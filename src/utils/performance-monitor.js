@@ -4,36 +4,44 @@ export class PerformanceMonitor {
     this.metrics = {
       startTime: performance.now(),
       mapLibreLoad: 0,
-      dataLoad: {},
-      renderTimes: [],
+      dataLoad: new Map(),
+      renderTimes: new Map(),
       memoryUsage: [],
+      userInteractions: [],
       viewportChanges: 0
     };
     
     this.observers = [];
+    this.frameRateInterval = null;
+    this.memoryInterval = null;
+    this.isMonitoring = false;
     this.initializeMonitoring();
   }
   
-  initializeMonitoring() {
-    // Monitor memory usage
-    if ('memory' in performance) {
-      setInterval(() => {
-        this.metrics.memoryUsage.push({
-          used: performance.memory.usedJSHeapSize,
-          total: performance.memory.totalJSHeapSize,
-          limit: performance.memory.jsHeapSizeLimit,
-          timestamp: Date.now()
-        });
-        
-        // Keep only last 100 measurements
-        if (this.metrics.memoryUsage.length > 100) {
-          this.metrics.memoryUsage = this.metrics.memoryUsage.slice(-100);
-        }
-      }, 5000); // Every 5 seconds
-    }
+  sinitializeMonitoring() {
+    if (this.isMonitoring) return;
+    
+    this.isMonitoring = true;
+    this.startTime = performance.now();
     
     // Monitor frame rate
+    this.startFrameRateMonitoring();
+    
+    // Monitor memory usage
+    this.startMemoryMonitoring();
+    
+    // Monitor user interactions
+    this.startInteractionMonitoring();
+    
+    // Monitor viewport changes
+    this.startViewportMonitoring();
+    
+    console.log('📊 Performance monitoring started');
+  }
+  
+  startFrameRateMonitoring() {
     let lastFrameTime = performance.now();
+    
     const measureFrameRate = () => {
       const now = performance.now();
       const frameTime = now - lastFrameTime;
@@ -50,9 +58,42 @@ export class PerformanceMonitor {
     };
     
     requestAnimationFrame(measureFrameRate);
+  }
+  
+  startMemoryMonitoring() {
+    if (!('memory' in performance)) return;
     
-    // Log performance warnings
-    setInterval(() => this.checkPerformanceWarnings(), 10000); // Every 10 seconds
+    this.memoryInterval = setInterval(() => {
+      this.metrics.memoryUsage.push({
+        used: performance.memory.usedJSHeapSize,
+        total: performance.memory.totalJSHeapSize,
+        limit: performance.memory.jsHeapSizeLimit,
+        timestamp: Date.now()
+      });
+      
+      // Keep only last 100 measurements
+      if (this.metrics.memoryUsage.length > 100) {
+        this.metrics.memoryUsage = this.metrics.memoryUsage.slice(-100);
+      }
+    }, 5000); // Every 5 seconds
+  }
+  
+  startInteractionMonitoring() {
+    // Monitor click, move, zoom interactions
+    ['click', 'mousemove', 'zoomstart', 'zoomend'].forEach(eventType => {
+      document.addEventListener(eventType, (event) => {
+        this.metrics.userInteractions.push({
+          type: eventType,
+          timestamp: performance.now(),
+          details: this.getInteractionDetails(event)
+        });
+      });
+    });
+  }
+  
+  startViewportMonitoring() {
+    // This would integrate with the map instance
+    console.log('🗺️ Viewport monitoring started');
   }
   
   checkPerformanceWarnings() {

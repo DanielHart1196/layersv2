@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Atlas Product</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="map-shell">
+        <div class="map-stage" id="mapStage">
+        </div>
+      </section>
+      <div class="mobile-refresh" id="mobileRefresh">
+        <button
+          class="mobile-refresh-button"
+          id="mobileRefreshButton"
+          type="button"
+          aria-label="Refresh page"
+          aria-expanded="false"
+          aria-controls="mobileRefreshMenu"
+        >
+          <span class="mobile-refresh-icon" aria-hidden="true"></span>
+        </button>
+        <div class="mobile-refresh-menu" id="mobileRefreshMenu" role="menu" aria-label="Reload options">
+          <button class="mobile-refresh-menu-item" id="hardReloadButton" type="button" role="menuitem">
+            Hard reload
+          </button>
+          <button class="mobile-refresh-menu-item" id="clearCacheReloadButton" type="button" role="menuitem">
+            Clear cache reload
+          </button>
+        </div>
+      </div>
+      <div class="layer-menu" id="layerMenu">
+        <div class="layer-menu-appearance" id="layerMenuAppearance">
+          <button
+            class="layer-menu-appearance-button"
+            id="layerMenuScreenButton"
+            type="button"
+            aria-label="Show screen background row"
+            aria-expanded="false"
+            aria-controls="layerMenuPanel"
+          ></button>
+          <button
+            class="layer-menu-appearance-button"
+            id="layerMenuAppearanceButton"
+            type="button"
+            aria-label="Show settings background row"
+            aria-expanded="false"
+            aria-controls="layerMenuPanel"
+          ></button>
+        </div>
+        <button
+          class="layer-menu-button"
+          id="layerMenuButton"
+          type="button"
+          aria-label="Open layer menu"
+          aria-expanded="false"
+          aria-controls="layerMenuPanel"
+        >
+          <span class="layer-menu-icon" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </span>
+        </button>
+        <div class="layer-menu-panel" id="layerMenuPanel" role="menu" aria-label="Layer groups">
+          <button class="layer-menu-row" id="earthRow" type="button" role="menuitem">Earth</button>
+          <button class="layer-menu-row" id="empiresRow" type="button" role="menuitem">Empires</button>
+        </div>
+      </div>
+    </main>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

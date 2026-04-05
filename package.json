@@ -1,0 +1,38 @@
+{
+  "name": "atlas-product",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "build:countries:dissolved-land": "node ./scripts/build-countries-dissolved-land-geojson.mjs",
+    "build:countries:split": "node ./scripts/build-country-geojson-splits.mjs",
+    "build:natural-earth:land": "node ./scripts/build-natural-earth-land-geojson.mjs",
+    "build:olympics:latest": "node ./scripts/build-olympics-latest-geojson.mjs",
+    "build:transport:rail:sa": "node ./scripts/build-transport-rail-sa-geojson.mjs",
+    "build:land:50m:pmtiles": "node ./scripts/build-land-50m-pmtiles.mjs",
+    "build:africa:pmtiles": "node ./scripts/build-africa-pmtiles.mjs",
+    "build:osm-land": "node ./scripts/build-osm-land-runtime.mjs",
+    "build:osm-world:smooth": "node ./scripts/build-osm-world-smooth-runtime.mjs",
+    "build:osm-land:pmtiles": "node ./scripts/build-osm-land-pmtiles.mjs",
+    "build:osm-land:australia:pmtiles": "node ./scripts/build-osm-land-australia-pmtiles.mjs",
+    "build:osm-land:australia:sliced:geojson": "node ./scripts/build-osm-land-australia-sliced-geojson.mjs",
+    "build:osm-land:australia:sliced:pmtiles": "node ./scripts/build-osm-land-australia-sliced-pmtiles.mjs",
+    "build:osm-land:victoria:geojson": "node ./scripts/build-osm-land-victoria-geojson.mjs",
+    "build:osm-land:victoria:pmtiles": "node ./scripts/build-osm-land-victoria-pmtiles.mjs",
+    "build:osm-outline:japan:pmtiles": "node ./scripts/build-osm-outline-japan-pmtiles.mjs",
+    "build:osm-outline:australia:pmtiles": "node ./scripts/build-osm-outline-australia-pmtiles.mjs",
+    "build:osm-outline:australia:sliced:pmtiles": "node ./scripts/build-osm-outline-australia-sliced-pmtiles.mjs",
+    "build:osm-outline:victoria:pmtiles": "node ./scripts/build-osm-outline-victoria-pmtiles.mjs"
+  },
+  "dependencies": {
+    "maplibre-gl": "^5.21.1",
+    "pmtiles": "^4.4.0",
+    "polygon-clipping": "^0.15.7",
+    "topojson-client": "^3.1.0"
+  },
+  "devDependencies": {
+    "vite": "^7.1.12"
+  }
+}

@@ -1,5 +1,6 @@
-import maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+// MapLibre loaded from CDN - use global instead of import
+// import maplibregl from "maplibre-gl";
+// import "maplibre-gl/dist/maplibre-gl.css";
 import { Protocol } from "pmtiles";
 import polygonClipping from "polygon-clipping";
 import {
@@ -1127,6 +1128,9 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
   if (!container) {
     return null;
   }
+
+  // Use MapLibre from CDN
+  const maplibregl = window.maplibregl;
 
   ensureProtocol(manifest);
   const layerState = structuredClone(initialLayerState);

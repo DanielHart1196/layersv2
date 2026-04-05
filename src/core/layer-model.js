@@ -479,7 +479,12 @@ function createLayerModel() {
   }
 
   function getDefaultChildOrder(parentId) {
-    return getOrderableChildRows(parentId).map((row) => row.id);
+    const parent = rowDefinitionsById.get(parentId) ?? layerDefinitions[parentId];
+    if (!parent || !parent.rows) {
+      return [];
+    }
+    
+    return parent.rows.map((row) => row.id);
   }
 
   function normalizeChildRowOrder(parentId, candidateOrder = null) {

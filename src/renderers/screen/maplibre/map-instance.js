@@ -85,7 +85,7 @@ const MONGOL_FILL_LAYER_ID = "atlas-mongol-empire-fill";
 const MONGOL_LINE_LAYER_ID = "atlas-mongol-empire-line";
 const MONGOL_FILL_SOURCE_ID = "atlas-mongol-empire-fill-source";
 const MONGOL_FILL_SOURCE_LAYER = "mongol-fill";
-const MONGOL_VECTOR_URL = "/data/empires/mongol_empire_1279_extent.medium.self-cutout.geojson";
+const MONGOL_VECTOR_URL = "/data/empires/mongol_empire_1279_extent.medium.geojson";
 const MONGOL_FILL_VECTOR_URL = "/data/empires/mongol_empire_1279_extent.medium.dissolved-fill.geojson";
 const BRITISH_SOURCE_ID = "atlas-british-empire";
 const BRITISH_FILL_SOURCE_ID = "atlas-british-empire-fill-source";
@@ -1227,73 +1227,66 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       }
     })();
 
-    // Load other layers lazily based on conditions
-    const lazyLoadLayers = async () => {
-      const zoom = map.getZoom();
-
+    // Load all remaining layers immediately
+    void (async () => {
       try {
-        // Load Australia layers only at higher zoom or if visible
-        if ((zoom > 3 || getInheritedLayoutVisibility(layerState, "australia") === "visible") && !loadedLayers.has("australia")) {
-          loadedLayers.add("australia");
-          await Promise.all([
-            attachAustraliaFillLayer(map, layerState, manifest),
-            attachAustraliaOutlineLayer(map, layerState, manifest),
-          ]);
-          applyLogicalLayerOrder("earth", getLayerStyleValue(layerState, "earth", "rowOrder", ["ocean", "australia", "countries-land", "graticules"]));
-        }
+        await Promise.all([
+          attachAustraliaFillLayer(map, layerState, manifest),
+          attachAustraliaOutlineLayer(map, layerState, manifest),
+          attachCountriesLandLayers(map, layerState),
+          attachCountriesVectorLayer(map, layerState),
+          attachGraticulesLayer(map, layerState),
+          attachTransportRailLayer(map, layerState),
+          attachOlympicsLayers(map, layerState),
+        ]);
 
-        // Load countries layers at moderate zoom
-        if ((zoom > 2 || getInheritedLayoutVisibility(layerState, "countries") === "visible") && !loadedLayers.has("countries")) {
-          loadedLayers.add("countries");
-          await Promise.all([
-            attachCountriesLandLayers(map, layerState),
-            attachCountriesVectorLayer(map, layerState),
-          ]);
-        }
+        applyLogicalLayerOrder("earth", getLayerStyleValue(layerState, "earth", "rowOrder", ["ocean", "australia", "countries-land", "graticules"]));
+        applyLogicalLayerOrder("transport", getLayerStyleValue(layerState, "transport", "rowOrder", ["transport-rail"]));
+        applyLogicalLayerOrder("countries", getLayerStyleValue(layerState, "countries", "rowOrder", ["countries-fill", "countries-line"]));
+        applyLogicalLayerOrder("olympics", getLayerStyleValue(layerState, "olympics", "rowOrder", ["olympics-gold", "olympics-silver", "olympics-bronze"]));
+      } catch (error) {
+        console.error("Failed to attach remaining layers.", error);
+      }
+    })();
 
-        // Load graticules at higher zoom (they're decorative)
-        if (zoom > 4 && !loadedLayers.has("graticules")) {
-          loadedLayers.add("graticules");
-          await attachGraticulesLayer(map, layerState);
-        }
+    // Load all layers with proper ordering
+    void (async () => {
+      try {
+        await Promise.all([
+          attachAustraliaFillLayer(map, layerState, manifest),
+          attachAustraliaOutlineLayer(map, layerState, manifest),
+          attachCountriesLandLayers(map, layerState),
+          attachCountriesVectorLayer(map, layerState),
+          attachGraticulesLayer(map, layerState),
+          attachTransportRailLayer(map, layerState),
+          attachOlympicsLayers(map, layerState),
+        ]);
 
-        // Load transport at moderate zoom
-        if ((zoom > 2 || getInheritedLayoutVisibility(layerState, "transport") === "visible") && !loadedLayers.has("transport")) {
-          loadedLayers.add("transport");
-          await attachTransportRailLayer(map, layerState);
-          applyLogicalLayerOrder("transport", getLayerStyleValue(layerState, "transport", "rowOrder", ["transport-rail"]));
-        }
-
-        // Load olympics at higher zoom or if visible
-        if ((zoom > 3 || getInheritedLayoutVisibility(layerState, "olympics") === "visible") && !loadedLayers.has("olympics")) {
-          loadedLayers.add("olympics");
-          await attachOlympicsLayers(map, layerState);
-          applyLogicalLayerOrder("olympics", getLayerStyleValue(layerState, "olympics", "rowOrder", ["olympics-gold", "olympics-silver", "olympics-bronze"]));
-        }
-
-        // Apply final layer order
         applyLogicalLayerOrder("__root__", getLayerStyleValue(layerState, "__root__", "rowOrder", ["earth", "transport", "countries", "olympics", "empires"]));
         applyLogicalLayerOrder("earth", getLayerStyleValue(layerState, "earth", "rowOrder", ["ocean", "australia", "countries-land", "graticules"]));
-        applyLogicalLayerOrder("countries", getLayerStyleValue(layerState, "countries", "rowOrder", ["countries-land", "countries-vector"]));
+        applyLogicalLayerOrder("transport", getLayerStyleValue(layerState, "transport", "rowOrder", ["transport-rail"]));
+        applyLogicalLayerOrder("countries", getLayerStyleValue(layerState, "countries", "rowOrder", ["countries-fill", "countries-line"]));
+        applyLogicalLayerOrder("olympics", getLayerStyleValue(layerState, "olympics", "rowOrder", ["olympics-gold", "olympics-silver", "olympics-bronze"]));
       } catch (error) {
-        console.error("Failed to attach lazy layers.", error);
+        console.error("Failed to attach all layers.", error);
       }
-    };
+    })();
 
-    // Initial lazy load after a short delay
-    setTimeout(lazyLoadLayers, 100);
-
-    // Load layers when user stops moving (idle event)
-    map.on("idle", lazyLoadLayers);
-
-    // Load layers when zoom changes
-    map.on("zoomend", lazyLoadLayers);
-  });
-
-  return {
-    destroy() {
-      clearScaleHideTimeout();
-      scaleOverlay.remove();
+    return {
+      destroy() {
+        clearScaleHideTimeout();
+        scaleOverlay.remove();
+        map.remove();
+      },
+      getMap() {
+        return map;
+      },
+      reorderLayerGroup(parentId, orderedLayerIds) {
+        applyLogicalLayerOrder(map, parentId, orderedLayerIds);
+      },
+      setLayerStyleValue(layerId, key, value) {
+        if (!layerState[layerId] || typeof layerState[layerId] !== "object") {
+          layerState[layerId] = {};
       map.remove();
     },
     getMap() {

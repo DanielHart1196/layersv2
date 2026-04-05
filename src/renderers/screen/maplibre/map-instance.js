@@ -1214,6 +1214,19 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       }
     })();
 
+    // Load base map layers instantly (water, land)
+    void (async () => {
+      try {
+        await Promise.all([
+          attachCountriesLandLayers(map, layerState),
+        ]);
+
+        applyLogicalLayerOrder("earth", getLayerStyleValue(layerState, "earth", "rowOrder", ["ocean", "australia", "countries-land", "graticules"]));
+      } catch (error) {
+        console.error("Failed to attach base map layers.", error);
+      }
+    })();
+
     // Load other layers lazily based on conditions
     const lazyLoadLayers = async () => {
       const zoom = map.getZoom();

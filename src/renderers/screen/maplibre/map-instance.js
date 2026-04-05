@@ -1291,19 +1291,6 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     },
     getMap() {
       return map;
-    },
-    reorderLayerGroup(parentId, orderedLayerIds) {
-      applyLogicalLayerOrder(map, parentId, orderedLayerIds);
-    },
-    setLayerStyleValue(layerId, key, value) {
-      if (!layerState[layerId] || typeof layerState[layerId] !== "object") {
-        layerState[layerId] = {};
-      }
-      layerState[layerId][key] = value;
-
-      if (key === "fillOpacity") {
-        if (layerId === "land" && map.getLayer(OSM_LAND_FILL_LAYER_ID)) {
-          map.setPaintProperty(OSM_LAND_FILL_LAYER_ID, "fill-opacity", Number(value) / 100);
           return;
         }
 

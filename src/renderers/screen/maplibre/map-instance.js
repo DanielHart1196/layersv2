@@ -15,6 +15,9 @@ const COUNTRY_TILE_SOURCE_LAYER = "countries";
 const COUNTRY_FILL_LAYER_ID = "atlas-country-vector-fill";
 const COUNTRY_LINE_LAYER_ID = "atlas-country-vector-line";
 const COUNTRY_VECTOR_URL = "/data/external-countries.geojson";
+
+// Track which layers have been loaded to prevent duplicate loading
+const loadedLayers = new Set();
 const OLYMPICS_SOURCE_ID = "atlas-olympics";
 const OLYMPICS_GOLD_LAYER_ID = "atlas-olympics-gold";
 const OLYMPICS_SILVER_LAYER_ID = "atlas-olympics-silver";
@@ -1194,25 +1197,80 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     }
     void (async () => {
       try {
-        await attachAustraliaFillLayer(map, layerState, manifest);
-        await attachAustraliaOutlineLayer(map, layerState, manifest);
-        await attachCountriesLandLayers(map, layerState);
-        await attachGraticulesLayer(map, layerState);
-        await attachTransportRailLayer(map, layerState);
-        await attachCountriesVectorLayer(map, layerState);
-        await attachRomanEmpireLayer(map, layerState);
-        await attachMongolEmpireLayer(map, layerState);
-        await attachBritishEmpireLayer(map, layerState);
-        await attachOlympicsLayers(map, layerState);
-        applyLogicalLayerOrder(map, "__root__", getLayerStyleValue(layerState, "__root__", "rowOrder", ["earth", "transport", "countries", "olympics", "empires"]));
-        applyLogicalLayerOrder(map, "earth", getLayerStyleValue(layerState, "earth", "rowOrder", ["ocean", "australia", "countries-land", "graticules"]));
-        applyLogicalLayerOrder(map, "transport", getLayerStyleValue(layerState, "transport", "rowOrder", ["transport-rail"]));
-        applyLogicalLayerOrder(map, "olympics", getLayerStyleValue(layerState, "olympics", "rowOrder", ["olympics-gold", "olympics-silver", "olympics-bronze"]));
-        applyLogicalLayerOrder(map, "empires", getLayerStyleValue(layerState, "empires", "rowOrder", ["roman", "mongol", "british"]));
+        // Load essential layers immediately
+        await Promise.all([
+          attachRomanEmpireLayer(map, layerState),
+          attachMongolEmpireLayer(map, layerState),
+          attachBritishEmpireLayer(map, layerState),
+        ]);
+
+        applyLogicalLayerOrder("empires", getLayerStyleValue(layerState, "empires", "rowOrder", ["roman", "mongol", "british"]));
       } catch (error) {
-        console.error("Failed to attach ordered atlas layers.", error);
+        console.error("Failed to attach essential layers.", error);
       }
     })();
+
+    // Load other layers lazily based on conditions
+    const lazyLoadLayers = async () => {
+      const zoom = map.getZoom();
+
+      try {
+        // Load Australia layers only at higher zoom or if visible
+        if ((zoom > 3 || getInheritedLayoutVisibility(layerState, "australia") === "visible") && !loadedLayers.has("australia")) {
+          loadedLayers.add("australia");
+          await Promise.all([
+            attachAustraliaFillLayer(map, layerState, manifest),
+            attachAustraliaOutlineLayer(map, layerState, manifest),
+          ]);
+          applyLogicalLayerOrder("earth", getLayerStyleValue(layerState, "earth", "rowOrder", ["ocean", "australia", "countries-land", "graticules"]));
+        }
+
+        // Load countries layers at moderate zoom
+        if ((zoom > 2 || getInheritedLayoutVisibility(layerState, "countries") === "visible") && !loadedLayers.has("countries")) {
+          loadedLayers.add("countries");
+          await Promise.all([
+            attachCountriesLandLayers(map, layerState),
+            attachCountriesVectorLayer(map, layerState),
+          ]);
+        }
+
+        // Load graticules at higher zoom (they're decorative)
+        if (zoom > 4 && !loadedLayers.has("graticules")) {
+          loadedLayers.add("graticules");
+          await attachGraticulesLayer(map, layerState);
+        }
+
+        // Load transport at moderate zoom
+        if ((zoom > 2 || getInheritedLayoutVisibility(layerState, "transport") === "visible") && !loadedLayers.has("transport")) {
+          loadedLayers.add("transport");
+          await attachTransportRailLayer(map, layerState);
+          applyLogicalLayerOrder("transport", getLayerStyleValue(layerState, "transport", "rowOrder", ["transport-rail"]));
+        }
+
+        // Load olympics at higher zoom or if visible
+        if ((zoom > 3 || getInheritedLayoutVisibility(layerState, "olympics") === "visible") && !loadedLayers.has("olympics")) {
+          loadedLayers.add("olympics");
+          await attachOlympicsLayers(map, layerState);
+          applyLogicalLayerOrder("olympics", getLayerStyleValue(layerState, "olympics", "rowOrder", ["olympics-gold", "olympics-silver", "olympics-bronze"]));
+        }
+
+        // Apply final layer order
+        applyLogicalLayerOrder("__root__", getLayerStyleValue(layerState, "__root__", "rowOrder", ["earth", "transport", "countries", "olympics", "empires"]));
+        applyLogicalLayerOrder("earth", getLayerStyleValue(layerState, "earth", "rowOrder", ["ocean", "australia", "countries-land", "graticules"]));
+        applyLogicalLayerOrder("countries", getLayerStyleValue(layerState, "countries", "rowOrder", ["countries-land", "countries-vector"]));
+      } catch (error) {
+        console.error("Failed to attach lazy layers.", error);
+      }
+    };
+
+    // Initial lazy load after a short delay
+    setTimeout(lazyLoadLayers, 100);
+
+    // Load layers when user stops moving (idle event)
+    map.on("idle", lazyLoadLayers);
+
+    // Load layers when zoom changes
+    map.on("zoomend", lazyLoadLayers);
   });
 
   return {

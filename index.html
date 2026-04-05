@@ -9,6 +9,26 @@
     <script src="https://unpkg.com/maplibre-gl@5.21.1/dist/maplibre-gl.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.21.1/dist/maplibre-gl.css">
     
+    <!-- Service Worker Registration -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').then(registration => {
+          console.log('Service Worker registered:', registration);
+        }).catch(error => {
+          console.log('Service Worker registration failed:', error);
+        });
+      }
+    </script>
+    
+    <!-- Preload critical data files -->
+    <link rel="preload" href="/data/countries-10m.json" as="fetch" importance="high">
+    <link rel="preload" href="/data/empires/roman_empire_117ad_major_empires_source.geojson" as="fetch" importance="high">
+    <link rel="preload" href="/data/empires/mongol_empire_1279_extent.medium.geojson" as="fetch" importance="high">
+    <link rel="preload" href="/data/empires/british_empire_1921_extent.low.geojson" as="fetch" importance="high">
+    
+    <!-- Preconnect to CDN -->
+    <link rel="preconnect" href="https://unpkg.com" crossorigin>
+    
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
   <body>

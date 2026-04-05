@@ -12,6 +12,7 @@ export default defineConfig({
     port: 8100,
     strictPort: true,
   },
+  base: "./",
   build: {
     outDir: "dist",
     rollupOptions: {
@@ -19,5 +20,8 @@ export default defineConfig({
         main: resolve(__dirname, "index.html"),
       },
     },
+  },
+  optimizeDeps: {
+    include: ["maplibre-gl"],
   },
 });

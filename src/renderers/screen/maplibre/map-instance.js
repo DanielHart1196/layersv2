@@ -249,6 +249,20 @@ function updateScaleOverlay(map, overlay) {
 function getLogicalLayerBundles() {
   return {
     __root__: {
+      earth: [
+        "atlas-water",
+        OSM_LAND_FILL_LAYER_ID,
+        AFRICA_FILL_LAYER_ID,
+        ...AUSTRALIA_FILL_LAYER_IDS,
+        ...AUSTRALIA_OUTLINE_LINE_LAYER_IDS,
+        VICTORIA_FILL_LAYER_ID,
+        ...VICTORIA_OUTLINE_LINE_LAYER_IDS,
+        JAPAN_OUTLINE_LINE_LAYER_ID,
+        OSM_OUTLINE_LINE_LAYER_ID,
+        COUNTRIES_LAND_FILL_LAYER_ID,
+        COUNTRIES_LAND_LINE_LAYER_ID,
+        GRATICULES_LINE_LAYER_ID,
+      ],
       transport: [TRANSPORT_RAIL_LINE_LAYER_ID],
       olympics: [OLYMPICS_GOLD_LAYER_ID, OLYMPICS_SILVER_LAYER_ID, OLYMPICS_BRONZE_LAYER_ID],
       empires: [
@@ -307,8 +321,16 @@ function applyLogicalLayerOrder(map, parentId, orderedLayerIds) {
     ])
     : null;
 
-  for (let index = flattened.length - 1; index >= 0; index -= 1) {
-    map.moveLayer(flattened[index], anchorBeforeId ?? undefined);
+  if (anchorBeforeId) {
+    // Insert before anchor: iterate backward so flattened[0] ends up just before the anchor
+    for (let index = flattened.length - 1; index >= 0; index -= 1) {
+      map.moveLayer(flattened[index], anchorBeforeId);
+    }
+  } else {
+    // Move to top: iterate forward so flattened[last] ends up on top
+    for (let index = 0; index < flattened.length; index += 1) {
+      map.moveLayer(flattened[index], undefined);
+    }
   }
 }
 
@@ -1169,7 +1191,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         ]);
 
         applyLogicalLayerOrder(map, "__root__", getLayerStyleValue(layerState, "__root__", "rowOrder", ["earth", "transport", "olympics", "empires"]));
-        applyLogicalLayerOrder(map, "earth", getLayerStyleValue(layerState, "earth", "rowOrder", ["ocean", "australia", "countries-land", "graticules"]));
+        applyLogicalLayerOrder(map, "earth", getLayerStyleValue(layerState, "earth", "rowOrder", ["ocean", "land", "africa", "australia", "victoria", "japan", "outline", "countries-land", "graticules"]));
         applyLogicalLayerOrder(map, "transport", getLayerStyleValue(layerState, "transport", "rowOrder", ["transport-rail"]));
         applyLogicalLayerOrder(map, "olympics", getLayerStyleValue(layerState, "olympics", "rowOrder", ["olympics-gold", "olympics-silver", "olympics-bronze"]));
         applyLogicalLayerOrder(map, "empires", getLayerStyleValue(layerState, "empires", "rowOrder", ["roman", "mongol", "british"]));
@@ -1190,7 +1212,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         ]);
 
         // Re-apply earth ordering now that all layers exist
-        applyLogicalLayerOrder(map, "earth", getLayerStyleValue(layerState, "earth", "rowOrder", ["ocean", "australia", "countries-land", "graticules"]));
+        applyLogicalLayerOrder(map, "earth", getLayerStyleValue(layerState, "earth", "rowOrder", ["ocean", "land", "africa", "australia", "victoria", "japan", "outline", "countries-land", "graticules"]));
       } catch (error) {
         console.error("Failed to attach deferred layers.", error);
       }

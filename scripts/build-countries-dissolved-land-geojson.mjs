@@ -1,20 +1,53 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
-import * as topojson from "topojson-client";
+import process from "node:process";
+import { spawnSync } from "node:child_process";
 
-const require = createRequire(import.meta.url);
-const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-
-// world-atlas land-50m.json is already a dissolved single-polygon landmass —
-// no ogr2ogr ST_Union needed.
-const topology = require("world-atlas/land-50m.json");
-const geojson = topojson.feature(topology, topology.objects.land);
-
+const ROOT_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const SOURCE_PATH = path.join(ROOT_DIR, "public", "data", "external-countries.geojson");
 const OUTPUT_PATH = path.join(ROOT_DIR, "public", "data", "world-atlas", "countries-dissolved-land.geojson");
-fs.mkdirSync(path.dirname(OUTPUT_PATH), { recursive: true });
-fs.writeFileSync(OUTPUT_PATH, JSON.stringify(geojson));
+const SOURCE_LAYER = "ne_10m_admin_0_countries";
 
-const bytes = fs.statSync(OUTPUT_PATH).size;
-console.log(`Built countries-dissolved-land.geojson (${(bytes / 1024 / 1024).toFixed(1)} MB) at ${OUTPUT_PATH}`);
+function hasCommand(command) {
+  const result = spawnSync("sh", ["-lc", `command -v ${command}`], {
+    encoding: "utf8",
+  });
+  return result.status === 0;
+}
+
+function fail(message) {
+  console.error(message);
+  process.exit(1);
+}
+
+if (!hasCommand("ogr2ogr")) {
+  fail("Missing required generator: ogr2ogr (GDAL)");
+}
+
+if (!fs.existsSync(SOURCE_PATH)) {
+  fail(`Missing required source file: ${SOURCE_PATH}`);
+}
+
+fs.mkdirSync(path.dirname(OUTPUT_PATH), { recursive: true });
+fs.rmSync(OUTPUT_PATH, { force: true });
+
+const result = spawnSync("ogr2ogr", [
+  "-f",
+  "GeoJSON",
+  OUTPUT_PATH,
+  SOURCE_PATH,
+  "-dialect",
+  "sqlite",
+  "-sql",
+  `SELECT ST_Union(geometry) AS geometry, 'Dissolved Countries Land' AS name, 'external-countries.geojson' AS source FROM ${SOURCE_LAYER}`,
+  "-overwrite",
+], {
+  cwd: ROOT_DIR,
+  stdio: "inherit",
+});
+
+if (result.status !== 0) {
+  process.exit(result.status ?? 1);
+}
+
+console.log(`Built dissolved countries land GeoJSON at ${OUTPUT_PATH}`);

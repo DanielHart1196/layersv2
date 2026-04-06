@@ -1139,10 +1139,17 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
           .forEach((l) => prewarmTileSource(localLayerTileSourceId(l.id)));
         [ROMAN_FILL_SOURCE_ID, MONGOL_FILL_SOURCE_ID, BRITISH_FILL_SOURCE_ID].forEach(prewarmTileSource);
 
-        await Promise.all([
-          ...STANDARD_LAYER_REGISTRY
+        // Deferred standard layers first (transport, local layers etc.)
+        await Promise.all(
+          STANDARD_LAYER_REGISTRY
             .filter((entry) => entry.deferred)
-            .map((entry) => attachStandardLayer(map, layerState, manifest, entry)),
+            .map((entry) => attachStandardLayer(map, layerState, manifest, entry))
+        );
+
+        applyFullLayerOrder(map, layerState);
+
+        // Empires after land is ordered — prevents them rendering above land
+        await Promise.all([
           attachRomanEmpireLayer(map, layerState),
           attachMongolEmpireLayer(map, layerState),
           attachBritishEmpireLayer(map, layerState),

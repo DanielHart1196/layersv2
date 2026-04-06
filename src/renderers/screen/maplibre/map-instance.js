@@ -1703,8 +1703,8 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
           olympicsSource.setData(getOlympicsVectorUrl(layerState));
         }
       }
-
-    },
+    }
+  },
   };
 }
 

@@ -2,6 +2,7 @@ import { LOCAL_LAYERS } from "../config/local-layers.js";
 
 function createLayerModel() {
   const STORAGE_KEY = "atlas.layerState.v1";
+  const DEFS_STORAGE_KEY = "atlas.dynamicDefs.v1";
   const ROOT_PARENT_ID = "__root__";
   const SHARED_COLOR_STORAGE_KEY = "atlas.colors.customColors";
   const SHARED_COLOR_PRESETS = ["#000000", "#FFFFFF", "#d94b4b", "#e58a2b", "#e5c84a", "#5b8c5a", "#4b6ed9", "#8c5bd6"];
@@ -332,6 +333,9 @@ function createLayerModel() {
   };
 
   const ROOT_ROW_IDS = ["earth", "transport", "olympics", "empires"];
+  const rootDynamicRows = []; // top-level user-added layers
+  const dynamicIds = new Set(); // IDs of all dynamically added rows
+  const staticParentAdditions = new Map(); // parentId → [rows] for rows added to static parents
   const rowDefinitionsById = new Map();
 
   function indexRowDefinitions(rows = []) {
@@ -354,9 +358,10 @@ function createLayerModel() {
 
   function getParentRows(parentId) {
     if (parentId === ROOT_PARENT_ID) {
-      return ROOT_ROW_IDS
-        .map((id) => layerDefinitions[id])
-        .filter(Boolean);
+      return [
+        ...ROOT_ROW_IDS.map((id) => layerDefinitions[id]).filter(Boolean),
+        ...rootDynamicRows,
+      ];
     }
 
     const parent = rowDefinitionsById.get(parentId) ?? layerDefinitions[parentId];
@@ -507,6 +512,13 @@ function createLayerModel() {
           baseState[layerId].lineWeight = Math.max(0, Math.min(10, baseState[layerId].lineWeight / 100));
         }
       });
+
+      // Also restore state for dynamic layers (not in baseState).
+      Object.entries(parsed).forEach(([layerId, state]) => {
+        if (!baseState[layerId] && state && typeof state === "object") {
+          baseState[layerId] = { ...state };
+        }
+      });
     } catch (_error) {
       return baseState;
     }
@@ -519,6 +531,50 @@ function createLayerModel() {
       window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(layerState));
     } catch (_error) {
       // Ignore storage failures and keep the runtime usable.
+    }
+  }
+
+  function persistDynamicDefs() {
+    try {
+      const defs = {
+        rootRows: rootDynamicRows,
+        staticAdditions: Object.fromEntries(staticParentAdditions),
+      };
+      window.localStorage?.setItem(DEFS_STORAGE_KEY, JSON.stringify(defs));
+    } catch (_error) {
+      // ignore
+    }
+  }
+
+  function hydrateDynamicDefs() {
+    try {
+      const raw = window.localStorage?.getItem(DEFS_STORAGE_KEY);
+      if (!raw) return;
+      const defs = JSON.parse(raw);
+      if (!defs || typeof defs !== "object") return;
+
+      // Restore root-level dynamic rows.
+      (defs.rootRows ?? []).forEach((row) => {
+        rootDynamicRows.push(row);
+        dynamicIds.add(row.id);
+        indexRowDefinitions([row]);
+        // layerState for this row was already restored by hydrateLayerState.
+      });
+
+      // Restore rows added to static parents (e.g. filter under "earth").
+      Object.entries(defs.staticAdditions ?? {}).forEach(([parentId, rows]) => {
+        const parent = rowDefinitionsById.get(parentId) ?? layerDefinitions[parentId];
+        if (!parent) return;
+        if (!Array.isArray(parent.rows)) parent.rows = [];
+        rows.forEach((row) => {
+          parent.rows.push(row);
+          rowDefinitionsById.set(row.id, row);
+          dynamicIds.add(row.id);
+        });
+        staticParentAdditions.set(parentId, rows);
+      });
+    } catch (_error) {
+      // ignore corrupt storage
     }
   }
 
@@ -743,11 +799,6 @@ function createLayerModel() {
   // Adds a new data row (type: "layer") pointing to an entry in the layer catalog.
   // layerRef is the catalog layer ID (e.g. "countriesLand", or a Supabase UUID later).
   function addDataRow(parentId, { name, layerRef }) {
-    const parentDef = rowDefinitionsById.get(parentId) ?? layerDefinitions[parentId];
-    if (!parentDef) {
-      return null;
-    }
-
     const uid = `dyn-${Date.now()}`;
     const newRow = {
       id: uid,
@@ -758,12 +809,16 @@ function createLayerModel() {
       rows: [],
     };
 
-    if (!Array.isArray(parentDef.rows)) {
-      parentDef.rows = [];
+    if (parentId === ROOT_PARENT_ID) {
+      rootDynamicRows.push(newRow);
+    } else {
+      const parentDef = rowDefinitionsById.get(parentId) ?? layerDefinitions[parentId];
+      if (!parentDef) return null;
+      if (!Array.isArray(parentDef.rows)) parentDef.rows = [];
+      parentDef.rows.push(newRow);
     }
-    parentDef.rows.push(newRow);
-    rowDefinitionsById.set(newRow.id, newRow);
 
+    rowDefinitionsById.set(newRow.id, newRow);
     layerState[uid] = { expanded: false, visible: true };
 
     return newRow;

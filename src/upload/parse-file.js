@@ -2,18 +2,19 @@ import Papa from "papaparse";
 import { gpx, kml } from "@tmcw/togeojson";
 import { detectColumns, rowsToFeatures } from "./csv-mapper.js";
 
-export const SUPPORTED_EXTENSIONS = [".csv", ".geojson", ".json", ".gpx"];
+export const SUPPORTED_EXTENSIONS = [".csv", ".xlsx", ".geojson", ".json", ".gpx"];
 
 export function getFileType(file) {
   const name = file.name.toLowerCase();
   if (name.endsWith(".csv"))                      return "csv";
+  if (name.endsWith(".xlsx"))                     return "xlsx";
   if (name.endsWith(".gpx"))                      return "gpx";
   if (name.endsWith(".geojson") || name.endsWith(".json")) return "geojson";
   return null;
 }
 
 // Returns { type, headers, rows, features, mapping, error }
-// For CSV: returns headers + rows so the UI can show the column mapper
+// For CSV/XLSX: returns headers + rows so the UI can show the column mapper
 // For GeoJSON/GPX: returns features directly, no mapping needed
 export async function parseFile(file) {
   const type = getFileType(file);
@@ -21,9 +22,8 @@ export async function parseFile(file) {
     return { error: `Unsupported file type. Use: ${SUPPORTED_EXTENSIONS.join(", ")}` };
   }
 
-  const text = await file.text();
-
   if (type === "csv") {
+    const text = await file.text();
     const result = Papa.parse(text, { header: true, skipEmptyLines: true, dynamicTyping: false });
     if (result.errors.length && result.data.length === 0) {
       return { error: "Could not parse CSV." };
@@ -34,13 +34,31 @@ export async function parseFile(file) {
     return { type: "csv", headers, rows, mapping };
   }
 
+  if (type === "xlsx") {
+    const { read: xlsxRead, utils: xlsxUtils } = await import("xlsx");
+    const buffer = await file.arrayBuffer();
+    const workbook = xlsxRead(buffer, { type: "array" });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) return { error: "No sheets found in this workbook." };
+    const sheet = workbook.Sheets[sheetName];
+    const rows = xlsxUtils.sheet_to_json(sheet, { defval: "" });
+    if (rows.length === 0) return { error: "Sheet is empty." };
+    const headers = Object.keys(rows[0]);
+    // Normalise all values to strings to match CSV behaviour
+    const stringRows = rows.map((r) => Object.fromEntries(headers.map((h) => [h, r[h] == null ? "" : String(r[h])])));
+    const mapping = detectColumns(headers);
+    return { type: "csv", headers, rows: stringRows, mapping }; // reuse csv flow
+  }
+
   if (type === "gpx") {
+    const text = await file.text();
     const xml = new DOMParser().parseFromString(text, "text/xml");
     const geojson = gpx(xml);
     return { type: "gpx", features: normaliseFeatures(geojson.features) };
   }
 
   if (type === "geojson") {
+    const text = await file.text();
     const geojson = JSON.parse(text);
     const features = geojson.type === "FeatureCollection"
       ? geojson.features

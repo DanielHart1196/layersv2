@@ -1061,17 +1061,31 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
   });
   map.on("error", (event) => {
     const message = event?.error?.message ?? event?.error?.toString?.() ?? "unknown";
-    const url = event?.tile?.url ?? event?.source?.url ?? event?.source?.data ?? "";
-    const combined = message + " " + String(url);
+    const url = String(
+      event?.tile?.url ?? event?.source?.url ?? event?.source?.data ?? ""
+    );
+    const combined = message + " " + url;
+
+    // Suppress known-harmless errors:
     if (
-      combined.includes("Wrong magic number for PMTiles") ||
+      // Local dev PMTiles files that aren't present
       combined.includes("australia-land-") ||
       combined.includes("victoria-land") ||
-      (combined.includes(".pmtiles") || combined.includes("/pmtiles/"))
+      // Any PMTiles fetch/parse failure (wrong magic = file not ready yet)
+      combined.includes("Wrong magic number for PMTiles") ||
+      combined.includes(".pmtiles") ||
+      combined.includes("/pmtiles/") ||
+      // Tile fetch failures (network, 404s on local dev)
+      combined.includes("Failed to fetch") ||
+      message.includes("404") ||
+      // Source-layer not found in a vector tile (harmless if tiles are still uploading)
+      message.includes("does not exist in the map's style") ||
+      message.includes("source-layer")
     ) {
       return;
     }
-    console.error("MapLibre map error.", message, event?.error);
+
+    console.error("[MapLibre]", message, event?.error);
   });
   map.on("movestart", () => {
     showScaleOverlay();

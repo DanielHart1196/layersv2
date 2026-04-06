@@ -80,7 +80,9 @@ async function bootstrapApplication() {
     onLayerCreated: async ({ layerId, name, parentId }) => {
       try {
         const { layer, geojson } = await loadLayerFromSupabase(layerId);
-        screenRuntime.loadDynamicLayer({ layerId, geojson, tilesUrl: layer.tiles_url ?? null, style: layer.default_style });
+        if (geojson || layer.tiles_url) {
+          screenRuntime.loadDynamicLayer({ layerId, geojson, tilesUrl: layer.tiles_url ?? null, style: layer.default_style });
+        }
         const added = layerModel.addDataRow(parentId ?? layerModel.getRootParentId(), { name, layerRef: layerId });
         if (added) rerenderLayerMenu();
       } catch (err) {

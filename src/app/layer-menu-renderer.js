@@ -1134,7 +1134,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
         fragment.append(buildRows(childRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden, onAddRow));
       }
       if (onAddRow) {
-        const addBtn = createAddButton(depth, row.id, onAddRow);
+        const addBtn = createAddButton(depth + 1, row.id, onAddRow);
         fragment.append(addBtn);
       }
     }
@@ -1305,6 +1305,10 @@ function renderLayerMenuRows({
         onAddRow ?? null,
       ),
     );
+
+    if (onAddRow) {
+      panel.append(createAddButton(0, layerModel.getRootParentId(), onAddRow));
+    }
   }
 
   render();

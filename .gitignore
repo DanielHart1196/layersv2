@@ -41,3 +41,10 @@ coverage/
 # Temporary folders
 tmp/
 temp/
+
+# Large data files — serve via R2/CDN, not committed to git.
+# Upload these locally for dev; add to R2 for production.
+public/pmtiles/*.pmtiles
+public/data/world-atlas/australia-land-*.geojson
+public/data/world-atlas/victoria-land*.geojson
+public/data/external-countries.geojson

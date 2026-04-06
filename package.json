@@ -33,6 +33,7 @@
     "topojson-client": "^3.1.0"
   },
   "devDependencies": {
-    "vite": "^7.1.12"
+    "vite": "^7.1.12",
+    "world-atlas": "^2.0.2"
   }
 }

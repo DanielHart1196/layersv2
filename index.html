@@ -20,12 +20,12 @@
       }
     </script>
     
-    <!-- Preload critical data files -->
-    <link rel="preload" href="/data/countries-10m.json" as="fetch" importance="high">
-    <link rel="preload" href="/data/empires/roman_empire_117ad_major_empires_source.geojson" as="fetch" importance="high">
-    <link rel="preload" href="/data/empires/mongol_empire_1279_extent.medium.geojson" as="fetch" importance="high">
-    <link rel="preload" href="/data/empires/british_empire_1921_extent.low.geojson" as="fetch" importance="high">
-    
+    <!-- Preload files that are in the initial map style — browser fetches
+         these immediately, before any JS runs, so they're ready when
+         MapLibre requests them during initialisation. -->
+    <link rel="preload" href="/data/world-atlas/countries-dissolved-land.geojson" as="fetch" crossorigin>
+    <link rel="preload" href="/data/graticules/world-graticules-10deg.geojson" as="fetch" crossorigin>
+
     <!-- Preconnect to CDN -->
     <link rel="preconnect" href="https://unpkg.com" crossorigin>
     

@@ -1,3 +1,5 @@
+import { LOCAL_LAYERS } from "../config/local-layers.js";
+
 function createLayerModel() {
   const STORAGE_KEY = "atlas.layerState.v1";
   const ROOT_PARENT_ID = "__root__";
@@ -92,6 +94,35 @@ function createLayerModel() {
     };
   }
 
+  function localLayerToRow(entry) {
+    return {
+      id: entry.id,
+      type: "layer",
+      label: entry.label,
+      layerId: entry.id,
+      hidden: entry.defaultVisible === false,
+      rows: [
+        ...(entry.fill ? [createFillRow({
+          id: `${entry.id}-fill`,
+          layerId: entry.id,
+          storageKey: SHARED_COLOR_STORAGE_KEY,
+          presets: SHARED_COLOR_PRESETS,
+          defaultColor: entry.fill.color,
+          defaultOpacity: entry.fill.opacity,
+        })] : []),
+        ...(entry.line ? [createLineRow({
+          id: `${entry.id}-line`,
+          layerId: entry.id,
+          storageKey: SHARED_COLOR_STORAGE_KEY,
+          presets: SHARED_COLOR_PRESETS,
+          defaultColor: entry.line.color,
+          defaultOpacity: entry.line.opacity,
+          defaultWeight: entry.line.weight,
+        })] : []),
+      ],
+    };
+  }
+
   const layerDefinitions = {
     earth: {
       id: "earth",
@@ -117,54 +148,7 @@ function createLayerModel() {
             }),
           ],
         },
-        {
-          id: "land",
-          type: "layer",
-          label: "Land",
-          layerId: "land",
-          hidden: true,
-          rows: [
-            createFillRow({
-              id: "land-fill",
-              layerId: "land",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#6EAA6E",
-            }),
-          ],
-        },
-        {
-          id: "outline",
-          type: "layer",
-          label: "Outline",
-          layerId: "outline",
-          hidden: true,
-          rows: [
-            createLineRow({
-              id: "outline-line",
-              layerId: "outline",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#d9e4da",
-            }),
-          ],
-        },
-        {
-          id: "japan",
-          type: "layer",
-          label: "Japan",
-          layerId: "japan",
-          hidden: true,
-          rows: [
-            createLineRow({
-              id: "japan-line",
-              layerId: "japan",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#d9e4da",
-            }),
-          ],
-        },
+        ...LOCAL_LAYERS.filter((l) => l.group === "earth").map(localLayerToRow),
         {
           id: "australia",
           type: "layer",
@@ -181,44 +165,6 @@ function createLayerModel() {
             createLineRow({
               id: "australia-line",
               layerId: "australia",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#d9e4da",
-            }),
-          ],
-        },
-        {
-          id: "africa",
-          type: "layer",
-          label: "Africa",
-          layerId: "africa",
-          hidden: true,
-          rows: [
-            createFillRow({
-              id: "africa-fill",
-              layerId: "africa",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#6EAA6E",
-            }),
-          ],
-        },
-        {
-          id: "countries-land",
-          type: "layer",
-          label: "Land",
-          layerId: "countriesLand",
-          rows: [
-            createFillRow({
-              id: "countries-land-fill",
-              layerId: "countriesLand",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#6EAA6E",
-            }),
-            createLineRow({
-              id: "countries-land-line",
-              layerId: "countriesLand",
               storageKey: SHARED_COLOR_STORAGE_KEY,
               presets: SHARED_COLOR_PRESETS,
               defaultColor: "#d9e4da",
@@ -248,21 +194,6 @@ function createLayerModel() {
             }),
           ],
         },
-        {
-          id: "graticules",
-          type: "layer",
-          label: "Graticules",
-          layerId: "graticules",
-          rows: [
-            createLineRow({
-              id: "graticules-line",
-              layerId: "graticules",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#8FA9BC",
-            }),
-          ],
-        },
       ],
     },
     transport: {
@@ -271,25 +202,7 @@ function createLayerModel() {
       type: "layer",
       layerId: "transport",
       defaultExpanded: true,
-      rows: [
-        {
-          id: "transport-rail",
-          type: "layer",
-          label: "Rail (SA)",
-          layerId: "transportRail",
-          rows: [
-            createLineRow({
-              id: "transport-rail-line",
-              layerId: "transportRail",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#f07a58",
-              defaultOpacity: 92,
-              defaultWeight: 3.5,
-            }),
-          ],
-        },
-      ],
+      rows: LOCAL_LAYERS.filter((l) => l.group === "transport").map(localLayerToRow),
     },
     olympics: {
       id: "olympics",
@@ -689,6 +602,10 @@ function createLayerModel() {
     };
   }
 
+  function isExpanded(layerId) {
+    return layerState[layerId]?.expanded === true;
+  }
+
   function toggleExpanded(layerId) {
     const record = layerState[layerId];
     if (!record || typeof record.expanded !== "boolean") {
@@ -739,6 +656,119 @@ function createLayerModel() {
     return nextOrder.slice();
   }
 
+  // Appends a new child row to any parent row (layer or group).
+  // config is used by filter/sort types.
+  function addRowToLayer(layerId, rowType, config = {}) {
+    const parentDef = rowDefinitionsById.get(layerId) ?? layerDefinitions[layerId];
+    if (!parentDef || parentDef.type !== "layer") {
+      return null;
+    }
+
+    const uid = `${layerId}-dyn-${rowType}-${Date.now()}`;
+    let newRow;
+    if (rowType === "fill") {
+      newRow = createFillRow({
+        id: uid,
+        label: "Fill",
+        layerId,
+        storageKey: SHARED_COLOR_STORAGE_KEY,
+        presets: SHARED_COLOR_PRESETS,
+        defaultColor: "#8C6A2A",
+        defaultOpacity: 80,
+      });
+    } else if (rowType === "line") {
+      newRow = createLineRow({
+        id: uid,
+        label: "Line",
+        layerId,
+        storageKey: SHARED_COLOR_STORAGE_KEY,
+        presets: SHARED_COLOR_PRESETS,
+        defaultColor: "#000000",
+        defaultOpacity: 100,
+        defaultWeight: 1,
+      });
+    } else if (rowType === "slider") {
+      newRow = createSliderRow({
+        id: uid,
+        label: "Slider",
+        layerId,
+        key: `dyn_${uid}`,
+        min: 0,
+        max: 100,
+        step: 1,
+        valueFormat: "percent",
+        initialValue: 50,
+      });
+    } else if (rowType === "filter") {
+      newRow = {
+        id: uid,
+        type: "filter",
+        label: config.name || "Filter",
+        field: config.field ?? "",
+        op: config.op ?? "==",
+        value: config.value ?? "",
+      };
+    } else if (rowType === "sort") {
+      newRow = {
+        id: uid,
+        type: "sort",
+        label: config.name || "Sort",
+        field: config.field ?? "",
+        direction: config.direction ?? "asc",
+      };
+    } else {
+      return null;
+    }
+
+    if (!Array.isArray(parentDef.rows)) {
+      parentDef.rows = [];
+    }
+    parentDef.rows.push(newRow);
+    rowDefinitionsById.set(newRow.id, newRow);
+
+    if (newRow.initialState) {
+      if (!layerState[layerId]) {
+        layerState[layerId] = {};
+      }
+      Object.entries(newRow.initialState).forEach(([key, value]) => {
+        if (layerState[layerId][key] === undefined) {
+          layerState[layerId][key] = value;
+        }
+      });
+    }
+
+    return newRow;
+  }
+
+  // Adds a new data row (type: "layer") pointing to an entry in the layer catalog.
+  // layerRef is the catalog layer ID (e.g. "countriesLand", or a Supabase UUID later).
+  function addDataRow(parentId, { name, layerRef }) {
+    const parentDef = rowDefinitionsById.get(parentId) ?? layerDefinitions[parentId];
+    if (!parentDef) {
+      return null;
+    }
+
+    const uid = `dyn-${Date.now()}`;
+    const newRow = {
+      id: uid,
+      type: "layer",
+      label: name || layerRef,
+      layerId: uid,
+      layerRef,
+      rows: [],
+    };
+
+    if (!Array.isArray(parentDef.rows)) {
+      parentDef.rows = [];
+    }
+    parentDef.rows.push(newRow);
+    rowDefinitionsById.set(newRow.id, newRow);
+
+    layerState[uid] = { expanded: false, visible: true };
+
+    return newRow;
+  }
+
   function setChildRowOrder(parentId, nextOrder) {
     if (!getParentRows(parentId).length || !Array.isArray(nextOrder)) {
       return null;
@@ -758,12 +788,15 @@ function createLayerModel() {
   }
 
   return {
+    addDataRow,
+    addRowToLayer,
     getChildRows,
     getDefinitions,
     getRootRows,
     getRootParentId,
     getRowValue,
     getState,
+    isExpanded,
     normalizeChildRowOrder,
     reorderChildRow,
     setChildRowOrder,

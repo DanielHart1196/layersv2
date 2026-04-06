@@ -817,3 +817,537 @@ body.is-reordering-rows {
     right: 12px;
   }
 }
+
+/* ─── Upload panel ─────────────────────────────────────────────────────────── */
+
+.upload-panel {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.6);
+  align-items: center;
+  justify-content: center;
+}
+
+.upload-panel.is-open {
+  display: flex;
+}
+
+.upload-panel-inner {
+  background: var(--bg-1, #122330);
+  border: 1px solid rgba(154, 210, 255, 0.12);
+  border-radius: 12px;
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.upload-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(154, 210, 255, 0.08);
+}
+
+.upload-panel-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.upload-panel-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: color 120ms;
+}
+
+.upload-panel-close:hover { color: rgba(255, 255, 255, 0.8); }
+
+.upload-panel-content {
+  padding: 20px;
+}
+
+.upload-step-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  margin: 0 0 4px;
+}
+
+.upload-step-sub {
+  font-size: 12px;
+  color: rgba(154, 210, 255, 0.5);
+  margin: 0 0 16px;
+}
+
+.upload-dropzone {
+  border: 2px dashed rgba(154, 210, 255, 0.2);
+  border-radius: 10px;
+  padding: 40px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms;
+  position: relative;
+}
+
+.upload-dropzone:hover,
+.upload-dropzone.is-over {
+  border-color: rgba(154, 210, 255, 0.5);
+  background: rgba(154, 210, 255, 0.04);
+}
+
+.upload-dropzone-hint {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0 0 6px;
+}
+
+.upload-dropzone-formats {
+  font-size: 11px;
+  color: rgba(154, 210, 255, 0.4);
+  margin: 0;
+  letter-spacing: 0.03em;
+}
+
+.upload-file-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.upload-col-map {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.upload-col-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.upload-col-label {
+  font-size: 12px;
+  color: rgba(154, 210, 255, 0.6);
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.upload-col-select,
+.upload-field-input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(154, 210, 255, 0.15);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+  padding: 6px 10px;
+  outline: none;
+  width: 100%;
+}
+
+.upload-col-select:focus,
+.upload-field-input:focus {
+  border-color: rgba(154, 210, 255, 0.4);
+}
+
+.upload-preview {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 16px;
+  overflow-x: auto;
+  display: block;
+}
+
+.upload-preview th,
+.upload-preview td {
+  padding: 4px 8px;
+  border: 1px solid rgba(154, 210, 255, 0.08);
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.upload-preview th { color: rgba(154, 210, 255, 0.5); font-weight: 500; }
+
+.upload-summary {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.upload-summary-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.upload-summary-row strong { color: rgba(255, 255, 255, 0.85); }
+
+.upload-field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(154, 210, 255, 0.6);
+  margin-bottom: 12px;
+}
+
+.upload-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.upload-actions-col {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.upload-btn-ghost {
+  background: none;
+  border: none;
+  color: var(--text-muted, #888);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 6px 0;
+  text-align: center;
+}
+.upload-btn-ghost:hover {
+  color: var(--text, #ccc);
+}
+
+.upload-btn {
+  padding: 8px 18px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  transition: opacity 120ms;
+}
+
+.upload-btn:hover { opacity: 0.85; }
+
+.upload-btn-primary {
+  background: rgba(154, 210, 255, 0.15);
+  color: rgba(154, 210, 255, 0.9);
+  border: 1px solid rgba(154, 210, 255, 0.25);
+}
+
+.upload-btn-secondary {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.upload-error {
+  font-size: 12px;
+  color: #e74c3c;
+  margin: 8px 0 0;
+}
+
+.upload-step-uploading,
+.upload-step-done {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.upload-uploading-label,
+.upload-done-label {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.7);
+  margin: 0 0 16px;
+}
+
+.upload-progress-track {
+  height: 4px;
+  background: rgba(154, 210, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.upload-progress-bar {
+  height: 100%;
+  background: rgba(154, 210, 255, 0.6);
+  border-radius: 2px;
+  transition: width 200ms ease;
+}
+
+.upload-progress-label {
+  font-size: 12px;
+  color: rgba(154, 210, 255, 0.5);
+  margin: 0;
+}
+
+/* ─── Add row button ───────────────────────────────────────────────────────── */
+
+.layer-menu-add-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 11px;
+  color: rgba(154, 210, 255, 0.3);
+  padding: 5px 12px 5px calc(12px + var(--row-depth, 0) * 16px);
+  transition: color 120ms;
+  letter-spacing: 0.02em;
+}
+
+.layer-menu-add-row:hover {
+  color: rgba(154, 210, 255, 0.7);
+}
+
+/* ─── Add row panel (arp) ──────────────────────────────────────────────────── */
+
+.arp-panel {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.55);
+  align-items: center;
+  justify-content: center;
+}
+
+.arp-panel.is-open {
+  display: flex;
+}
+
+.arp-inner {
+  background: var(--bg-1, #122330);
+  border: 1px solid rgba(154, 210, 255, 0.12);
+  border-radius: 12px;
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.arp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(154, 210, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.arp-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.arp-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: color 120ms;
+}
+
+.arp-close:hover { color: rgba(255, 255, 255, 0.8); }
+
+.arp-content {
+  padding: 16px 20px 20px;
+}
+
+/* Type picker */
+
+.arp-type-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.arp-type-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  background: rgba(154, 210, 255, 0.04);
+  border: 1px solid rgba(154, 210, 255, 0.08);
+  border-radius: 8px;
+  padding: 11px 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 100ms, border-color 100ms;
+}
+
+.arp-type-item:hover {
+  background: rgba(154, 210, 255, 0.09);
+  border-color: rgba(154, 210, 255, 0.18);
+}
+
+.arp-type-item-inline {
+  flex-direction: row;
+  padding: 9px 14px;
+}
+
+.arp-type-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.arp-type-sub {
+  font-size: 11px;
+  color: rgba(154, 210, 255, 0.5);
+}
+
+.arp-type-divider {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(154, 210, 255, 0.35);
+  padding: 8px 4px 2px;
+}
+
+/* Form */
+
+.arp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.arp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.arp-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(154, 210, 255, 0.5);
+}
+
+.arp-field-input,
+.arp-select {
+  background: rgba(154, 210, 255, 0.06);
+  border: 1px solid rgba(154, 210, 255, 0.12);
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+  padding: 9px 12px;
+  width: 100%;
+  outline: none;
+  transition: border-color 120ms;
+  box-sizing: border-box;
+}
+
+.arp-field-input::placeholder { color: rgba(154, 210, 255, 0.3); }
+.arp-field-input:focus,
+.arp-select:focus { border-color: rgba(154, 210, 255, 0.35); }
+
+.arp-select { cursor: pointer; }
+.arp-select option,
+.arp-select optgroup { background: #122330; color: rgba(255,255,255,0.85); }
+
+.arp-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.arp-radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.arp-radio input[type="radio"] { accent-color: rgba(154, 210, 255, 0.8); }
+
+.arp-source-section { margin-top: -4px; }
+
+.arp-upload-hint {
+  font-size: 12px;
+  color: rgba(154, 210, 255, 0.45);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.arp-error {
+  font-size: 12px;
+  color: #e07070;
+  margin: 0;
+}
+
+.arp-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.arp-btn {
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 9px 18px;
+  transition: background 120ms, color 120ms;
+}
+
+.arp-btn-secondary {
+  background: rgba(154, 210, 255, 0.07);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.arp-btn-secondary:hover {
+  background: rgba(154, 210, 255, 0.12);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.arp-btn-primary {
+  background: rgba(154, 210, 255, 0.18);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.arp-btn-primary:hover {
+  background: rgba(154, 210, 255, 0.28);
+}
+
+/* Filter / sort meta rows in layer menu */
+
+.layer-menu-row-meta .layer-menu-row-header {
+  opacity: 0.65;
+  font-style: italic;
+}

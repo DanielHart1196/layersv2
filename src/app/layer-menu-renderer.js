@@ -366,6 +366,14 @@ function setupPointerReorderGrabber(grabber, parentId, rowId, reorderApi) {
       return;
     }
 
+    // Collapse any expanded row being jumped over before the preview re-renders.
+    const orderedIds = reorderApi.getOrderedRowIds(parentId);
+    const currentIndex = orderedIds.indexOf(rowId);
+    const jumpedIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+    if (jumpedIndex >= 0 && jumpedIndex < orderedIds.length) {
+      reorderApi.collapseRow(orderedIds[jumpedIndex]);
+    }
+
     gesture.previewOrder = nextPreviewOrder;
     reorderApi.onPreview(parentId, nextPreviewOrder);
   }
@@ -510,6 +518,7 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
   if (hasChildren) {
     row.classList.add("is-expandable");
     row.setAttribute("aria-expanded", String(Boolean(state?.expanded)));
+    row.dataset.expandKey = expandStateKey;
   }
 
   if (hasVisibility) {
@@ -1028,7 +1037,21 @@ function createAppearanceFillRow({ id, label, kind }) {
   };
 }
 
-function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth = 0, parentId = null, inheritedHidden = false) {
+function createAddButton(depth, parentId, onAddRow) {
+  const btn = document.createElement("button");
+  btn.className = "layer-menu-add-row";
+  btn.style.setProperty("--row-depth", String(depth + 1));
+  btn.setAttribute("type", "button");
+  btn.setAttribute("aria-label", depth === 0 ? "Add layer" : "Add row");
+  btn.textContent = depth === 0 ? "+ Add layer" : "+ Add row";
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    onAddRow({ kind: "open-add-panel", depth, parentId });
+  });
+  return btn;
+}
+
+function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth = 0, parentId = null, inheritedHidden = false, onAddRow = null) {
   const fragment = document.createDocumentFragment();
   const state = layerModel.getState();
 
@@ -1051,6 +1074,26 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       }, onToggleExpanded.__requestRender);
       colorRow.style.setProperty("--row-depth", String(depth));
       fragment.append(colorRow);
+      return;
+    }
+
+    if (row.type === "filter") {
+      const el = document.createElement("div");
+      el.className = "layer-menu-row layer-menu-row-meta";
+      el.style.setProperty("--row-depth", String(depth));
+      const { header } = createRowHeader(`${row.label}: ${row.field} ${row.op} ${row.value}`, null, "layer-menu-row-header");
+      el.append(header);
+      fragment.append(el);
+      return;
+    }
+
+    if (row.type === "sort") {
+      const el = document.createElement("div");
+      el.className = "layer-menu-row layer-menu-row-meta";
+      el.style.setProperty("--row-depth", String(depth));
+      const { header } = createRowHeader(`${row.label}: ${row.field} ${row.direction === "asc" ? "↑" : "↓"}`, null, "layer-menu-row-header");
+      el.append(header);
+      fragment.append(el);
       return;
     }
 
@@ -1085,9 +1128,15 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
     layerRow.style.setProperty("--row-depth", String(depth));
     fragment.append(layerRow);
 
-    if (childRows.length && state[rowStateKey]?.expanded) {
-      const nextInheritedHidden = inheritedHidden || (row.type === "layer" && state[rowStateKey]?.visible === false);
-      fragment.append(buildRows(childRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden));
+    if (row.type === "layer" && state[rowStateKey]?.expanded) {
+      const nextInheritedHidden = inheritedHidden || (state[rowStateKey]?.visible === false);
+      if (childRows.length) {
+        fragment.append(buildRows(childRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden, onAddRow));
+      }
+      if (onAddRow) {
+        const addBtn = createAddButton(depth, row.id, onAddRow);
+        fragment.append(addBtn);
+      }
     }
   });
 
@@ -1098,6 +1147,7 @@ function renderLayerMenuRows({
   panel,
   layerModel,
   onRowInput,
+  onAddRow,
 }) {
   if (!panel || !layerModel) {
     return () => {};
@@ -1168,6 +1218,11 @@ function renderLayerMenuRows({
           onRowInput({ type: "reorder", parentId }, committedOrder);
         }
         render();
+      },
+      collapseRow(expandKey) {
+        if (layerModel.isExpanded(expandKey)) {
+          onToggleExpanded(expandKey);
+        }
       },
     };
 
@@ -1246,6 +1301,8 @@ function renderLayerMenuRows({
         appearanceState,
         0,
         layerModel.getRootParentId(),
+        false,
+        onAddRow ?? null,
       ),
     );
   }

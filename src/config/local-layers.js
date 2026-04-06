@@ -1,0 +1,150 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Local layer registry — the ONE place to add or configure a layer.
+//
+// Each entry drives both the map rendering and the layer-menu UI automatically.
+//
+// SOURCE KINDS:
+//   "geojson"       — static GeoJSON file served from /public/data/
+//                     • url          required  full-quality source
+//                     • initialUrl   optional  fast low-quality first paint, swapped after load
+//   "atlas-vector"  — GeoJSON served as vector tiles (good for large files / interaction)
+//                     • dataUrl      required  GeoJSON file path
+//                     • sourceLayer  required  name of the vector tile layer
+//   "pmtiles"       — streaming PMTiles (best for very large datasets)
+//                     • pmtilesId    required  filename without extension in /public/pmtiles/
+//                     • sourceLayer  required  name of the vector tile layer inside the PMTiles
+//
+// FILL / LINE:
+//   Set to null to omit. All values are optional — defaults shown below.
+//   fill: { color, opacity (0–100) }
+//   line: { color, opacity (0–100), weight (px), cap ("butt"|"round"|"square"), join ("miter"|"round"|"bevel") }
+//
+// OTHER FLAGS:
+//   group         — "earth" | "transport" — which section of the layer menu
+//   deferred      — true = loads after browser idle (use for hidden-by-default layers)
+//   defaultVisible — false = hidden in the menu on first load
+//   inInitialStyle — true = baked into the MapLibre initial style (fastest possible render)
+//                    Only use for the most critical visible layers. Keep the list short.
+//   menuLabel     — label shown in the layer menu (defaults to label)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const LOCAL_LAYERS = [
+  // ── Earth ──────────────────────────────────────────────────────────────────
+
+  {
+    id: "countriesLand",
+    label: "Land",
+    group: "earth",
+    deferred: false,
+    defaultVisible: true,
+    inInitialStyle: true, // fast 110m outline → swaps to full dissolved land after load
+    source: {
+      kind: "geojson",
+      initialUrl: "/data/world-atlas/land-110m.geojson",
+      url: "/data/world-atlas/countries-dissolved-land.geojson",
+    },
+    fill: { color: "#6EAA6E", opacity: 100 },
+    line: { color: "#d9e4da", opacity: 100, weight: 1 },
+  },
+
+  {
+    id: "graticules",
+    label: "Graticules",
+    group: "earth",
+    deferred: false,
+    defaultVisible: true,
+    inInitialStyle: true,
+    source: {
+      kind: "atlas-vector",
+      dataUrl: "/data/graticules/world-graticules-10deg.geojson",
+      sourceLayer: "graticules",
+    },
+    fill: null,
+    line: { color: "#8FA9BC", opacity: 100, weight: 1 },
+  },
+
+  {
+    id: "land",
+    label: "Land (detail)",
+    group: "earth",
+    deferred: true,
+    defaultVisible: false,
+    source: {
+      kind: "pmtiles",
+      pmtilesId: "osm-land",
+      sourceLayer: "land-fill",
+    },
+    fill: { color: "#6EAA6E", opacity: 100 },
+    line: null,
+  },
+
+  {
+    id: "outline",
+    label: "Outline",
+    group: "earth",
+    deferred: true,
+    defaultVisible: false,
+    source: {
+      kind: "atlas-vector",
+      dataUrl: "/data/world-atlas/osm-coastlines.smooth.geojson",
+      sourceLayer: "coastlines",
+    },
+    fill: null,
+    line: { color: "#d9e4da", opacity: 100, weight: 1 },
+  },
+
+  {
+    id: "africa",
+    label: "Africa",
+    group: "earth",
+    deferred: true,
+    defaultVisible: false,
+    source: {
+      kind: "pmtiles",
+      pmtilesId: "africa-fill",
+      sourceLayer: "land-fill",
+    },
+    fill: { color: "#6EAA6E", opacity: 100 },
+    line: null,
+  },
+
+  {
+    id: "japan",
+    label: "Japan",
+    group: "earth",
+    deferred: true,
+    defaultVisible: false,
+    source: {
+      kind: "pmtiles",
+      pmtilesId: "osm-outline-japan",
+      sourceLayer: "coastlines",
+    },
+    fill: null,
+    line: { color: "#d9e4da", opacity: 100, weight: 1 },
+  },
+
+  // ── Transport ──────────────────────────────────────────────────────────────
+
+  {
+    id: "transportRail",
+    label: "Rail (SA)",
+    group: "transport",
+    deferred: false,
+    defaultVisible: true,
+    source: {
+      kind: "geojson",
+      url: "/data/transport/rail-sa.geojson",
+    },
+    fill: null,
+    line: { color: "#f07a58", opacity: 92, weight: 3.5, cap: "round", join: "round" },
+  },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ID helpers — consistent naming used by map-instance.js and layer-model.js
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function localLayerSourceId(id) { return `atlas-${id}`; }
+export function localLayerTileSourceId(id) { return `atlas-${id}-tiles`; }
+export function localLayerFillId(id) { return `atlas-${id}-fill`; }
+export function localLayerLineId(id) { return `atlas-${id}-line`; }

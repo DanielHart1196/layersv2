@@ -129,6 +129,9 @@ function createMaplibreScreenRuntime({
     setLayerStyleValue(layerId, key, value) {
       mapInstance?.setLayerStyleValue?.(layerId, key, value);
     },
+    loadDynamicLayer({ layerId, geojson, tilesUrl, style }) {
+      mapInstance?.attachDynamicLayer?.(layerId, geojson, tilesUrl, style);
+    },
   };
 }
 

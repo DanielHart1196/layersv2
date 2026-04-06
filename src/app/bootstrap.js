@@ -1,4 +1,6 @@
 import { createLayerModel } from "../core/layer-model.js";
+import { mountUploadPanel } from "../upload/upload-panel.js";
+import { mountAddRowPanel } from "./add-row-panel.js";
 import { getProjectionRegistry } from "../core/projection/projection-registry.js";
 import { createStyleModel } from "../core/style-model.js";
 import { createViewModel } from "../core/view-model.js";
@@ -11,6 +13,7 @@ import { createMaplibreScreenRuntime } from "../renderers/screen/maplibre/runtim
 import { createScreenRendererAdapter } from "../renderers/screen/screen-renderer.js";
 import { createEditableRuntimeStore } from "../sources/editable/runtime-store.js";
 import { createPmtilesManifest } from "../sources/pmtiles/source-manifest.js";
+import { loadLayerFromSupabase } from "../sources/supabase/layer-loader.js";
 
 async function bootstrapApplication() {
   const layerModel = createLayerModel();
@@ -43,6 +46,14 @@ async function bootstrapApplication() {
   const rerenderLayerMenu = renderLayerMenuRows({
     panel: document.getElementById("layerMenuPanel"),
     layerModel,
+    onAddRow: ({ kind, depth, parentId, rowType }) => {
+      if (kind === "open-add-panel") {
+        addRowPanel.open({ depth, parentId });
+      } else if (kind === "row") {
+        const added = layerModel.addRowToLayer(parentId, rowType);
+        if (added) rerenderLayerMenu();
+      }
+    },
     onRowInput: (row, nextValue) => {
       if (row?.type === "reorder") {
         screenRuntime.reorderLayerGroup(row.parentId, nextValue);
@@ -65,6 +76,33 @@ async function bootstrapApplication() {
     screenButton: document.getElementById("layerMenuScreenButton"),
     rerenderLayerMenu,
   });
+  const uploadPanel = mountUploadPanel({
+    onLayerCreated: async ({ layerId, name, parentId }) => {
+      try {
+        const { layer, geojson } = await loadLayerFromSupabase(layerId);
+        screenRuntime.loadDynamicLayer({ layerId, geojson, tilesUrl: layer.tiles_url ?? null, style: layer.default_style });
+        const added = layerModel.addDataRow(parentId ?? layerModel.getRootParentId(), { name, layerRef: layerId });
+        if (added) rerenderLayerMenu();
+      } catch (err) {
+        console.error("Failed to load uploaded layer onto map.", err);
+      }
+    },
+  });
+
+  const addRowPanel = mountAddRowPanel({
+    onAddLayer({ parentId, name, layerRef }) {
+      const added = layerModel.addDataRow(parentId, { name, layerRef });
+      if (added) rerenderLayerMenu();
+    },
+    onAddRow({ parentId, rowType, config }) {
+      const added = layerModel.addRowToLayer(parentId, rowType, config);
+      if (added) rerenderLayerMenu();
+    },
+    onUploadRequested({ parentId }) {
+      uploadPanel.open({ parentId });
+    },
+  });
+
   window.AtlasProduct = {
     layers: layerModel.getDefinitions(),
     layerState: layerModel.getState(),

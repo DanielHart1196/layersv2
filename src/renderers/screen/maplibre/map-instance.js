@@ -2,12 +2,19 @@
 // import maplibregl from "maplibre-gl";
 // import "maplibre-gl/dist/maplibre-gl.css";
 import { Protocol } from "pmtiles";
-import polygonClipping from "polygon-clipping";
 import {
   createGeojsonVectorSourceSpec,
   installAtlasVectorTileProtocol,
   registerGeojsonVectorTileSource,
+  prewarmTileSource,
 } from "./vector-tiles.js";
+import {
+  LOCAL_LAYERS,
+  localLayerSourceId,
+  localLayerTileSourceId,
+  localLayerFillId,
+  localLayerLineId,
+} from "../../../config/local-layers.js";
 
 let protocolInstalled = false;
 
@@ -17,26 +24,6 @@ const OLYMPICS_SOURCE_ID = "atlas-olympics";
 const OLYMPICS_GOLD_LAYER_ID = "atlas-olympics-gold";
 const OLYMPICS_SILVER_LAYER_ID = "atlas-olympics-silver";
 const OLYMPICS_BRONZE_LAYER_ID = "atlas-olympics-bronze";
-const TRANSPORT_RAIL_SOURCE_ID = "atlas-transport-rail";
-const TRANSPORT_RAIL_LINE_LAYER_ID = "atlas-transport-rail-line";
-const TRANSPORT_RAIL_VECTOR_URL = "/data/transport/rail-sa.geojson";
-const OSM_LAND_SOURCE_ID = "atlas-osm-land";
-const OSM_LAND_TILE_SOURCE_ID = "atlas-osm-land-tiles";
-const OSM_LAND_TILE_SOURCE_LAYER = "land-fill";
-const OSM_LAND_FILL_LAYER_ID = "atlas-osm-land-fill";
-const OSM_LAND_VECTOR_URL = "/data/world-atlas/land-50m.geojson";
-const OSM_LAND_PMTILES_ID = "osm-land";
-const OSM_OUTLINE_SOURCE_ID = "atlas-osm-outline";
-const OSM_OUTLINE_TILE_SOURCE_ID = "atlas-osm-outline-tiles";
-const OSM_OUTLINE_TILE_SOURCE_LAYER = "coastlines";
-const OSM_OUTLINE_LINE_LAYER_ID = "atlas-osm-outline-line";
-const OSM_OUTLINE_VECTOR_URL = "/data/world-atlas/osm-coastlines.smooth.geojson";
-const OSM_OUTLINE_PMTILES_ID = "osm-outline";
-const JAPAN_OUTLINE_SOURCE_ID = "atlas-japan-outline";
-const JAPAN_OUTLINE_TILE_SOURCE_ID = "atlas-japan-outline-tiles";
-const JAPAN_OUTLINE_TILE_SOURCE_LAYER = "coastlines";
-const JAPAN_OUTLINE_LINE_LAYER_ID = "atlas-japan-outline-line";
-const JAPAN_OUTLINE_PMTILES_ID = "osm-outline-japan";
 const AUSTRALIA_TILE_IDS = ["a", "b", "c", "d", "e", "f", "g", "h"];
 const AUSTRALIA_OUTLINE_TILE_SOURCE_LAYER = "coastlines";
 const AUSTRALIA_OUTLINE_SOURCE_IDS = AUSTRALIA_TILE_IDS.map((tileId) => `atlas-australia-outline-${tileId}`);
@@ -46,16 +33,8 @@ const AUSTRALIA_OUTLINE_PMTILES_IDS = AUSTRALIA_TILE_IDS.map((tileId) => `osm-ou
 const AUSTRALIA_FILL_SOURCE_IDS = AUSTRALIA_TILE_IDS.map((tileId) => `atlas-australia-fill-${tileId}`);
 const AUSTRALIA_FILL_LAYER_IDS = AUSTRALIA_TILE_IDS.map((tileId) => `atlas-australia-fill-${tileId}`);
 const AUSTRALIA_FILL_VECTOR_URLS = AUSTRALIA_TILE_IDS.map((tileId) => `/data/world-atlas/australia-land-${tileId}.geojson`);
-const AFRICA_FILL_SOURCE_ID = "atlas-africa-fill";
-const AFRICA_FILL_TILE_SOURCE_ID = "atlas-africa-fill-tiles";
-const AFRICA_FILL_TILE_SOURCE_LAYER = "land-fill";
-const AFRICA_FILL_LAYER_ID = "atlas-africa-fill";
-const AFRICA_FILL_PMTILES_ID = "africa-fill";
-const COUNTRIES_LAND_SOURCE_ID = "atlas-countries-land";
-const COUNTRIES_LAND_FILL_LAYER_ID = "atlas-countries-land-fill";
-const COUNTRIES_LAND_LINE_LAYER_ID = "atlas-countries-land-line";
-const COUNTRIES_LAND_INITIAL_URL = "/data/world-atlas/land-110m.geojson";
-const COUNTRIES_LAND_VECTOR_URL = "/data/world-atlas/countries-dissolved-land.geojson";
+// Standard layer IDs derived from config — see src/config/local-layers.js
+
 const VICTORIA_TILE_IDS = ["a", "b", "c", "d"];
 const VICTORIA_FILL_SOURCE_ID = "atlas-victoria-fill";
 const VICTORIA_FILL_LAYER_ID = "atlas-victoria-fill";
@@ -64,11 +43,6 @@ const VICTORIA_OUTLINE_TILE_SOURCE_LAYER = "coastlines";
 const VICTORIA_OUTLINE_PMTILES_IDS = VICTORIA_TILE_IDS.map((tileId) => `osm-outline-victoria-${tileId}`);
 const VICTORIA_OUTLINE_SOURCE_IDS = VICTORIA_TILE_IDS.map((tileId) => `atlas-victoria-outline-${tileId}`);
 const VICTORIA_OUTLINE_LINE_LAYER_IDS = VICTORIA_TILE_IDS.map((tileId) => `atlas-victoria-outline-line-${tileId}`);
-const GRATICULES_SOURCE_ID = "atlas-graticules";
-const GRATICULES_TILE_SOURCE_ID = "atlas-graticules-tiles";
-const GRATICULES_TILE_SOURCE_LAYER = "graticules";
-const GRATICULES_LINE_LAYER_ID = "atlas-graticules-line";
-const GRATICULES_VECTOR_URL = "/data/graticules/world-graticules-10deg.geojson";
 const ROMAN_SOURCE_ID = "atlas-roman-empire";
 const ROMAN_FILL_SOURCE_ID = "atlas-roman-empire-fill-source";
 const ROMAN_FILL_SOURCE_LAYER = "roman-fill";
@@ -101,31 +75,25 @@ const EMPIRE_LINE_LAYER_IDS = {
 const PARENT_LAYER_IDS = {
   ocean: "earth",
   australia: "earth",
-  countriesLand: "earth",
-  graticules: "earth",
-  transportRail: "transport",
+  victoria: "earth",
   olympicsGold: "olympics",
   olympicsSilver: "olympics",
   olympicsBronze: "olympics",
   roman: "empires",
   mongol: "empires",
   british: "empires",
+  ...Object.fromEntries(LOCAL_LAYERS.map((l) => [l.id, l.group])),
 };
 const LINE_LAYER_IDS = {
-  transportRail: TRANSPORT_RAIL_LINE_LAYER_ID,
-  outline: OSM_OUTLINE_LINE_LAYER_ID,
-  japan: JAPAN_OUTLINE_LINE_LAYER_ID,
   australia: AUSTRALIA_OUTLINE_LINE_LAYER_IDS[0],
-  countriesLand: COUNTRIES_LAND_LINE_LAYER_ID,
   victoria: VICTORIA_OUTLINE_LINE_LAYER_IDS[0],
   ...EMPIRE_LINE_LAYER_IDS,
-  graticules: GRATICULES_LINE_LAYER_ID,
+  ...Object.fromEntries(LOCAL_LAYERS.filter((l) => l.line).map((l) => [l.id, localLayerLineId(l.id)])),
 };
 const WATER_BACKGROUND_COLOR = { r: 44, g: 111, b: 146 };
 const DEFAULT_LAND_FILL_COLOR = "#6EAA6E";
 const DEFAULT_OCEAN_FILL_COLOR = "#2C6F92";
 const DEFAULT_OUTLINE_LINE_COLOR = "#d9e4da";
-const DEFAULT_GRATICULE_LINE_COLOR = "#8FA9BC";
 const SCALE_BAR_MAX_WIDTH_PX = 120;
 const SCALE_BAR_HIDE_DELAY_MS = 1200;
 const SCALE_BAR_SCREEN_OFFSET_X = 18;
@@ -246,24 +214,27 @@ function updateScaleOverlay(map, overlay) {
   }
 }
 
+function localLayerMaplibreIds(entry) {
+  return [
+    ...(entry.fill ? [localLayerFillId(entry.id)] : []),
+    ...(entry.line ? [localLayerLineId(entry.id)] : []),
+  ];
+}
+
 function getLogicalLayerBundles() {
+  const earthLocalLayers = LOCAL_LAYERS.filter((l) => l.group === "earth");
+  const transportLocalLayers = LOCAL_LAYERS.filter((l) => l.group === "transport");
   return {
     __root__: {
       earth: [
         "atlas-water",
-        OSM_LAND_FILL_LAYER_ID,
-        AFRICA_FILL_LAYER_ID,
+        ...earthLocalLayers.flatMap(localLayerMaplibreIds),
         ...AUSTRALIA_FILL_LAYER_IDS,
         ...AUSTRALIA_OUTLINE_LINE_LAYER_IDS,
         VICTORIA_FILL_LAYER_ID,
         ...VICTORIA_OUTLINE_LINE_LAYER_IDS,
-        JAPAN_OUTLINE_LINE_LAYER_ID,
-        OSM_OUTLINE_LINE_LAYER_ID,
-        COUNTRIES_LAND_FILL_LAYER_ID,
-        COUNTRIES_LAND_LINE_LAYER_ID,
-        GRATICULES_LINE_LAYER_ID,
       ],
-      transport: [TRANSPORT_RAIL_LINE_LAYER_ID],
+      transport: transportLocalLayers.flatMap(localLayerMaplibreIds),
       olympics: [OLYMPICS_GOLD_LAYER_ID, OLYMPICS_SILVER_LAYER_ID, OLYMPICS_BRONZE_LAYER_ID],
       empires: [
         ROMAN_FILL_LAYER_ID,
@@ -275,17 +246,13 @@ function getLogicalLayerBundles() {
       ],
     },
     earth: {
-      land: [OSM_LAND_FILL_LAYER_ID],
-      outline: [OSM_OUTLINE_LINE_LAYER_ID],
-      japan: [JAPAN_OUTLINE_LINE_LAYER_ID],
+      ocean: ["atlas-water"],
       australia: [...AUSTRALIA_FILL_LAYER_IDS, ...AUSTRALIA_OUTLINE_LINE_LAYER_IDS],
-      africa: [AFRICA_FILL_LAYER_ID],
-      "countries-land": [COUNTRIES_LAND_FILL_LAYER_ID, COUNTRIES_LAND_LINE_LAYER_ID],
       victoria: [VICTORIA_FILL_LAYER_ID, ...VICTORIA_OUTLINE_LINE_LAYER_IDS],
-      graticules: [GRATICULES_LINE_LAYER_ID],
+      ...Object.fromEntries(earthLocalLayers.map((l) => [l.id, localLayerMaplibreIds(l)])),
     },
     transport: {
-      "transport-rail": [TRANSPORT_RAIL_LINE_LAYER_ID],
+      ...Object.fromEntries(transportLocalLayers.map((l) => [l.id, localLayerMaplibreIds(l)])),
     },
     olympics: {
       "olympics-gold": [OLYMPICS_GOLD_LAYER_ID],
@@ -300,36 +267,45 @@ function getLogicalLayerBundles() {
   };
 }
 
-function applyLogicalLayerOrder(map, parentId, orderedLayerIds) {
-  const bundles = getLogicalLayerBundles()[parentId];
-  if (!bundles) {
-    return;
+// Default child orders — must mirror layer-model.js buildDefaultLayerState()
+const DEFAULT_GROUP_CHILD_ORDERS = {
+  earth:     ["ocean", "land", "africa", "australia", "victoria", "japan", "outline", "countriesLand", "graticules"],
+  transport: ["transportRail"],
+  olympics:  ["olympics-gold", "olympics-silver", "olympics-bronze"],
+  empires:   ["roman", "mongol", "british"],
+};
+const DEFAULT_ROOT_ORDER = ["earth", "transport", "olympics", "empires"];
+
+// Ordering rules:
+// - Earth group: always pinned to the bottom of the render stack, regardless
+//   of its position in the UI. Processed first so everything else is on top.
+// - Ocean (within Earth): always pinned to the bottom within Earth. Processed
+//   first within the earth pass so it ends at the very bottom.
+// - Everything else: higher in the UI = higher z-index = renders on top.
+//   Achieved by iterating in reverse UI order (bottom-to-top), so the topmost
+//   item is moved last and ends up highest.
+function applyFullLayerOrder(map, layerState) {
+  const bundles = getLogicalLayerBundles();
+  const rootOrder = layerState["__root__"]?.rowOrder ?? DEFAULT_ROOT_ORDER;
+
+  const moveLayer = (id) => { if (map.getLayer(id)) map.moveLayer(id, undefined); };
+
+  // Earth: always bottom — process first. Ocean: always bottom within earth.
+  const earthBundle = bundles["earth"] ?? {};
+  const earthChildOrder = layerState["earth"]?.rowOrder ?? DEFAULT_GROUP_CHILD_ORDERS["earth"] ?? [];
+  const nonOceanEarth = earthChildOrder.filter((id) => id !== "ocean");
+  (earthBundle["ocean"] ?? []).forEach(moveLayer); // ocean first = very bottom
+  for (const childId of [...nonOceanEarth].reverse()) {
+    (earthBundle[childId] ?? []).forEach(moveLayer);
   }
 
-  const flattened = orderedLayerIds
-    .flatMap((layerId) => bundles[layerId] ?? [])
-    .filter((layerId) => map.getLayer(layerId));
-
-  const anchorBeforeId = (parentId === "earth" || parentId === "transport")
-    ? getFirstExistingLayerId(map, [
-      ROMAN_FILL_LAYER_ID,
-      ROMAN_LINE_LAYER_ID,
-      MONGOL_FILL_LAYER_ID,
-      MONGOL_LINE_LAYER_ID,
-      BRITISH_FILL_LAYER_ID,
-      BRITISH_LINE_LAYER_ID,
-    ])
-    : null;
-
-  if (anchorBeforeId) {
-    // Insert before anchor: iterate backward so flattened[0] ends up just before the anchor
-    for (let index = flattened.length - 1; index >= 0; index -= 1) {
-      map.moveLayer(flattened[index], anchorBeforeId);
-    }
-  } else {
-    // Move to top: iterate forward so flattened[last] ends up on top
-    for (let index = 0; index < flattened.length; index += 1) {
-      map.moveLayer(flattened[index], undefined);
+  // All other groups: reversed UI order so higher = renders on top.
+  const nonEarthGroups = rootOrder.filter((id) => id !== "earth");
+  for (const groupId of [...nonEarthGroups].reverse()) {
+    const childOrder = layerState[groupId]?.rowOrder ?? DEFAULT_GROUP_CHILD_ORDERS[groupId] ?? [];
+    const groupBundle = bundles[groupId] ?? {};
+    for (const childId of [...childOrder].reverse()) {
+      (groupBundle[childId] ?? []).forEach(moveLayer);
     }
   }
 }
@@ -365,28 +341,59 @@ function createRuntimeVectorSourceSpec({
   return createGeojsonVectorSourceSpec(atlasVectorTileId, maxZoom);
 }
 
-function buildStyle(manifest, layerState) {
+function buildInitialStyleLayerSpecs(entry, layerState) {
+  const sourceId = localLayerSourceId(entry.id);
+  const specs = [];
+  if (entry.fill) {
+    const spec = {
+      id: localLayerFillId(entry.id),
+      type: "fill",
+      source: sourceId,
+      layout: { visibility: getInheritedLayoutVisibility(layerState, entry.id) },
+      paint: {
+        "fill-color": getLayerStyleValue(layerState, entry.id, "fillColor", entry.fill.color),
+        "fill-opacity": Number(getLayerStyleValue(layerState, entry.id, "fillOpacity", entry.fill.opacity)) / 100,
+      },
+    };
+    if (entry.source.sourceLayer) spec["source-layer"] = entry.source.sourceLayer;
+    specs.push(spec);
+  }
+  if (entry.line) {
+    const spec = {
+      id: localLayerLineId(entry.id),
+      type: "line",
+      source: sourceId,
+      layout: { visibility: getInheritedLayoutVisibility(layerState, entry.id) },
+      paint: {
+        "line-color": getLayerStyleValue(layerState, entry.id, "lineColor", entry.line.color),
+        "line-width": buildLineWidthExpression(getLayerStyleValue(layerState, entry.id, "lineWeight", entry.line.weight ?? 1)),
+        "line-opacity": Number(getLayerStyleValue(layerState, entry.id, "lineOpacity", entry.line.opacity)) / 100,
+      },
+    };
+    if (entry.source.sourceLayer) spec["source-layer"] = entry.source.sourceLayer;
+    specs.push(spec);
+  }
+  return specs;
+}
+
+function buildStyle(layerState) {
+  const initialLayers = LOCAL_LAYERS.filter((l) => l.inInitialStyle);
   return {
     version: 8,
-    projection: {
-      type: "globe",
-    },
+    projection: { type: "globe" },
     // Sources here load in parallel with MapLibre's own initialisation,
     // before the load event fires — so these layers render immediately.
-    sources: {
-      [COUNTRIES_LAND_SOURCE_ID]: {
-        type: "geojson",
-        data: COUNTRIES_LAND_INITIAL_URL,
-      },
-      [GRATICULES_SOURCE_ID]: createGeojsonVectorSourceSpec(GRATICULES_TILE_SOURCE_ID),
-    },
+    sources: Object.fromEntries(initialLayers.map((entry) => [
+      localLayerSourceId(entry.id),
+      entry.source.kind === "atlas-vector"
+        ? createGeojsonVectorSourceSpec(localLayerTileSourceId(entry.id))
+        : { type: "geojson", data: entry.source.initialUrl ?? entry.source.url },
+    ])),
     layers: [
       {
         id: "atlas-water",
         type: "background",
-        layout: {
-          visibility: getInheritedLayoutVisibility(layerState, "ocean"),
-        },
+        layout: { visibility: getInheritedLayoutVisibility(layerState, "ocean") },
         paint: {
           "background-color": buildWaterBackgroundColor(
             getLayerStyleValue(layerState, "ocean", "fillColor", DEFAULT_OCEAN_FILL_COLOR),
@@ -394,45 +401,7 @@ function buildStyle(manifest, layerState) {
           ),
         },
       },
-      {
-        id: COUNTRIES_LAND_FILL_LAYER_ID,
-        type: "fill",
-        source: COUNTRIES_LAND_SOURCE_ID,
-        layout: {
-          visibility: getInheritedLayoutVisibility(layerState, "countriesLand"),
-        },
-        paint: {
-          "fill-color": getLayerStyleValue(layerState, "countriesLand", "fillColor", DEFAULT_LAND_FILL_COLOR),
-          "fill-opacity": Number(getLayerStyleValue(layerState, "countriesLand", "fillOpacity", 100)) / 100,
-        },
-      },
-      {
-        id: COUNTRIES_LAND_LINE_LAYER_ID,
-        type: "line",
-        source: COUNTRIES_LAND_SOURCE_ID,
-        layout: {
-          visibility: getInheritedLayoutVisibility(layerState, "countriesLand"),
-        },
-        paint: {
-          "line-color": getLayerStyleValue(layerState, "countriesLand", "lineColor", DEFAULT_OUTLINE_LINE_COLOR),
-          "line-width": buildLineWidthExpression(getLayerStyleValue(layerState, "countriesLand", "lineWeight", 1)),
-          "line-opacity": Number(getLayerStyleValue(layerState, "countriesLand", "lineOpacity", 100)) / 100,
-        },
-      },
-      {
-        id: GRATICULES_LINE_LAYER_ID,
-        type: "line",
-        source: GRATICULES_SOURCE_ID,
-        "source-layer": GRATICULES_TILE_SOURCE_LAYER,
-        layout: {
-          visibility: getInheritedLayoutVisibility(layerState, "graticules"),
-        },
-        paint: {
-          "line-color": getLayerStyleValue(layerState, "graticules", "lineColor", DEFAULT_GRATICULE_LINE_COLOR),
-          "line-width": buildLineWidthExpression(getLayerStyleValue(layerState, "graticules", "lineWeight", 1)),
-          "line-opacity": Number(getLayerStyleValue(layerState, "graticules", "lineOpacity", 100)) / 100,
-        },
-      },
+      ...initialLayers.flatMap((entry) => buildInitialStyleLayerSpecs(entry, layerState)),
     ],
   };
 }
@@ -538,42 +507,21 @@ function geometryToMultiPolygonCoordinates(geometry) {
 }
 
 function buildEmpireOutlineFeatureCollection(featureCollection) {
-  const polygonSets = [];
-
-  for (const feature of featureCollection?.features ?? []) {
-    const polygons = geometryToMultiPolygonCoordinates(feature.geometry);
-    if (polygons.length > 0) {
-      polygonSets.push(polygons);
-    }
-  }
-
-  if (polygonSets.length === 0) {
-    return {
-      type: "FeatureCollection",
-      features: [],
-    };
-  }
-
-  const dissolved = polygonClipping.union(...polygonSets);
+  // Extract all polygon rings as LineStrings directly — no polygon union needed,
+  // which avoids blocking the main thread with a heavy polygonClipping.union() call.
   const lineFeatures = [];
-
-  for (const polygon of dissolved ?? []) {
-    for (const ring of polygon ?? []) {
-      lineFeatures.push({
-        type: "Feature",
-        properties: {},
-        geometry: {
-          type: "LineString",
-          coordinates: ring,
-        },
-      });
+  for (const feature of featureCollection?.features ?? []) {
+    for (const polygon of geometryToMultiPolygonCoordinates(feature.geometry)) {
+      for (const ring of polygon) {
+        lineFeatures.push({
+          type: "Feature",
+          properties: {},
+          geometry: { type: "LineString", coordinates: ring },
+        });
+      }
     }
   }
-
-  return {
-    type: "FeatureCollection",
-    features: lineFeatures,
-  };
+  return { type: "FeatureCollection", features: lineFeatures };
 }
 
 function ensureProtocol(manifest = []) {
@@ -584,10 +532,12 @@ function ensureProtocol(manifest = []) {
   const protocol = new Protocol();
   maplibregl.addProtocol("pmtiles", protocol.tile);
   installAtlasVectorTileProtocol(maplibregl);
-  registerGeojsonVectorTileSource({
-    id: GRATICULES_TILE_SOURCE_ID,
-    dataUrl: GRATICULES_VECTOR_URL,
-    sourceLayer: GRATICULES_TILE_SOURCE_LAYER,
+  LOCAL_LAYERS.filter((l) => l.source.kind === "atlas-vector").forEach((l) => {
+    registerGeojsonVectorTileSource({
+      id: localLayerTileSourceId(l.id),
+      dataUrl: l.source.dataUrl,
+      sourceLayer: l.source.sourceLayer,
+    });
   });
   registerGeojsonVectorTileSource({
     id: ROMAN_FILL_SOURCE_ID,
@@ -635,79 +585,41 @@ async function loadBritishEmpireVector() {
 }
 
 // ─── Standard layer registry ─────────────────────────────────────────────────
-//
-// Each entry fully describes a "standard" layer: one GeoJSON/vector source with
-// an optional fill layer and/or line layer. Adding a new standard layer only
-// requires adding an entry here — attach, style updates, and visibility
-// are all handled generically.
-//
-// source.kind:
-//   "geojson"        — static GeoJSON URL, no tiles
-//   "atlas-vector"   — atlas vector-tile protocol (createGeojsonVectorSourceSpec)
-//   "runtime-vector" — atlas vector tiles OR pmtiles when available (createRuntimeVectorSourceSpec)
-//
-// deferred: true  → Phase 2 (idle/hidden-by-default)
-// deferred: false → Phase 1 (loaded immediately on map load)
+// Derived from src/config/local-layers.js — do not edit here.
 
-const STANDARD_LAYER_REGISTRY = [
-  // Phase 1 — visible-by-default
-  {
-    layerId: "countriesLand",
-    deferred: false,
-    source: { kind: "geojson", id: COUNTRIES_LAND_SOURCE_ID, url: COUNTRIES_LAND_VECTOR_URL },
-    fill: { id: COUNTRIES_LAND_FILL_LAYER_ID, defaultColor: DEFAULT_LAND_FILL_COLOR },
-    line: { id: COUNTRIES_LAND_LINE_LAYER_ID, defaultColor: DEFAULT_OUTLINE_LINE_COLOR, defaultWeight: 1 },
-  },
-  {
-    layerId: "graticules",
-    deferred: false,
-    source: { kind: "atlas-vector", id: GRATICULES_SOURCE_ID, atlasVectorTileId: GRATICULES_TILE_SOURCE_ID },
-    fill: null,
-    line: { id: GRATICULES_LINE_LAYER_ID, sourceLayer: GRATICULES_TILE_SOURCE_LAYER, defaultColor: DEFAULT_GRATICULE_LINE_COLOR, defaultWeight: 1 },
-  },
-  {
-    layerId: "transportRail",
-    deferred: false,
-    source: { kind: "geojson", id: TRANSPORT_RAIL_SOURCE_ID, url: TRANSPORT_RAIL_VECTOR_URL },
-    fill: null,
-    line: {
-      id: TRANSPORT_RAIL_LINE_LAYER_ID,
-      defaultColor: "#f07a58",
-      defaultWeight: 3.5,
-      defaultOpacity: 92,
-      extraLayout: { "line-cap": "round", "line-join": "round" },
-    },
-  },
-  // Phase 2 — hidden-by-default (loaded on idle)
-  {
-    layerId: "land",
-    deferred: true,
-    source: { kind: "runtime-vector", id: OSM_LAND_SOURCE_ID, pmtilesId: OSM_LAND_PMTILES_ID, atlasVectorTileId: OSM_LAND_TILE_SOURCE_ID },
-    fill: { id: OSM_LAND_FILL_LAYER_ID, sourceLayer: OSM_LAND_TILE_SOURCE_LAYER, defaultColor: DEFAULT_LAND_FILL_COLOR },
-    line: null,
-  },
-  {
-    layerId: "outline",
-    deferred: true,
-    source: { kind: "atlas-vector", id: OSM_OUTLINE_SOURCE_ID, atlasVectorTileId: OSM_OUTLINE_TILE_SOURCE_ID },
-    fill: null,
-    line: { id: OSM_OUTLINE_LINE_LAYER_ID, sourceLayer: OSM_OUTLINE_TILE_SOURCE_LAYER, defaultColor: DEFAULT_OUTLINE_LINE_COLOR, defaultWeight: 1 },
-  },
-  {
-    layerId: "japan",
-    deferred: true,
-    source: { kind: "runtime-vector", id: JAPAN_OUTLINE_SOURCE_ID, pmtilesId: JAPAN_OUTLINE_PMTILES_ID, atlasVectorTileId: JAPAN_OUTLINE_TILE_SOURCE_ID },
-    fill: null,
-    line: { id: JAPAN_OUTLINE_LINE_LAYER_ID, sourceLayer: JAPAN_OUTLINE_TILE_SOURCE_LAYER, defaultColor: DEFAULT_OUTLINE_LINE_COLOR, defaultWeight: 1 },
-  },
-  {
-    layerId: "africa",
-    deferred: true,
-    source: { kind: "runtime-vector", id: AFRICA_FILL_SOURCE_ID, pmtilesId: AFRICA_FILL_PMTILES_ID, atlasVectorTileId: AFRICA_FILL_TILE_SOURCE_ID },
-    fill: { id: AFRICA_FILL_LAYER_ID, sourceLayer: AFRICA_FILL_TILE_SOURCE_LAYER, defaultColor: DEFAULT_LAND_FILL_COLOR },
-    line: null,
-  },
-];
+function toRegistryEntry(entry) {
+  const { id, deferred, source, fill, line } = entry;
+  const sourceLayer = source.sourceLayer ?? null;
+  const registrySource = source.kind === "pmtiles"
+    ? { kind: "runtime-vector", id: localLayerSourceId(id), pmtilesId: source.pmtilesId, atlasVectorTileId: localLayerTileSourceId(id) }
+    : source.kind === "atlas-vector"
+      ? { kind: "atlas-vector", id: localLayerSourceId(id), atlasVectorTileId: localLayerTileSourceId(id) }
+      : { kind: "geojson", id: localLayerSourceId(id), url: source.url };
+  return {
+    layerId: id,
+    deferred: deferred ?? false,
+    source: registrySource,
+    fill: fill ? {
+      id: localLayerFillId(id),
+      sourceLayer,
+      defaultColor: fill.color,
+      defaultOpacity: fill.opacity,
+    } : null,
+    line: line ? {
+      id: localLayerLineId(id),
+      sourceLayer,
+      defaultColor: line.color,
+      defaultOpacity: line.opacity,
+      defaultWeight: line.weight ?? 1,
+      ...(line.cap || line.join ? { extraLayout: {
+        ...(line.cap ? { "line-cap": line.cap } : {}),
+        ...(line.join ? { "line-join": line.join } : {}),
+      } } : {}),
+    } : null,
+  };
+}
+
+const STANDARD_LAYER_REGISTRY = LOCAL_LAYERS.map(toRegistryEntry);
 
 function attachStandardLayer(map, layerState, manifest, entry) {
   const { source, fill, line, layerId } = entry;
@@ -1139,7 +1051,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
 
   const map = new maplibregl.Map({
     container,
-    style: buildStyle(manifest, layerState),
+    style: buildStyle(layerState),
     center: [viewState.center.longitude, viewState.center.latitude],
     zoom: viewState.zoom,
     minZoom: 0.7,
@@ -1149,6 +1061,16 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
   });
   map.on("error", (event) => {
     const message = event?.error?.message ?? event?.error?.toString?.() ?? "unknown";
+    const url = event?.tile?.url ?? event?.source?.url ?? event?.source?.data ?? "";
+    const combined = message + " " + String(url);
+    if (
+      combined.includes("Wrong magic number for PMTiles") ||
+      combined.includes("australia-land-") ||
+      combined.includes("victoria-land") ||
+      (combined.includes(".pmtiles") || combined.includes("/pmtiles/"))
+    ) {
+      return;
+    }
     console.error("MapLibre map error.", message, event?.error);
   });
   map.on("movestart", () => {
@@ -1167,10 +1089,11 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     }
   });
   map.on("load", () => {
-    // Upgrade land immediately — swap from the tiny 110m initial file to the
-    // full 50m dissolved land in the background. Non-blocking: map stays
-    // interactive while the higher-res data loads.
-    map.getSource(COUNTRIES_LAND_SOURCE_ID)?.setData(COUNTRIES_LAND_VECTOR_URL);
+    // Upgrade any layers that loaded with a fast initialUrl — swap to full
+    // quality in the background. Non-blocking: map stays interactive.
+    LOCAL_LAYERS.filter((l) => l.source.initialUrl).forEach((l) => {
+      map.getSource(localLayerSourceId(l.id))?.setData(l.source.url);
+    });
 
     // Phase 1: All visible-by-default layers — load immediately in parallel
     // Note: water, countriesLand, and graticules are already in the initial style
@@ -1182,37 +1105,46 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
           ...STANDARD_LAYER_REGISTRY
             .filter((entry) => !entry.deferred)
             .map((entry) => attachStandardLayer(map, layerState, manifest, entry)),
-          attachAustraliaFillLayer(map, layerState, manifest),
-          attachAustraliaOutlineLayer(map, layerState, manifest),
-          attachRomanEmpireLayer(map, layerState),
-          attachMongolEmpireLayer(map, layerState),
-          attachBritishEmpireLayer(map, layerState),
           attachOlympicsLayers(map, layerState),
         ]);
 
-        applyLogicalLayerOrder(map, "__root__", getLayerStyleValue(layerState, "__root__", "rowOrder", ["earth", "transport", "olympics", "empires"]));
-        applyLogicalLayerOrder(map, "earth", getLayerStyleValue(layerState, "earth", "rowOrder", ["ocean", "land", "africa", "australia", "victoria", "japan", "outline", "countries-land", "graticules"]));
-        applyLogicalLayerOrder(map, "transport", getLayerStyleValue(layerState, "transport", "rowOrder", ["transport-rail"]));
-        applyLogicalLayerOrder(map, "olympics", getLayerStyleValue(layerState, "olympics", "rowOrder", ["olympics-gold", "olympics-silver", "olympics-bronze"]));
-        applyLogicalLayerOrder(map, "empires", getLayerStyleValue(layerState, "empires", "rowOrder", ["roman", "mongol", "british"]));
+        applyFullLayerOrder(map, layerState);
       } catch (error) {
         console.error("Failed to attach primary layers.", error);
       }
     })();
 
-    // Phase 2: Hidden-by-default layers — defer until browser is idle
+    // Phase 2: Deferred + empire layers — run at idle time so Phase 1 stays
+    // interactive. Also prewarms atlas-vector tile indices so GeoJSONVT
+    // construction doesn't block the main thread on first tile request.
     const loadDeferredLayers = async () => {
       try {
+        // Prewarm all registered atlas-vector sources before tiles are needed
+        LOCAL_LAYERS
+          .filter((l) => l.source.kind === "atlas-vector")
+          .forEach((l) => prewarmTileSource(localLayerTileSourceId(l.id)));
+        [ROMAN_FILL_SOURCE_ID, MONGOL_FILL_SOURCE_ID, BRITISH_FILL_SOURCE_ID].forEach(prewarmTileSource);
+
         await Promise.all([
           ...STANDARD_LAYER_REGISTRY
             .filter((entry) => entry.deferred)
             .map((entry) => attachStandardLayer(map, layerState, manifest, entry)),
+          attachRomanEmpireLayer(map, layerState),
+          attachMongolEmpireLayer(map, layerState),
+          attachBritishEmpireLayer(map, layerState),
+        ]);
+
+        applyFullLayerOrder(map, layerState);
+
+        // Phase 3: Detailed land tiles — load after everything else is rendered
+        await Promise.all([
+          attachAustraliaFillLayer(map, layerState, manifest),
+          attachAustraliaOutlineLayer(map, layerState, manifest),
           attachVictoriaFillLayers(map, layerState, manifest),
           attachVictoriaOutlineLayers(map, layerState, manifest),
         ]);
 
-        // Re-apply earth ordering now that all layers exist
-        applyLogicalLayerOrder(map, "earth", getLayerStyleValue(layerState, "earth", "rowOrder", ["ocean", "land", "africa", "australia", "victoria", "japan", "outline", "countries-land", "graticules"]));
+        applyFullLayerOrder(map, layerState);
       } catch (error) {
         console.error("Failed to attach deferred layers.", error);
       }
@@ -1234,7 +1166,10 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       return map;
     },
     reorderLayerGroup(parentId, orderedLayerIds) {
-      applyLogicalLayerOrder(map, parentId, orderedLayerIds);
+      if (layerState[parentId]) {
+        layerState[parentId].rowOrder = orderedLayerIds;
+      }
+      applyFullLayerOrder(map, layerState);
     },
     setLayerStyleValue(layerId, key, value) {
       if (!layerState[layerId] || typeof layerState[layerId] !== "object") {
@@ -1451,6 +1386,37 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         if (olympicsSource && "setData" in olympicsSource) {
           olympicsSource.setData(getOlympicsVectorUrl(layerState));
         }
+      }
+    },
+    attachDynamicLayer(layerId, geojson, tilesUrl, style) {
+      const sourceId = `dynamic-${layerId}`;
+      if (map.getSource(sourceId)) return;
+
+      const color = style?.color ?? "#e74c3c";
+      const opacity = (style?.opacity ?? 80) / 100;
+      const renderType = style?.renderType ?? "point";
+
+      // Prefer PMTiles vector source when available; fall back to flat GeoJSON.
+      if (tilesUrl) {
+        map.addSource(sourceId, { type: "vector", url: `pmtiles://${tilesUrl}` });
+      } else {
+        map.addSource(sourceId, { type: "geojson", data: geojson });
+      }
+
+      const sourceLayer = tilesUrl ? "layer" : undefined;
+      const sourceLayerProp = tilesUrl ? { "source-layer": sourceLayer } : {};
+
+      if (renderType === "polygon") {
+        map.addLayer({ id: `${sourceId}-fill`, type: "fill", source: sourceId, ...sourceLayerProp,
+          paint: { "fill-color": color, "fill-opacity": opacity } });
+        map.addLayer({ id: `${sourceId}-line`, type: "line", source: sourceId, ...sourceLayerProp,
+          paint: { "line-color": color, "line-opacity": Math.min(1, opacity + 0.2), "line-width": 1 } });
+      } else if (renderType === "line") {
+        map.addLayer({ id: `${sourceId}-line`, type: "line", source: sourceId, ...sourceLayerProp,
+          paint: { "line-color": color, "line-opacity": opacity, "line-width": style?.weight ?? 2 } });
+      } else {
+        map.addLayer({ id: `${sourceId}-circle`, type: "circle", source: sourceId, ...sourceLayerProp,
+          paint: { "circle-color": color, "circle-opacity": opacity, "circle-radius": style?.radius ?? 6 } });
       }
     },
   };

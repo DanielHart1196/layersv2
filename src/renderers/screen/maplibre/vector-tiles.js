@@ -99,6 +99,18 @@ function installAtlasVectorTileProtocol(maplibregl) {
   protocolInstalled = true;
 }
 
+// Call this at idle time to pre-build the GeoJSONVT index so the first real
+// tile request doesn't block the main thread building it mid-interaction.
+function prewarmTileSource(id) {
+  const entry = protocolRegistry.get(id);
+  if (!entry || entry.tileIndexPromise) {
+    return;
+  }
+
+  const dataPromise = entry.data ? Promise.resolve(entry.data) : loadJson(entry.dataUrl);
+  entry.tileIndexPromise = dataPromise.then((data) => new GeoJSONVT(data, entry.tileOptions));
+}
+
 function registerGeojsonVectorTileSource({
   id,
   dataUrl,
@@ -134,5 +146,6 @@ function createGeojsonVectorSourceSpec(id, maxZoom = DEFAULT_TILE_OPTIONS.maxZoo
 export {
   createGeojsonVectorSourceSpec,
   installAtlasVectorTileProtocol,
+  prewarmTileSource,
   registerGeojsonVectorTileSource,
 };

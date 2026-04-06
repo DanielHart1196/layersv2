@@ -796,8 +796,8 @@ function createLayerModel() {
     }
 
     // Track so we can re-attach to the parent on hydration.
-    if (!staticParentAdditions.has(parentId)) staticParentAdditions.set(parentId, []);
-    staticParentAdditions.get(parentId).push(newRow);
+    if (!staticParentAdditions.has(layerId)) staticParentAdditions.set(layerId, []);
+    staticParentAdditions.get(layerId).push(newRow);
     persistDynamicDefs();
     persistLayerState();
 

@@ -1704,8 +1704,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         }
       }
     }
-  },
-  };
+};
 }
 
 export { createMapInstance, isRealPmtilesUrl };

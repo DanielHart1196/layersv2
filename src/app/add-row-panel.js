@@ -2,7 +2,7 @@ import { getLayerCatalogByGroup, getFullCatalogByGroup } from "../core/layer-cat
 
 // ─── Mount ────────────────────────────────────────────────────────────────────
 
-export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getFieldsForParent }) {
+export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getFieldsForParent, getValuesForParentField }) {
   const panel = createPanelShell();
   document.body.appendChild(panel);
 
@@ -229,10 +229,10 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getF
             <option value="<=">≤</option>
           </select>
         </label>
-        <label class="arp-field">
+        <div class="arp-field">
           <span class="arp-field-label">Value</span>
-          <input class="arp-field-input" id="arpValue" type="text" placeholder="value" />
-        </label>
+          <div id="arpValueWrap"><input class="arp-field-input" id="arpValue" type="text" placeholder="value" /></div>
+        </div>
         <p class="arp-error" hidden></p>
         <div class="arp-actions">
           <button class="arp-btn arp-btn-secondary" id="arpBack">Back</button>
@@ -241,7 +241,9 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getF
       </div>
     `);
 
-    populateFieldPicker(el, state.parentId);
+    populateFieldPicker(el, state.parentId, (field) => {
+      populateValuePicker(el, state.parentId, field);
+    });
 
     el.querySelector("#arpBack").addEventListener("click", () => {
       state.screen = "type-picker";
@@ -326,12 +328,12 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getF
     return (input?.value ?? "").trim();
   }
 
-  function populateFieldPicker(el, parentId) {
+  function populateFieldPicker(el, parentId, onFieldChange) {
     if (!getFieldsForParent) {
-      // No callback — just enable the text input as a plain field
       const input = el.querySelector("#arpField");
       input.placeholder = "property name";
       input.disabled = false;
+      if (onFieldChange) input.addEventListener("change", () => onFieldChange(input.value));
       return;
     }
 
@@ -340,20 +342,49 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getF
       if (!wrap) return;
 
       if (!fields || fields.length === 0) {
-        // Fall back to free text
         const input = el.querySelector("#arpField");
         input.placeholder = "property name";
         input.disabled = false;
+        if (onFieldChange) input.addEventListener("change", () => onFieldChange(input.value));
         return;
       }
 
-      // Replace input with a select
       wrap.innerHTML = "";
       const select = document.createElement("select");
       select.className = "arp-select";
       select.id = "arpField";
       select.innerHTML = `<option value="">Select a field…</option>` +
         fields.map((f) => `<option value="${f}">${f}</option>`).join("");
+      if (onFieldChange) {
+        select.addEventListener("change", () => onFieldChange(select.value));
+      }
+      wrap.append(select);
+    });
+  }
+
+  function populateValuePicker(el, parentId, field) {
+    const wrap = el.querySelector("#arpValueWrap");
+    if (!wrap) return;
+
+    if (!field || !getValuesForParentField) return;
+
+    // Reset to loading state
+    wrap.innerHTML = `<input class="arp-field-input" id="arpValue" type="text" placeholder="Loading values…" disabled />`;
+
+    getValuesForParentField(parentId, field).then((values) => {
+      if (!wrap.isConnected) return;
+
+      if (!values || values.length === 0) {
+        wrap.innerHTML = `<input class="arp-field-input" id="arpValue" type="text" placeholder="value" />`;
+        return;
+      }
+
+      wrap.innerHTML = "";
+      const select = document.createElement("select");
+      select.className = "arp-select";
+      select.id = "arpValue";
+      select.innerHTML = `<option value="">Select a value…</option>` +
+        values.map((v) => `<option value="${v}">${v}</option>`).join("");
       wrap.append(select);
     });
   }

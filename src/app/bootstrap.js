@@ -118,6 +118,16 @@ async function bootstrapApplication() {
       if (!row?.layerRef) return null;
       return loadLayerFields(row.layerRef);
     },
+    async getValuesForParentField(parentId, field) {
+      const row = layerModel.getRowById(parentId);
+      if (!row?.layerRef || !SUPABASE_UUID.test(row.layerRef)) return null;
+      try {
+        const { getLayerFieldValues } = await import("../sources/supabase/layer-loader.js");
+        return await getLayerFieldValues(row.layerRef, field);
+      } catch {
+        return null;
+      }
+    },
   });
 
   window.LayerV2 = {

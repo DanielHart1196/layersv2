@@ -40,6 +40,30 @@ export async function getSupabaseCatalog() {
   }));
 }
 
+// Returns sorted distinct values for a specific property field, sampled from up to 200 features.
+export async function getLayerFieldValues(layerId, field) {
+  const { data, error } = await supabase
+    .from("features")
+    .select("properties")
+    .eq("layer_id", layerId)
+    .limit(200);
+
+  if (error || !data?.length) return null;
+
+  const seen = new Set();
+  for (const row of data) {
+    const val = row.properties?.[field];
+    if (val !== undefined && val !== null && val !== "") seen.add(val);
+  }
+
+  if (!seen.size) return null;
+
+  return [...seen].sort((a, b) => {
+    if (typeof a === "number" && typeof b === "number") return a - b;
+    return String(a).localeCompare(String(b));
+  });
+}
+
 // Returns sorted unique property field names for a layer, sampled from up to 20 features.
 export async function getLayerFields(layerId) {
   const { data, error } = await supabase

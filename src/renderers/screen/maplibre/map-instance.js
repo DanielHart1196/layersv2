@@ -1704,6 +1704,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         }
       }
     }
+  },
 };
 }
 

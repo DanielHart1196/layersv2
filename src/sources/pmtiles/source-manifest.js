@@ -7,7 +7,7 @@ function createPmtilesManifest() {
       url: "/pmtiles/basemap-main.pmtiles",
       layers: ["earth", "water", "landuse", "roads", "boundaries", "buildings", "places"],
       notes: [
-        "self-hosted archive path under atlas-product/public/pmtiles/",
+        "self-hosted archive path under layerv2/public/pmtiles/",
         "replace with your own generated archive before expecting live basemap data",
       ],
       mutable: false,
@@ -19,7 +19,7 @@ function createPmtilesManifest() {
       url: "/pmtiles/terrain-dem.pmtiles",
       layers: ["dem", "hillshade"],
       notes: [
-        "optional terrain archive under atlas-product/public/pmtiles/",
+        "optional terrain archive under layerv2/public/pmtiles/",
       ],
       mutable: false,
     },

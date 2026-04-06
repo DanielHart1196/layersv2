@@ -1,9 +1,6 @@
 import { LOCAL_LAYERS } from "../config/local-layers.js";
 
-// Returns all layers available to reference in a row.
-// Groups entries by their group so the UI can render a grouped select.
-// Later this will also merge in Supabase-hosted layers.
-export function getLayerCatalog() {
+function localEntries() {
   return LOCAL_LAYERS.map((l) => ({
     id: l.id,
     label: l.label,
@@ -15,13 +12,28 @@ export function getLayerCatalog() {
   }));
 }
 
-// Returns catalog entries grouped as { [group]: [entry, ...] }
-export function getLayerCatalogByGroup() {
-  const catalog = getLayerCatalog();
+function groupEntries(entries) {
   const groups = {};
-  for (const entry of catalog) {
+  for (const entry of entries) {
     if (!groups[entry.group]) groups[entry.group] = [];
     groups[entry.group].push(entry);
   }
   return groups;
+}
+
+// Sync — local layers only. Used for the initial render before Supabase responds.
+export function getLayerCatalog() {
+  return localEntries();
+}
+
+export function getLayerCatalogByGroup() {
+  return groupEntries(localEntries());
+}
+
+// Async — merges local + Supabase public/unlisted layers.
+export async function getFullCatalogByGroup() {
+  const { getSupabaseCatalog } = await import("../sources/supabase/layer-loader.js");
+  const [supabaseEntries] = await Promise.allSettled([getSupabaseCatalog()]);
+  const remote = supabaseEntries.status === "fulfilled" ? supabaseEntries.value : [];
+  return groupEntries([...localEntries(), ...remote]);
 }

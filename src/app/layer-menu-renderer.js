@@ -14,8 +14,8 @@ function formatRowValue(row, value) {
   return String(value ?? "");
 }
 
-const SETTINGS_BACKGROUND_STORAGE_KEY = "atlas.layerMenuAppearance.v1";
-const SCREEN_BACKGROUND_STORAGE_KEY = "atlas.screenAppearance.v1";
+const SETTINGS_BACKGROUND_STORAGE_KEY = "layerv2.layerMenuAppearance.v1";
+const SCREEN_BACKGROUND_STORAGE_KEY = "layerv2.screenAppearance.v1";
 const SETTINGS_BACKGROUND_PRESETS = ["#000000", "#FFFFFF", "#d94b4b", "#e58a2b", "#e5c84a", "#5b8c5a", "#4b6ed9", "#8c5bd6"];
 const DEFAULT_SETTINGS_BACKGROUND = {
   color: "#FFFFFF",
@@ -498,12 +498,14 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
   const expandStateKey = definition.layerId ?? definition.id;
   const hasChildren = Array.isArray(definition.rows) && definition.rows.length > 0;
   const hasVisibility = Boolean(definition.layerId);
+  // Always expandable if it has a layerId — even with no children, so "+ Add row" is reachable.
+  const isExpandable = hasChildren || Boolean(definition.layerId);
   const isReorderable = Boolean(parentId && definition.layerId && definition.id !== "ocean" && definition.id !== "earth");
   const { header, label, chevron, grabber } = createRowHeader(definition.label, null, "layer-menu-row-header", {
     grabber: isReorderable,
-    labelButton: hasVisibility || !hasChildren,
-    chevron: hasChildren,
-    chevronButton: hasChildren,
+    labelButton: hasVisibility || !isExpandable,
+    chevron: isExpandable,
+    chevronButton: isExpandable,
     chevronExpanded: Boolean(state?.expanded),
   });
   row.append(header);
@@ -515,7 +517,7 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
     }
   }
 
-  if (hasChildren) {
+  if (isExpandable) {
     row.classList.add("is-expandable");
     row.setAttribute("aria-expanded", String(Boolean(state?.expanded)));
     row.dataset.expandKey = expandStateKey;
@@ -527,7 +529,7 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
       event.stopPropagation();
       onToggleVisibility(definition.layerId);
     });
-  } else if (!hasChildren) {
+  } else if (!isExpandable) {
     label.addEventListener("click", (event) => {
       event.stopPropagation();
       onToggleExpanded(definition.id);
@@ -543,7 +545,7 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
     setupPointerReorderGrabber(grabber, parentId, definition.id, reorderApi);
   }
 
-  if (hasChildren) {
+  if (isExpandable) {
     header.addEventListener("click", (event) => {
       if (
         event.target?.closest?.(".layer-menu-row-grabber")
@@ -1128,7 +1130,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
     layerRow.style.setProperty("--row-depth", String(depth));
     fragment.append(layerRow);
 
-    if (row.type === "layer" && state[rowStateKey]?.expanded) {
+    if (row.type === "layer" && row.layerId && state[rowStateKey]?.expanded) {
       const nextInheritedHidden = inheritedHidden || (state[rowStateKey]?.visible === false);
       if (childRows.length) {
         fragment.append(buildRows(childRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden, onAddRow));

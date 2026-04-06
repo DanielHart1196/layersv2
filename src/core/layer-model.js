@@ -1,10 +1,10 @@
 import { LOCAL_LAYERS } from "../config/local-layers.js";
 
 function createLayerModel() {
-  const STORAGE_KEY = "atlas.layerState.v1";
-  const DEFS_STORAGE_KEY = "atlas.dynamicDefs.v1";
+  const STORAGE_KEY = "layerv2.layerState.v1";
+  const DEFS_STORAGE_KEY = "layerv2.dynamicDefs.v1";
   const ROOT_PARENT_ID = "__root__";
-  const SHARED_COLOR_STORAGE_KEY = "atlas.colors.customColors";
+  const SHARED_COLOR_STORAGE_KEY = "layerv2.colors.customColors";
   const SHARED_COLOR_PRESETS = ["#000000", "#FFFFFF", "#d94b4b", "#e58a2b", "#e5c84a", "#5b8c5a", "#4b6ed9", "#8c5bd6"];
 
   function createFillRow({
@@ -476,6 +476,7 @@ function createLayerModel() {
   }
 
   const layerState = hydrateLayerState();
+  hydrateDynamicDefs(); // must run after hydrateLayerState so state exists for dynamic rows
   layerState[ROOT_PARENT_ID].rowOrder = normalizeChildRowOrder(ROOT_PARENT_ID, layerState[ROOT_PARENT_ID]?.rowOrder);
   layerState.earth.rowOrder = normalizeChildRowOrder("earth", layerState.earth?.rowOrder);
   layerState.transport.rowOrder = normalizeChildRowOrder("transport", layerState.transport?.rowOrder);
@@ -781,6 +782,7 @@ function createLayerModel() {
     }
     parentDef.rows.push(newRow);
     rowDefinitionsById.set(newRow.id, newRow);
+    dynamicIds.add(newRow.id);
 
     if (newRow.initialState) {
       if (!layerState[layerId]) {
@@ -792,6 +794,12 @@ function createLayerModel() {
         }
       });
     }
+
+    // Track so we can re-attach to the parent on hydration.
+    if (!staticParentAdditions.has(parentId)) staticParentAdditions.set(parentId, []);
+    staticParentAdditions.get(parentId).push(newRow);
+    persistDynamicDefs();
+    persistLayerState();
 
     return newRow;
   }
@@ -816,10 +824,15 @@ function createLayerModel() {
       if (!parentDef) return null;
       if (!Array.isArray(parentDef.rows)) parentDef.rows = [];
       parentDef.rows.push(newRow);
+      if (!staticParentAdditions.has(parentId)) staticParentAdditions.set(parentId, []);
+      staticParentAdditions.get(parentId).push(newRow);
     }
 
     rowDefinitionsById.set(newRow.id, newRow);
+    dynamicIds.add(newRow.id);
     layerState[uid] = { expanded: false, visible: true };
+    persistDynamicDefs();
+    persistLayerState();
 
     return newRow;
   }
@@ -842,6 +855,24 @@ function createLayerModel() {
     return layerState[parentId].rowOrder.slice();
   }
 
+  function getRowById(rowId) {
+    return rowDefinitionsById.get(rowId) ?? layerDefinitions[rowId] ?? null;
+  }
+
+  // Returns all dynamically added rows that point to a Supabase layer UUID.
+  // Used on boot to re-attach layers to the map.
+  function getSupabaseLayers() {
+    const supabaseUuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const results = [];
+    dynamicIds.forEach((id) => {
+      const row = rowDefinitionsById.get(id);
+      if (row && row.layerRef && supabaseUuidPattern.test(row.layerRef)) {
+        results.push({ rowId: id, layerId: row.layerRef, name: row.label });
+      }
+    });
+    return results;
+  }
+
   return {
     addDataRow,
     addRowToLayer,
@@ -849,8 +880,10 @@ function createLayerModel() {
     getDefinitions,
     getRootRows,
     getRootParentId,
+    getRowById,
     getRowValue,
     getState,
+    getSupabaseLayers,
     isExpanded,
     normalizeChildRowOrder,
     reorderChildRow,

@@ -1,8 +1,8 @@
-import { getLayerCatalogByGroup } from "../core/layer-catalog.js";
+import { getLayerCatalogByGroup, getFullCatalogByGroup } from "../core/layer-catalog.js";
 
 // ─── Mount ────────────────────────────────────────────────────────────────────
 
-export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested }) {
+export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getFieldsForParent }) {
   const panel = createPanelShell();
   document.body.appendChild(panel);
 
@@ -99,15 +99,7 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested }) {
   // ── Data form ──────────────────────────────────────────────────────────────
 
   function renderDataForm() {
-    const catalogByGroup = getLayerCatalogByGroup();
     const isSubRow = state.depth > 0;
-
-    const optionGroups = Object.entries(catalogByGroup)
-      .map(([group, entries]) => `
-        <optgroup label="${group}">
-          ${entries.map((e) => `<option value="${e.id}">${e.label}</option>`).join("")}
-        </optgroup>
-      `).join("");
 
     const el = html(`
       <div class="arp-form">
@@ -132,7 +124,7 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested }) {
         <div class="arp-source-section" id="arpCatalogSection">
           <select class="arp-select" id="arpLayerSelect">
             <option value="">Select a layer…</option>
-            ${optionGroups}
+            ${buildOptionGroups(getLayerCatalogByGroup())}
           </select>
         </div>
         <div class="arp-source-section" id="arpUploadSection" hidden>
@@ -192,7 +184,25 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested }) {
       }
     });
 
+    // Async upgrade: swap in full catalog (local + Supabase) once it arrives.
+    getFullCatalogByGroup().then((fullCatalog) => {
+      const select = el.querySelector("#arpLayerSelect");
+      if (!select) return; // panel already closed
+      const currentValue = select.value;
+      select.innerHTML = `<option value="">Select a layer…</option>` + buildOptionGroups(fullCatalog);
+      if (currentValue) select.value = currentValue; // restore selection if user already picked
+    });
+
     return el;
+  }
+
+  function buildOptionGroups(catalogByGroup) {
+    return Object.entries(catalogByGroup)
+      .map(([group, entries]) => `
+        <optgroup label="${group}">
+          ${entries.map((e) => `<option value="${e.id}">${e.label}</option>`).join("")}
+        </optgroup>
+      `).join("");
   }
 
   // ── Filter form ────────────────────────────────────────────────────────────
@@ -204,10 +214,10 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested }) {
           <span class="arp-field-label">Name</span>
           <input class="arp-field-input arp-name-input" type="text" placeholder="Filter name" />
         </label>
-        <label class="arp-field">
+        <div class="arp-field">
           <span class="arp-field-label">Field</span>
-          <input class="arp-field-input" id="arpField" type="text" placeholder="property name" />
-        </label>
+          <div id="arpFieldWrap"><input class="arp-field-input" id="arpField" type="text" placeholder="Loading fields…" disabled /></div>
+        </div>
         <label class="arp-field">
           <span class="arp-field-label">Operator</span>
           <select class="arp-select" id="arpOp">
@@ -231,6 +241,8 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested }) {
       </div>
     `);
 
+    populateFieldPicker(el, state.parentId);
+
     el.querySelector("#arpBack").addEventListener("click", () => {
       state.screen = "type-picker";
       render();
@@ -239,7 +251,7 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested }) {
     el.querySelector("#arpSubmit").addEventListener("click", () => {
       const errorEl = el.querySelector(".arp-error");
       const name    = el.querySelector(".arp-name-input").value.trim();
-      const field   = el.querySelector("#arpField").value.trim();
+      const field   = getFieldValue(el);
       const op      = el.querySelector("#arpOp").value;
       const value   = el.querySelector("#arpValue").value.trim();
       if (!field) {
@@ -263,10 +275,10 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested }) {
           <span class="arp-field-label">Name</span>
           <input class="arp-field-input arp-name-input" type="text" placeholder="Sort name" />
         </label>
-        <label class="arp-field">
+        <div class="arp-field">
           <span class="arp-field-label">Field</span>
-          <input class="arp-field-input" id="arpField" type="text" placeholder="property name" />
-        </label>
+          <div id="arpFieldWrap"><input class="arp-field-input" id="arpField" type="text" placeholder="Loading fields…" disabled /></div>
+        </div>
         <label class="arp-field">
           <span class="arp-field-label">Direction</span>
           <select class="arp-select" id="arpDir">
@@ -282,6 +294,8 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested }) {
       </div>
     `);
 
+    populateFieldPicker(el, state.parentId);
+
     el.querySelector("#arpBack").addEventListener("click", () => {
       state.screen = "type-picker";
       render();
@@ -290,7 +304,7 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested }) {
     el.querySelector("#arpSubmit").addEventListener("click", () => {
       const errorEl = el.querySelector(".arp-error");
       const name    = el.querySelector(".arp-name-input").value.trim();
-      const field   = el.querySelector("#arpField").value.trim();
+      const field   = getFieldValue(el);
       const dir     = el.querySelector("#arpDir").value;
       if (!field) {
         errorEl.textContent = "Field is required.";
@@ -302,6 +316,46 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested }) {
     });
 
     return el;
+  }
+
+  // ── Field picker helpers ───────────────────────────────────────────────────
+
+  function getFieldValue(el) {
+    const sel = el.querySelector("#arpField[tagName=SELECT], select#arpField");
+    const input = el.querySelector("#arpField");
+    return (input?.value ?? "").trim();
+  }
+
+  function populateFieldPicker(el, parentId) {
+    if (!getFieldsForParent) {
+      // No callback — just enable the text input as a plain field
+      const input = el.querySelector("#arpField");
+      input.placeholder = "property name";
+      input.disabled = false;
+      return;
+    }
+
+    getFieldsForParent(parentId).then((fields) => {
+      const wrap = el.querySelector("#arpFieldWrap");
+      if (!wrap) return;
+
+      if (!fields || fields.length === 0) {
+        // Fall back to free text
+        const input = el.querySelector("#arpField");
+        input.placeholder = "property name";
+        input.disabled = false;
+        return;
+      }
+
+      // Replace input with a select
+      wrap.innerHTML = "";
+      const select = document.createElement("select");
+      select.className = "arp-select";
+      select.id = "arpField";
+      select.innerHTML = `<option value="">Select a field…</option>` +
+        fields.map((f) => `<option value="${f}">${f}</option>`).join("");
+      wrap.append(select);
+    });
   }
 
   panel.querySelector(".arp-close").addEventListener("click", close);

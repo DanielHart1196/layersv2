@@ -36,6 +36,10 @@ async function bootstrapApplication() {
 
   screenRuntime.mount(document.getElementById("mapStage"));
 
+  // Re-attach any Supabase layers that were persisted from a previous session.
+  // Fire-and-forget — failures are logged but don't block the rest of bootstrap.
+  reattachPersistedSupabaseLayers(layerModel, screenRuntime);
+
   enableRefreshControls({
     wrapper: document.getElementById("mobileRefresh"),
     button: document.getElementById("mobileRefreshButton"),
@@ -66,6 +70,12 @@ async function bootstrapApplication() {
       }
 
       screenRuntime.setLayerStyleValue(update.layerId, update.key, update.value);
+
+      // Persist style changes as new defaults for Supabase layers.
+      const rowDef = layerModel.getRowById(update.layerId);
+      if (rowDef?.layerRef && SUPABASE_UUID.test(rowDef.layerRef)) {
+        debouncedUpdateDefaultStyle(rowDef.layerRef, update.key, update.value);
+      }
     },
   });
   enableLayerMenuControls({
@@ -103,9 +113,14 @@ async function bootstrapApplication() {
     onUploadRequested({ parentId }) {
       uploadPanel.open({ parentId });
     },
+    async getFieldsForParent(parentId) {
+      const row = layerModel.getRowById(parentId);
+      if (!row?.layerRef) return null;
+      return loadLayerFields(row.layerRef);
+    },
   });
 
-  window.AtlasProduct = {
+  window.LayerV2 = {
     layers: layerModel.getDefinitions(),
     layerState: layerModel.getState(),
     styles: styleModel.getStyles(),
@@ -128,6 +143,56 @@ async function bootstrapApplication() {
     editableStore,
     screenRuntime,
   };
+}
+
+const SUPABASE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Accumulate style changes per layer and flush after 1s of inactivity.
+const pendingStyleUpdates = new Map(); // layerRef → { ...style keys }
+const styleUpdateTimers = new Map();   // layerRef → timer id
+
+function debouncedUpdateDefaultStyle(layerRef, key, value) {
+  if (!pendingStyleUpdates.has(layerRef)) pendingStyleUpdates.set(layerRef, {});
+  pendingStyleUpdates.get(layerRef)[key] = value;
+
+  clearTimeout(styleUpdateTimers.get(layerRef));
+  styleUpdateTimers.set(layerRef, setTimeout(async () => {
+    const patch = pendingStyleUpdates.get(layerRef);
+    pendingStyleUpdates.delete(layerRef);
+    styleUpdateTimers.delete(layerRef);
+    try {
+      const { updateLayerDefaultStyle } = await import("../sources/supabase/layer-loader.js");
+      await updateLayerDefaultStyle(layerRef, patch);
+    } catch (err) {
+      console.warn("Failed to save layer style defaults:", err.message);
+    }
+  }, 1000));
+}
+
+async function loadLayerFields(layerRef) {
+  if (!SUPABASE_UUID.test(layerRef)) return null;
+  try {
+    const { getLayerFields } = await import("../sources/supabase/layer-loader.js");
+    return await getLayerFields(layerRef);
+  } catch {
+    return null;
+  }
+}
+
+async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
+  const supabaseLayers = layerModel.getSupabaseLayers();
+  if (!supabaseLayers.length) return;
+
+  for (const { layerId } of supabaseLayers) {
+    try {
+      const { layer, geojson } = await loadLayerFromSupabase(layerId);
+      if (geojson || layer.tiles_url) {
+        screenRuntime.loadDynamicLayer({ layerId, geojson, tilesUrl: layer.tiles_url ?? null, style: layer.default_style });
+      }
+    } catch (err) {
+      console.warn(`Failed to reattach layer ${layerId}:`, err.message);
+    }
+  }
 }
 
 export { bootstrapApplication };

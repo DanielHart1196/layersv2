@@ -1,5 +1,65 @@
 import { supabase } from "../../lib/supabase.js";
 
+// Merges a partial style patch into the layer's default_style in Supabase.
+// key/value pairs map directly to default_style fields (color, opacity, radius, weight).
+export async function updateLayerDefaultStyle(layerId, patch) {
+  // Read current default_style first, then merge.
+  const { data: layer, error: readError } = await supabase
+    .from("layers")
+    .select("default_style")
+    .eq("id", layerId)
+    .single();
+
+  if (readError) throw new Error(readError.message);
+
+  const merged = { ...(layer.default_style ?? {}), ...patch };
+
+  const { error } = await supabase
+    .from("layers")
+    .update({ default_style: merged })
+    .eq("id", layerId);
+
+  if (error) throw new Error(error.message);
+}
+
+// Returns all public/unlisted layers from Supabase as catalog entries.
+export async function getSupabaseCatalog() {
+  const { data, error } = await supabase
+    .from("layers")
+    .select("id, name, geometry_type")
+    .in("view_access", ["public", "unlisted"])
+    .order("name");
+
+  if (error || !data?.length) return [];
+
+  return data.map((l) => ({
+    id: l.id,
+    label: l.name,
+    group: "My layers",
+    geometryType: l.geometry_type ?? "mixed",
+  }));
+}
+
+// Returns sorted unique property field names for a layer, sampled from up to 20 features.
+export async function getLayerFields(layerId) {
+  const { data, error } = await supabase
+    .from("features")
+    .select("properties")
+    .eq("layer_id", layerId)
+    .limit(20);
+
+  if (error || !data?.length) return null;
+
+  const keys = new Set();
+  for (const row of data) {
+    if (row.properties && typeof row.properties === "object") {
+      Object.keys(row.properties).forEach((k) => keys.add(k));
+    }
+  }
+
+  return [...keys].filter((k) => !k.startsWith("_")).sort();
+}
+
 const MAX_GEOJSON_FEATURES = 10_000;
 
 export async function loadLayerFromSupabase(layerId) {

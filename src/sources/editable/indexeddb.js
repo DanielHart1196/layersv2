@@ -1,4 +1,4 @@
-const DATABASE_NAME = "atlas-product-editable";
+const DATABASE_NAME = "layerv2-editable";
 const DATABASE_VERSION = 1;
 const STORE_NAME = "collections";
 const PRIMARY_KEY = "user-overlays";

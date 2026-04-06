@@ -10,12 +10,6 @@ import {
 } from "./vector-tiles.js";
 
 let protocolInstalled = false;
-const COUNTRY_SOURCE_ID = "atlas-country-vector";
-const COUNTRY_TILE_SOURCE_ID = "atlas-country-vector-tiles";
-const COUNTRY_TILE_SOURCE_LAYER = "countries";
-const COUNTRY_FILL_LAYER_ID = "atlas-country-vector-fill";
-const COUNTRY_LINE_LAYER_ID = "atlas-country-vector-line";
-const COUNTRY_VECTOR_URL = "/data/external-countries.geojson";
 
 // Track which layers have been loaded to prevent duplicate loading
 const loadedLayers = new Set();
@@ -60,6 +54,7 @@ const AFRICA_FILL_PMTILES_ID = "africa-fill";
 const COUNTRIES_LAND_SOURCE_ID = "atlas-countries-land";
 const COUNTRIES_LAND_FILL_LAYER_ID = "atlas-countries-land-fill";
 const COUNTRIES_LAND_LINE_LAYER_ID = "atlas-countries-land-line";
+const COUNTRIES_LAND_INITIAL_URL = "/data/world-atlas/land-110m.geojson";
 const COUNTRIES_LAND_VECTOR_URL = "/data/world-atlas/countries-dissolved-land.geojson";
 const VICTORIA_TILE_IDS = ["a", "b", "c", "d"];
 const VICTORIA_FILL_SOURCE_ID = "atlas-victoria-fill";
@@ -123,7 +118,6 @@ const LINE_LAYER_IDS = {
   australia: AUSTRALIA_OUTLINE_LINE_LAYER_IDS[0],
   countriesLand: COUNTRIES_LAND_LINE_LAYER_ID,
   victoria: VICTORIA_OUTLINE_LINE_LAYER_IDS[0],
-  countries: COUNTRY_LINE_LAYER_ID,
   ...EMPIRE_LINE_LAYER_IDS,
   graticules: GRATICULES_LINE_LAYER_ID,
 };
@@ -256,7 +250,6 @@ function getLogicalLayerBundles() {
   return {
     __root__: {
       transport: [TRANSPORT_RAIL_LINE_LAYER_ID],
-      countries: [COUNTRY_FILL_LAYER_ID, COUNTRY_LINE_LAYER_ID],
       olympics: [OLYMPICS_GOLD_LAYER_ID, OLYMPICS_SILVER_LAYER_ID, OLYMPICS_BRONZE_LAYER_ID],
       empires: [
         ROMAN_FILL_LAYER_ID,
@@ -305,8 +298,6 @@ function applyLogicalLayerOrder(map, parentId, orderedLayerIds) {
 
   const anchorBeforeId = (parentId === "earth" || parentId === "transport")
     ? getFirstExistingLayerId(map, [
-      COUNTRY_FILL_LAYER_ID,
-      COUNTRY_LINE_LAYER_ID,
       ROMAN_FILL_LAYER_ID,
       ROMAN_LINE_LAYER_ID,
       MONGOL_FILL_LAYER_ID,
@@ -363,7 +354,7 @@ function buildStyle(manifest, layerState) {
     sources: {
       [COUNTRIES_LAND_SOURCE_ID]: {
         type: "geojson",
-        data: COUNTRIES_LAND_VECTOR_URL,
+        data: COUNTRIES_LAND_INITIAL_URL,
       },
       [GRATICULES_SOURCE_ID]: createGeojsonVectorSourceSpec(GRATICULES_TILE_SOURCE_ID),
     },
@@ -572,11 +563,6 @@ function ensureProtocol(manifest = []) {
   maplibregl.addProtocol("pmtiles", protocol.tile);
   installAtlasVectorTileProtocol(maplibregl);
   registerGeojsonVectorTileSource({
-    id: COUNTRY_TILE_SOURCE_ID,
-    dataUrl: COUNTRY_VECTOR_URL,
-    sourceLayer: COUNTRY_TILE_SOURCE_LAYER,
-  });
-  registerGeojsonVectorTileSource({
     id: GRATICULES_TILE_SOURCE_ID,
     dataUrl: GRATICULES_VECTOR_URL,
     sourceLayer: GRATICULES_TILE_SOURCE_LAYER,
@@ -656,13 +642,6 @@ const STANDARD_LAYER_REGISTRY = [
     source: { kind: "atlas-vector", id: GRATICULES_SOURCE_ID, atlasVectorTileId: GRATICULES_TILE_SOURCE_ID },
     fill: null,
     line: { id: GRATICULES_LINE_LAYER_ID, sourceLayer: GRATICULES_TILE_SOURCE_LAYER, defaultColor: DEFAULT_GRATICULE_LINE_COLOR, defaultWeight: 1 },
-  },
-  {
-    layerId: "countries",
-    deferred: false,
-    source: { kind: "atlas-vector", id: COUNTRY_SOURCE_ID, atlasVectorTileId: COUNTRY_TILE_SOURCE_ID },
-    fill: { id: COUNTRY_FILL_LAYER_ID, sourceLayer: COUNTRY_TILE_SOURCE_LAYER, defaultColor: DEFAULT_LAND_FILL_COLOR },
-    line: { id: COUNTRY_LINE_LAYER_ID, sourceLayer: COUNTRY_TILE_SOURCE_LAYER, defaultColor: "#e1efe4", defaultWeight: 1 },
   },
   {
     layerId: "transportRail",
@@ -1166,6 +1145,11 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     }
   });
   map.on("load", () => {
+    // Upgrade land immediately — swap from the tiny 110m initial file to the
+    // full 50m dissolved land in the background. Non-blocking: map stays
+    // interactive while the higher-res data loads.
+    map.getSource(COUNTRIES_LAND_SOURCE_ID)?.setData(COUNTRIES_LAND_VECTOR_URL);
+
     // Phase 1: All visible-by-default layers — load immediately in parallel
     // Note: water, countriesLand, and graticules are already in the initial style
     // and start loading before this event fires. attachStandardLayer's source
@@ -1184,10 +1168,9 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
           attachOlympicsLayers(map, layerState),
         ]);
 
-        applyLogicalLayerOrder(map, "__root__", getLayerStyleValue(layerState, "__root__", "rowOrder", ["earth", "transport", "countries", "olympics", "empires"]));
+        applyLogicalLayerOrder(map, "__root__", getLayerStyleValue(layerState, "__root__", "rowOrder", ["earth", "transport", "olympics", "empires"]));
         applyLogicalLayerOrder(map, "earth", getLayerStyleValue(layerState, "earth", "rowOrder", ["ocean", "australia", "countries-land", "graticules"]));
         applyLogicalLayerOrder(map, "transport", getLayerStyleValue(layerState, "transport", "rowOrder", ["transport-rail"]));
-        applyLogicalLayerOrder(map, "countries", getLayerStyleValue(layerState, "countries", "rowOrder", ["countries-fill", "countries-line"]));
         applyLogicalLayerOrder(map, "olympics", getLayerStyleValue(layerState, "olympics", "rowOrder", ["olympics-gold", "olympics-silver", "olympics-bronze"]));
         applyLogicalLayerOrder(map, "empires", getLayerStyleValue(layerState, "empires", "rowOrder", ["roman", "mongol", "british"]));
       } catch (error) {

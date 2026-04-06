@@ -48,3 +48,4 @@ public/pmtiles/*.pmtiles
 public/data/world-atlas/australia-land-*.geojson
 public/data/world-atlas/victoria-land*.geojson
 public/data/external-countries.geojson
+public/data/world-atlas/land-110m.geojson

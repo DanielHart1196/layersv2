@@ -291,30 +291,6 @@ function createLayerModel() {
         },
       ],
     },
-    countries: {
-      id: "countries",
-      type: "layer",
-      label: "Countries",
-      layerId: "countries",
-      rows: [
-        createFillRow({
-          id: "countries-fill",
-          layerId: "countries",
-          storageKey: SHARED_COLOR_STORAGE_KEY,
-          presets: SHARED_COLOR_PRESETS,
-          defaultColor: "#6EAA6E",
-          defaultOpacity: 0,
-        }),
-        createLineRow({
-          id: "countries-line",
-          layerId: "countries",
-          storageKey: SHARED_COLOR_STORAGE_KEY,
-          presets: SHARED_COLOR_PRESETS,
-          defaultColor: "#e1efe4",
-          defaultOpacity: 0,
-        }),
-      ],
-    },
     olympics: {
       id: "olympics",
       type: "layer",
@@ -442,7 +418,7 @@ function createLayerModel() {
     },
   };
 
-  const ROOT_ROW_IDS = ["earth", "transport", "countries", "olympics", "empires"];
+  const ROOT_ROW_IDS = ["earth", "transport", "olympics", "empires"];
   const rowDefinitionsById = new Map();
 
   function indexRowDefinitions(rows = []) {
@@ -600,25 +576,6 @@ function createLayerModel() {
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== "object") {
         return baseState;
-      }
-
-      if (parsed.land && !parsed.countries) {
-        parsed.countries = parsed.land;
-      }
-
-      if (parsed.countries && !parsed.land) {
-        parsed.land = {
-          fillColor: parsed.countries.fillColor,
-          fillOpacity: parsed.countries.fillOpacity,
-          visible: true,
-        };
-        parsed.outline = {
-          visible: true,
-        };
-        parsed.countries = {
-          ...parsed.countries,
-          fillOpacity: 0,
-        };
       }
 
       Object.entries(baseState).forEach(([layerId, defaults]) => {

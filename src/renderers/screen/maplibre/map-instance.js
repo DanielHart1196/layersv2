@@ -1287,19 +1287,39 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       setLayerStyleValue(layerId, key, value) {
         if (!layerState[layerId] || typeof layerState[layerId] !== "object") {
           layerState[layerId] = {};
-      map.remove();
-    },
-    getMap() {
-      return map;
-          return;
         }
+        
+        layerState[layerId][key] = value;
 
-        if (layerId === "australia" && AUSTRALIA_FILL_LAYER_IDS.some((fillLayerId) => map.getLayer(fillLayerId))) {
-          AUSTRALIA_FILL_LAYER_IDS.forEach((fillLayerId) => {
-            if (map.getLayer(fillLayerId)) {
-              map.setPaintProperty(fillLayerId, "fill-opacity", Number(value) / 100);
+        if (key === "fillOpacity") {
+          if (layerId === "australia" && AUSTRALIA_FILL_LAYER_IDS.some((fillLayerId) => map.getLayer(fillLayerId))) {
+            AUSTRALIA_FILL_LAYER_IDS.forEach((fillLayerId) => {
+              if (map.getLayer(fillLayerId)) {
+                map.setPaintProperty(fillLayerId, "fill-opacity", Number(value) / 100);
+              }
+            });
+          } else if (layerId === "africa" && map.getLayer(AFRICA_FILL_LAYER_ID)) {
+            map.setPaintProperty(AFRICA_FILL_LAYER_ID, "fill-opacity", Number(value) / 100);
+          } else if (layerId === "countriesLand" && map.getLayer(COUNTRIES_LAND_FILL_LAYER_ID)) {
+            map.setPaintProperty(COUNTRIES_LAND_FILL_LAYER_ID, "fill-opacity", Number(value) / 100);
+          } else if (layerId === "victoria" && map.getLayer(VICTORIA_FILL_LAYER_ID)) {
+            map.setPaintProperty(VICTORIA_FILL_LAYER_ID, "fill-opacity", Number(value) / 100);
+          } else if (layerId === "countries" && map.getLayer(COUNTRY_FILL_LAYER_ID)) {
+            map.setPaintProperty(COUNTRY_FILL_LAYER_ID, "fill-opacity", Number(value) / 100);
+          } else if (layerId === "ocean" && map.getLayer("atlas-water")) {
+            map.setPaintProperty(
+              "atlas-water",
+              "background-color",
+              buildWaterBackgroundColor(
+                getLayerStyleValue(layerState, "ocean", "fillColor", DEFAULT_OCEAN_FILL_COLOR),
+                value,
+              ),
+            );
+          } else {
+            const fillLayerId = EMPIRE_FILL_LAYER_IDS[layerId];
+            if (!fillLayerId || !map.getLayer(fillLayerId)) {
+              return;
             }
-          });
           return;
         }
 

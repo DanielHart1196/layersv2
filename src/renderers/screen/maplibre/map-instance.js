@@ -1271,42 +1271,57 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         console.error("Failed to attach all layers.", error);
       }
     })();
-
-    return {
-      destroy() {
-        clearScaleHideTimeout();
-        scaleOverlay.remove();
-        map.remove();
-      },
-      getMap() {
-        return map;
-      },
-      reorderLayerGroup(parentId, orderedLayerIds) {
-        applyLogicalLayerOrder(map, parentId, orderedLayerIds);
-      },
-      setLayerStyleValue(layerId, key, value) {
-        if (!layerState[layerId] || typeof layerState[layerId] !== "object") {
-          layerState[layerId] = {};
-        }
+  });
+  return {
+    destroy() {
+      clearScaleHideTimeout();
+      scaleOverlay.remove();
+      map.remove();
+    },
+    getMap() {
+      return map;
+    },
+    reorderLayerGroup(parentId, orderedLayerIds) {
+      applyLogicalLayerOrder(map, parentId, orderedLayerIds);
+    },
+    setLayerStyleValue(layerId, key, value) {
+      if (!layerState[layerId] || typeof layerState[layerId] !== "object") {
+        layerState[layerId] = {};
+      }
         
-        layerState[layerId][key] = value;
+      layerState[layerId][key] = value;
 
-        if (key === "fillOpacity") {
-          if (layerId === "australia" && AUSTRALIA_FILL_LAYER_IDS.some((fillLayerId) => map.getLayer(fillLayerId))) {
-            AUSTRALIA_FILL_LAYER_IDS.forEach((fillLayerId) => {
-              if (map.getLayer(fillLayerId)) {
-                map.setPaintProperty(fillLayerId, "fill-opacity", Number(value) / 100);
-              }
-            });
-          } else if (layerId === "africa" && map.getLayer(AFRICA_FILL_LAYER_ID)) {
+      if (key === "fillOpacity") {
+        if (layerId === "australia" && AUSTRALIA_FILL_LAYER_IDS.some((fillLayerId) => map.getLayer(fillLayerId))) {
+          AUSTRALIA_FILL_LAYER_IDS.forEach((fillLayerId) => {
+            if (map.getLayer(fillLayerId)) {
+              map.setPaintProperty(fillLayerId, "fill-opacity", Number(value) / 100);
+            }
+          });
+          return;
+        }
+
+          if (layerId === "africa" && map.getLayer(AFRICA_FILL_LAYER_ID)) {
             map.setPaintProperty(AFRICA_FILL_LAYER_ID, "fill-opacity", Number(value) / 100);
-          } else if (layerId === "countriesLand" && map.getLayer(COUNTRIES_LAND_FILL_LAYER_ID)) {
+            return;
+          }
+
+          if (layerId === "countriesLand" && map.getLayer(COUNTRIES_LAND_FILL_LAYER_ID)) {
             map.setPaintProperty(COUNTRIES_LAND_FILL_LAYER_ID, "fill-opacity", Number(value) / 100);
-          } else if (layerId === "victoria" && map.getLayer(VICTORIA_FILL_LAYER_ID)) {
+            return;
+          }
+
+          if (layerId === "victoria" && map.getLayer(VICTORIA_FILL_LAYER_ID)) {
             map.setPaintProperty(VICTORIA_FILL_LAYER_ID, "fill-opacity", Number(value) / 100);
-          } else if (layerId === "countries" && map.getLayer(COUNTRY_FILL_LAYER_ID)) {
+            return;
+          }
+
+          if (layerId === "countries" && map.getLayer(COUNTRY_FILL_LAYER_ID)) {
             map.setPaintProperty(COUNTRY_FILL_LAYER_ID, "fill-opacity", Number(value) / 100);
-          } else if (layerId === "ocean" && map.getLayer("atlas-water")) {
+            return;
+          }
+
+          if (layerId === "ocean" && map.getLayer("atlas-water")) {
             map.setPaintProperty(
               "atlas-water",
               "background-color",
@@ -1315,54 +1330,17 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
                 value,
               ),
             );
-          } else {
-            const fillLayerId = EMPIRE_FILL_LAYER_IDS[layerId];
-            if (!fillLayerId || !map.getLayer(fillLayerId)) {
-              return;
-            }
+            return;
+          }
+
+          const fillLayerId = EMPIRE_FILL_LAYER_IDS[layerId];
+          if (!fillLayerId || !map.getLayer(fillLayerId)) {
+            return;
+          }
+
+          map.setPaintProperty(fillLayerId, "fill-opacity", Number(value) / 100);
           return;
         }
-
-        if (layerId === "africa" && map.getLayer(AFRICA_FILL_LAYER_ID)) {
-          map.setPaintProperty(AFRICA_FILL_LAYER_ID, "fill-opacity", Number(value) / 100);
-          return;
-        }
-
-        if (layerId === "countriesLand" && map.getLayer(COUNTRIES_LAND_FILL_LAYER_ID)) {
-          map.setPaintProperty(COUNTRIES_LAND_FILL_LAYER_ID, "fill-opacity", Number(value) / 100);
-          return;
-        }
-
-        if (layerId === "victoria" && map.getLayer(VICTORIA_FILL_LAYER_ID)) {
-          map.setPaintProperty(VICTORIA_FILL_LAYER_ID, "fill-opacity", Number(value) / 100);
-          return;
-        }
-
-        if (layerId === "countries" && map.getLayer(COUNTRY_FILL_LAYER_ID)) {
-          map.setPaintProperty(COUNTRY_FILL_LAYER_ID, "fill-opacity", Number(value) / 100);
-          return;
-        }
-
-        if (layerId === "ocean" && map.getLayer("atlas-water")) {
-          map.setPaintProperty(
-            "atlas-water",
-            "background-color",
-            buildWaterBackgroundColor(
-              getLayerStyleValue(layerState, "ocean", "fillColor", DEFAULT_OCEAN_FILL_COLOR),
-              value,
-            ),
-          );
-          return;
-        }
-
-        const fillLayerId = EMPIRE_FILL_LAYER_IDS[layerId];
-        if (!fillLayerId || !map.getLayer(fillLayerId)) {
-          return;
-        }
-
-        map.setPaintProperty(fillLayerId, "fill-opacity", Number(value) / 100);
-        return;
-      }
 
       if (key === "fillColor") {
         if (layerId === "land" && map.getLayer(OSM_LAND_FILL_LAYER_ID)) {
@@ -1703,9 +1681,8 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
           olympicsSource.setData(getOlympicsVectorUrl(layerState));
         }
       }
-    }
-  },
-};
+    },
+  };
 }
 
 export { createMapInstance, isRealPmtilesUrl };

@@ -79,18 +79,6 @@ const EMPIRE_LINE_LAYER_IDS = {
   mongol: MONGOL_LINE_LAYER_ID,
   british: BRITISH_LINE_LAYER_ID,
 };
-const PARENT_LAYER_IDS = {
-  ocean: "earth",
-  australia: "earth",
-  victoria: "earth",
-  olympicsGold: "olympics",
-  olympicsSilver: "olympics",
-  olympicsBronze: "olympics",
-  roman: "empires",
-  mongol: "empires",
-  british: "empires",
-  ...Object.fromEntries(LOCAL_LAYERS.map((l) => [l.id, l.group])),
-};
 const LINE_LAYER_IDS = {
   australia: AUSTRALIA_OUTLINE_LINE_LAYER_IDS[0],
   victoria: VICTORIA_OUTLINE_LINE_LAYER_IDS[0],
@@ -233,6 +221,87 @@ function localLayerMaplibreIds(entry) {
   ];
 }
 
+function getDynamicLayerMaplibreIds(runtimeTargetId, map) {
+  const sourceId = `dynamic-${runtimeTargetId}`;
+  if (!map.getSource(sourceId)) {
+    return [];
+  }
+
+  return [`${sourceId}-fill`, `${sourceId}-line`, `${sourceId}-circle`]
+    .filter((id) => map.getLayer(id));
+}
+
+function getRuntimeTargetIdFromState(layerState, rowId) {
+  return layerState?.[rowId]?.runtimeTargetId ?? rowId;
+}
+
+function findRowStateKeyForRuntimeTarget(layerState, runtimeTargetId) {
+  if (!runtimeTargetId || !layerState || typeof layerState !== "object") {
+    return null;
+  }
+
+  if (layerState[runtimeTargetId]) {
+    return runtimeTargetId;
+  }
+
+  for (const [rowId, rowState] of Object.entries(layerState)) {
+    if (rowState?.runtimeTargetId === runtimeTargetId) {
+      return rowId;
+    }
+  }
+
+  return null;
+}
+
+function getDescendantRuntimeTargetIds(layerState, parentRowId) {
+  if (!parentRowId || !layerState || typeof layerState !== "object") {
+    return [];
+  }
+
+  const descendantIds = [];
+  const queue = [parentRowId];
+
+  while (queue.length) {
+    const currentParentId = queue.shift();
+    Object.entries(layerState).forEach(([rowId, rowState]) => {
+      if (rowState?.parentRowId !== currentParentId) {
+        return;
+      }
+
+      if (typeof rowState.runtimeTargetId === "string") {
+        descendantIds.push(rowState.runtimeTargetId);
+      }
+      queue.push(rowId);
+    });
+  }
+
+  return [...new Set(descendantIds)];
+}
+
+function getMaplibreLayerIdsForRuntimeTarget(runtimeTargetId, map) {
+  if (!runtimeTargetId) {
+    return [];
+  }
+
+  const localEntry = LOCAL_LAYERS.find((entry) => entry.id === runtimeTargetId);
+  if (localEntry) {
+    return localLayerMaplibreIds(localEntry);
+  }
+
+  const registryEntry = findRegistryEntry(runtimeTargetId);
+  if (registryEntry) {
+    if (registryEntry.circle?.ids?.length) {
+      return registryEntry.circle.ids.slice();
+    }
+    return [
+      ...(registryEntry.fill ? [registryEntry.fill.id] : []),
+      ...(registryEntry.line ? [registryEntry.line.id] : []),
+    ];
+  }
+
+  return getDynamicLayerMaplibreIds(runtimeTargetId, map);
+}
+
 function getLogicalLayerBundles() {
   const earthLocalLayers = LOCAL_LAYERS.filter((l) => l.group === "earth");
   const transportLocalLayers = LOCAL_LAYERS.filter((l) => l.group === "transport");
@@ -313,7 +382,13 @@ function applyFullLayerOrder(map, layerState) {
   const nonEarthGroups = rootOrder.filter((id) => id !== "earth");
   for (const groupId of [...nonEarthGroups].reverse()) {
     const childOrder = layerState[groupId]?.rowOrder ?? getDefaultChildOrder(groupId);
-    const groupBundle = bundles[groupId] ?? {};
+    const groupBundle = bundles[groupId] ?? null;
+
+    if (!groupBundle) {
+      const runtimeTargetId = getRuntimeTargetIdFromState(layerState, groupId);
+      getMaplibreLayerIdsForRuntimeTarget(runtimeTargetId, map).forEach(moveLayer);
+      continue;
+    }
     
     // Special handling for empires: use dynamic ordering from registry
     if (groupId === "empires") {
@@ -329,7 +404,8 @@ function applyFullLayerOrder(map, layerState) {
     } else {
       // Standard handling for other groups
       for (const childId of [...childOrder].reverse()) {
-        (groupBundle[childId] ?? []).forEach(moveLayer);
+        const layerIds = groupBundle[childId] ?? getMaplibreLayerIdsForRuntimeTarget(getRuntimeTargetIdFromState(layerState, childId), map);
+        layerIds.forEach(moveLayer);
       }
     }
   }
@@ -490,16 +566,35 @@ function getLayoutVisibility(layerState, layerId) {
 }
 
 function getInheritedLayoutVisibility(layerState, layerId) {
-  let currentLayerId = layerId;
+  let currentRowId = findRowStateKeyForRuntimeTarget(layerState, layerId) ?? layerId;
 
-  while (currentLayerId) {
-    if (!getLayerStyleValue(layerState, currentLayerId, "visible", true)) {
+  while (currentRowId) {
+    if (!getLayerStyleValue(layerState, currentRowId, "visible", true)) {
       return "none";
     }
-    currentLayerId = PARENT_LAYER_IDS[currentLayerId] ?? null;
+    currentRowId = layerState?.[currentRowId]?.parentRowId ?? null;
   }
 
   return "visible";
+}
+
+function applyRuntimeTargetVisibility(runtimeTargetId, map, layerState) {
+  if (!runtimeTargetId) {
+    return;
+  }
+
+  if (runtimeTargetId === "ocean") {
+    if (map.getLayer("atlas-water")) {
+      map.setLayoutProperty("atlas-water", "visibility", getInheritedLayoutVisibility(layerState, "ocean"));
+    }
+    return;
+  }
+
+  getMaplibreLayerIdsForRuntimeTarget(runtimeTargetId, map).forEach((id) => {
+    if (map.getLayer(id)) {
+      map.setLayoutProperty(id, "visibility", getInheritedLayoutVisibility(layerState, runtimeTargetId));
+    }
+  });
 }
 
 function getOlympicsYear(layerState) {
@@ -1276,7 +1371,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     });
 
     // Phase 1: All visible-by-default layers — load immediately in parallel
-    // Note: water, countriesLand, and graticules are already in the initial style
+    // Note: water, land, and graticules are already in the initial style
     // and start loading before this event fires. attachStandardLayer's source
     // guard skips them here automatically.
     void (async () => {
@@ -1367,7 +1462,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
 
       // ── Registry-driven layers (everything except ocean) ─────────────────────
       const registryEntry = findRegistryEntry(layerId);
-      if (registryEntry && applyRegistryStyleValue(registryEntry, map, layerState, key, value)) {
+      if (registryEntry && applyRegistryStyleValue(registryEntry, map, layerState, key, value) && key !== "visible") {
         return;
       }
 
@@ -1392,50 +1487,12 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
 
       // ── Group parent visibility cascades ─────────────────────────────────
       if (key === "visible") {
-        if (layerId === "earth") {
-          if (map.getLayer("atlas-water")) {
-            map.setLayoutProperty("atlas-water", "visibility", getInheritedLayoutVisibility(layerState, "ocean"));
-          }
-          FULL_REGISTRY.forEach((entry) => {
-            if (PARENT_LAYER_IDS[entry.layerId] === "earth") {
-              applyRegistryStyleValue(entry, map, layerState, "visible", value);
-            }
-          });
-          AUSTRALIA_FILL_LAYER_IDS.forEach((id) => {
-            if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", getInheritedLayoutVisibility(layerState, "australia"));
-          });
-          AUSTRALIA_OUTLINE_LINE_LAYER_IDS.forEach((id) => {
-            if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", getInheritedLayoutVisibility(layerState, "australia"));
-          });
-          if (map.getLayer(VICTORIA_FILL_LAYER_ID)) {
-            map.setLayoutProperty(VICTORIA_FILL_LAYER_ID, "visibility", getInheritedLayoutVisibility(layerState, "victoria"));
-          }
-          VICTORIA_OUTLINE_LINE_LAYER_IDS.forEach((id) => {
-            if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", getInheritedLayoutVisibility(layerState, "victoria"));
-          });
-          return;
-        }
-
-        if (layerId === "transport") {
-          FULL_REGISTRY.forEach((entry) => {
-            if (PARENT_LAYER_IDS[entry.layerId] === "transport") {
-              applyRegistryStyleValue(entry, map, layerState, "visible", value);
-            }
-          });
-          return;
-        }
-
-        if (layerId === "olympics") {
-          applyRegistryStyleValue(OLYMPICS_REGISTRY_ENTRY, map, layerState, "visible", value);
-          return;
-        }
-
-        if (layerId === "empires") {
-          EMPIRE_REGISTRY_ENTRIES.forEach((entry) => {
-            applyRegistryStyleValue(entry, map, layerState, "visible", value);
-          });
-          return;
-        }
+        applyRuntimeTargetVisibility(layerId, map, layerState);
+        const rowStateKey = findRowStateKeyForRuntimeTarget(layerState, layerId);
+        getDescendantRuntimeTargetIds(layerState, rowStateKey).forEach((runtimeTargetId) => {
+          applyRuntimeTargetVisibility(runtimeTargetId, map, layerState);
+        });
+        return;
       }
 
       // ── Dynamic layers (Supabase-uploaded: polygon, line, or point) ─────────

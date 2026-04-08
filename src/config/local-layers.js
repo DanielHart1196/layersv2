@@ -32,7 +32,7 @@ export const LOCAL_LAYERS = [
   // ── Earth ──────────────────────────────────────────────────────────────────
 
   {
-    id: "countriesLand",
+    id: "land",
     label: "Land",
     group: "earth",
     deferred: false,
@@ -61,66 +61,6 @@ export const LOCAL_LAYERS = [
     },
     fill: null,
     line: { color: "#8FA9BC", opacity: 100, weight: 1 },
-  },
-
-  {
-    id: "land",
-    label: "Land (detail)",
-    group: "earth",
-    deferred: true,
-    defaultVisible: false,
-    source: {
-      kind: "pmtiles",
-      pmtilesId: "osm-land",
-      sourceLayer: "land-fill",
-    },
-    fill: { color: "#6EAA6E", opacity: 100 },
-    line: null,
-  },
-
-  {
-    id: "outline",
-    label: "Outline",
-    group: "earth",
-    deferred: true,
-    defaultVisible: false,
-    source: {
-      kind: "atlas-vector",
-      dataUrl: "/data/world-atlas/osm-coastlines.smooth.geojson",
-      sourceLayer: "coastlines",
-    },
-    fill: null,
-    line: { color: "#d9e4da", opacity: 100, weight: 1 },
-  },
-
-  {
-    id: "africa",
-    label: "Africa",
-    group: "earth",
-    deferred: true,
-    defaultVisible: false,
-    source: {
-      kind: "pmtiles",
-      pmtilesId: "africa-fill",
-      sourceLayer: "land-fill",
-    },
-    fill: { color: "#6EAA6E", opacity: 100 },
-    line: null,
-  },
-
-  {
-    id: "japan",
-    label: "Japan",
-    group: "earth",
-    deferred: true,
-    defaultVisible: false,
-    source: {
-      kind: "pmtiles",
-      pmtilesId: "osm-outline-japan",
-      sourceLayer: "coastlines",
-    },
-    fill: null,
-    line: { color: "#d9e4da", opacity: 100, weight: 1 },
   },
 
   // ── Transport ──────────────────────────────────────────────────────────────

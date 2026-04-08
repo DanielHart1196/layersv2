@@ -3,7 +3,10 @@ import {
   ROOT_ROW_IDS,
   SHARED_COLOR_PRESETS,
   SHARED_COLOR_STORAGE_KEY,
+  createDataRow,
+  createFilterRow,
   createLayerDefinitions,
+  createSortRow,
   createSliderRow,
   createStyleRow,
 } from "./layer-definitions.js";
@@ -106,7 +109,7 @@ function createLayerModel() {
       return state[layerId];
     };
 
-    const applyRowDefaults = (row) => {
+    const applyRowDefaults = (row, parentRowId = null) => {
       if (row?.type === "layer") {
         const layerRecord = ensureLayerState(row.layerId);
         if (typeof layerRecord.expanded !== "boolean") {
@@ -115,10 +118,16 @@ function createLayerModel() {
         if (typeof layerRecord.visible !== "boolean") {
           layerRecord.visible = true;
         }
+        if (typeof layerRecord.runtimeTargetId !== "string") {
+          layerRecord.runtimeTargetId = row.runtimeLayerId ?? row.layerId;
+        }
+        if (layerRecord.parentRowId === undefined) {
+          layerRecord.parentRowId = parentRowId;
+        }
         if (Array.isArray(row.rows) && row.rows.length && !Array.isArray(layerRecord.rowOrder)) {
           layerRecord.rowOrder = getDefaultChildOrder(row.id);
         }
-        row.rows?.forEach(applyRowDefaults);
+        row.rows?.forEach((childRow) => applyRowDefaults(childRow, row.id));
         return;
       }
 
@@ -151,10 +160,10 @@ function createLayerModel() {
 
     Object.values(layerDefinitions).forEach((definition) => {
       if (definition?.type === "layer") {
-        applyRowDefaults(definition);
+        applyRowDefaults(definition, null);
         return;
       }
-      definition.rows?.forEach(applyRowDefaults);
+      definition.rows?.forEach((row) => applyRowDefaults(row, definition.id ?? null));
     });
 
     return state;
@@ -244,7 +253,21 @@ function createLayerModel() {
         rootDynamicRows.push(row);
         dynamicIds.add(row.id);
         indexRowDefinitions([row]);
-        // layerState for this row was already restored by hydrateLayerState.
+        if (!layerState[row.id] || typeof layerState[row.id] !== "object") {
+          layerState[row.id] = {};
+        }
+        if (typeof layerState[row.id].visible !== "boolean") {
+          layerState[row.id].visible = true;
+        }
+        if (typeof layerState[row.id].expanded !== "boolean") {
+          layerState[row.id].expanded = false;
+        }
+        if (typeof layerState[row.id].runtimeTargetId !== "string") {
+          layerState[row.id].runtimeTargetId = row.runtimeLayerId ?? row.layerRef ?? row.layerId ?? row.id;
+        }
+        if (layerState[row.id].parentRowId === undefined) {
+          layerState[row.id].parentRowId = null;
+        }
       });
 
       // Restore rows added to static parents (e.g. filter under "earth").
@@ -259,6 +282,21 @@ function createLayerModel() {
           parent.rows.push(row);
           rowDefinitionsById.set(row.id, row);
           dynamicIds.add(row.id);
+          if (!layerState[row.id] || typeof layerState[row.id] !== "object") {
+            layerState[row.id] = {};
+          }
+          if (typeof layerState[row.id].visible !== "boolean") {
+            layerState[row.id].visible = true;
+          }
+          if (typeof layerState[row.id].expanded !== "boolean") {
+            layerState[row.id].expanded = false;
+          }
+          if (typeof layerState[row.id].runtimeTargetId !== "string") {
+            layerState[row.id].runtimeTargetId = row.runtimeLayerId ?? row.layerRef ?? row.layerId ?? row.id;
+          }
+          if (layerState[row.id].parentRowId === undefined) {
+            layerState[row.id].parentRowId = parentId;
+          }
         });
         staticParentAdditions.set(parentId, rows);
       });
@@ -517,22 +555,20 @@ function createLayerModel() {
         initialValue: 50,
       });
     } else if (rowType === "filter") {
-      newRow = {
+      newRow = createFilterRow({
         id: uid,
-        type: "filter",
         label: config.name || "Filter",
         field: config.field ?? "",
         op: config.op ?? "==",
         value: config.value ?? "",
-      };
+      });
     } else if (rowType === "sort") {
-      newRow = {
+      newRow = createSortRow({
         id: uid,
-        type: "sort",
         label: config.name || "Sort",
         field: config.field ?? "",
         direction: config.direction ?? "asc",
-      };
+      });
     } else {
       return null;
     }
@@ -570,17 +606,17 @@ function createLayerModel() {
   }
 
   // Adds a new data row (type: "layer") pointing to an entry in the layer catalog.
-  // layerRef is the catalog layer ID (e.g. "countriesLand", or a Supabase UUID later).
+  // layerRef is the catalog layer ID (e.g. "land", or a Supabase UUID later).
   function addDataRow(parentId, { name, layerRef }) {
     const uid = `dyn-${Date.now()}`;
-    const newRow = {
+    const newRow = createDataRow({
       id: uid,
-      type: "layer",
       label: name || layerRef,
       layerId: uid,
       layerRef,
       rows: [],
-    };
+      runtimeLayerId: layerRef ?? uid,
+    });
 
     if (parentId === ROOT_PARENT_ID) {
       rootDynamicRows.push(newRow);
@@ -595,7 +631,12 @@ function createLayerModel() {
 
     rowDefinitionsById.set(newRow.id, newRow);
     dynamicIds.add(newRow.id);
-    layerState[uid] = { expanded: false, visible: true };
+    layerState[uid] = {
+      expanded: false,
+      visible: true,
+      runtimeTargetId: newRow.runtimeLayerId,
+      parentRowId: parentId === ROOT_PARENT_ID ? null : parentId,
+    };
     persistDynamicDefs();
     persistLayerState();
 

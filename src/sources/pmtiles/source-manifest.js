@@ -24,17 +24,6 @@ function createPmtilesManifest() {
       mutable: false,
     },
     {
-      id: "osm-land",
-      kind: "pmtiles",
-      role: "earth-land",
-      url: "/pmtiles/land-50m.pmtiles",
-      layers: ["land-fill"],
-      notes: [
-        "50m global land polygons for Earth -> Land PMTiles testing",
-      ],
-      mutable: false,
-    },
-    {
       id: "osm-outline",
       kind: "pmtiles",
       role: "earth-outline",
@@ -42,17 +31,6 @@ function createPmtilesManifest() {
       layers: ["coastlines"],
       notes: [
         "OSM coastlines for Earth -> Outline",
-      ],
-      mutable: false,
-    },
-    {
-      id: "osm-outline-japan",
-      kind: "pmtiles",
-      role: "earth-outline-test",
-      url: "/pmtiles/osm-outline-japan.pmtiles",
-      layers: ["coastlines"],
-      notes: [
-        "Japan-only OSM coastlines for Earth -> Japan fidelity testing",
       ],
       mutable: false,
     },
@@ -78,17 +56,6 @@ function createPmtilesManifest() {
       ],
       mutable: false,
     })),
-    {
-      id: "africa-fill",
-      kind: "pmtiles",
-      role: "earth-land-test",
-      url: "/pmtiles/africa.pmtiles",
-      layers: ["land-fill"],
-      notes: [
-        "Simple Africa polygon PMTiles fill diagnostic",
-      ],
-      mutable: false,
-    },
     ...["a", "b", "c", "d"].map((tileId) => ({
       id: `osm-land-victoria-${tileId}`,
       kind: "pmtiles",

@@ -41,8 +41,20 @@
   - sliders, colors, dropdowns, and similar controls are row types
   - if nesting is needed, prefer child rows over bespoke container concepts
 - For layer panel structure in `layers`, "shared" means same structural source code, not merely similar behavior.
+- For row architecture in `layers`, "shared" also means same runtime semantics:
+  - same persistence contract
+  - same visibility/enable contract
+  - same target-resolution contract
+  - same runtime-application path
+- Do not treat a refactor as successful just because rows share definitions or markup if `layer` rows still have privileged controller or renderer behavior.
+- If a behavior is truly implemented only for `layer` rows, say so plainly instead of describing the system as unified.
 - Do not add layer-specific shell markup, layer-specific chevron handling, or layer-specific expand/collapse controller paths when a layer can be expressed through the shared layer-row structure.
 - Expandability for a layer should be derived from shared layer definition structure such as child rows, rows, or a body section, not introduced as a one-off special case for that layer.
+- Before making architecture claims about shared rows in `layers`, verify the same behavior works end-to-end for at least:
+  - one data row
+  - one style row
+  - one filter or sort row
+- Do not rely on bridge refactors that preserve special `layer` behavior while making other row types only look unified.
 - Do not invent a new component pattern, alternate DOM structure, or parallel interaction model when an equivalent working pattern already exists in the codebase.
 - When extending an existing UI pattern to new data, copy the proven pattern first and only change the identifiers, labels, and state bindings required for the new item.
 - Before implementing a new UI interaction in `layers`, identify the exact existing file and section it should mirror, and use that as the implementation template.

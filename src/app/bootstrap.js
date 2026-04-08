@@ -14,6 +14,7 @@ import { createScreenRendererAdapter } from "../renderers/screen/screen-renderer
 import { createEditableRuntimeStore } from "../sources/editable/runtime-store.js";
 import { createPmtilesManifest } from "../sources/pmtiles/source-manifest.js";
 import { loadLayerFromSupabase } from "../sources/supabase/layer-loader.js";
+import { getRowRuntimeTargetId, getRowStateKey } from "../core/layer-definitions.js";
 
 async function bootstrapApplication() {
   const layerModel = createLayerModel();
@@ -102,11 +103,13 @@ async function bootstrapApplication() {
   const uploadPanel = mountUploadPanel({
     onLayerCreated: async ({ layerId, name, parentId }) => {
       try {
-        const { layer, geojson } = await loadLayerFromSupabase(layerId);
-        if (geojson || layer.tiles_url) {
-          screenRuntime.loadDynamicLayer({ layerId, geojson, tilesUrl: layer.tiles_url ?? null, style: layer.default_style });
-        }
-        const added = layerModel.addDataRow(parentId ?? layerModel.getRootParentId(), { name, layerRef: layerId });
+        const added = await addDataRowAndAttach({
+          parentId: parentId ?? layerModel.getRootParentId(),
+          name,
+          layerRef: layerId,
+          layerModel,
+          screenRuntime,
+        });
         if (added) rerenderLayerMenu();
       } catch (err) {
         console.error("Failed to load uploaded layer onto map.", err);
@@ -115,8 +118,14 @@ async function bootstrapApplication() {
   });
 
   const addRowPanel = mountAddRowPanel({
-    onAddLayer({ parentId, name, layerRef }) {
-      const added = layerModel.addDataRow(parentId, { name, layerRef });
+    async onAddLayer({ parentId, name, layerRef }) {
+      const added = await addDataRowAndAttach({
+        parentId,
+        name,
+        layerRef,
+        layerModel,
+        screenRuntime,
+      });
       if (added) rerenderLayerMenu();
     },
     onAddRow({ parentId, rowType, config }) {
@@ -206,16 +215,48 @@ async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
   const supabaseLayers = layerModel.getSupabaseLayers();
   if (!supabaseLayers.length) return;
 
-  for (const { layerId } of supabaseLayers) {
+  for (const { rowId, layerId } of supabaseLayers) {
     try {
       const { layer, geojson } = await loadLayerFromSupabase(layerId);
       if (geojson || layer.tiles_url) {
         screenRuntime.loadDynamicLayer({ layerId, geojson, tilesUrl: layer.tiles_url ?? null, style: layer.default_style });
       }
+      const row = layerModel.getRowById(rowId);
+      const stateKey = row ? getRowStateKey(row) : rowId;
+      const visible = layerModel.getState()?.[stateKey]?.visible;
+      if (typeof visible === "boolean") {
+        screenRuntime.setLayerStyleValue(layerId, "visible", visible);
+      }
     } catch (err) {
       console.warn(`Failed to reattach layer ${layerId}:`, err.message);
     }
   }
+}
+
+async function addDataRowAndAttach({ parentId, name, layerRef, layerModel, screenRuntime }) {
+  const resolvedParentId = parentId ?? layerModel.getRootParentId();
+  const added = layerModel.addDataRow(resolvedParentId, { name, layerRef });
+  if (!added) {
+    return null;
+  }
+
+  if (!SUPABASE_UUID.test(layerRef)) {
+    return added;
+  }
+
+  const { layer, geojson } = await loadLayerFromSupabase(layerRef);
+  if (geojson || layer.tiles_url) {
+    screenRuntime.loadDynamicLayer({ layerId: layerRef, geojson, tilesUrl: layer.tiles_url ?? null, style: layer.default_style });
+  }
+
+  const runtimeTargetId = getRowRuntimeTargetId(added);
+  const stateKey = getRowStateKey(added);
+  const visible = layerModel.getState()?.[stateKey]?.visible;
+  if (runtimeTargetId && typeof visible === "boolean") {
+    screenRuntime.setLayerStyleValue(runtimeTargetId, "visible", visible);
+  }
+
+  return added;
 }
 
 export { bootstrapApplication };

@@ -5,6 +5,70 @@ const ROOT_ROW_IDS = ["earth", "transport", "olympics", "empires"];
 const SHARED_COLOR_STORAGE_KEY = "layerv2.colors.customColors";
 const SHARED_COLOR_PRESETS = ["#000000", "#FFFFFF", "#d94b4b", "#e58a2b", "#e5c84a", "#5b8c5a", "#4b6ed9", "#8c5bd6"];
 
+function createDataRow({
+  id,
+  label,
+  layerId,
+  rows = [],
+  hidden = false,
+  defaultExpanded = false,
+  pinnedOrder = null,
+  layerRef = null,
+  runtimeLayerId = null,
+}) {
+  return {
+    id,
+    type: "layer",
+    kind: "data",
+    label,
+    layerId,
+    runtimeLayerId: runtimeLayerId ?? layerId,
+    layerRef,
+    hidden,
+    defaultExpanded,
+    ...(pinnedOrder ? { pinnedOrder } : {}),
+    rows,
+  };
+}
+
+function createFilterRow({
+  id,
+  label,
+  field = "",
+  op = "==",
+  value = "",
+  ui = null,
+}) {
+  return {
+    id,
+    type: "filter",
+    kind: "filter",
+    label,
+    field,
+    op,
+    value,
+    ...(ui ? { ui } : {}),
+  };
+}
+
+function createSortRow({
+  id,
+  label,
+  field = "",
+  direction = "asc",
+  ui = null,
+}) {
+  return {
+    id,
+    type: "sort",
+    kind: "sort",
+    label,
+    field,
+    direction,
+    ...(ui ? { ui } : {}),
+  };
+}
+
 function createStyleRow({
   id,
   type,
@@ -80,9 +144,8 @@ function createSliderRow({
 }
 
 function localLayerToRow(entry) {
-  return {
+  return createDataRow({
     id: entry.id,
-    type: "layer",
     label: entry.label,
     layerId: entry.id,
     hidden: entry.defaultVisible === false,
@@ -105,22 +168,20 @@ function localLayerToRow(entry) {
         defaultWeight: entry.line.weight,
       })] : []),
     ],
-  };
+  });
 }
 
 function createLayerDefinitions() {
   return {
-    earth: {
+    earth: createDataRow({
       id: "earth",
       label: "Earth",
-      type: "layer",
       layerId: "earth",
       defaultExpanded: true,
       pinnedOrder: "start",
       rows: [
-        {
+        createDataRow({
           id: "ocean",
-          type: "layer",
           label: "Ocean",
           layerId: "ocean",
           pinnedOrder: "start",
@@ -134,11 +195,10 @@ function createLayerDefinitions() {
               defaultColor: "#2C6F92",
             }),
           ],
-        },
+        }),
         ...LOCAL_LAYERS.filter((l) => l.group === "earth").map(localLayerToRow),
-        {
+        createDataRow({
           id: "australia",
-          type: "layer",
           label: "Australia",
           layerId: "australia",
           rows: [
@@ -159,10 +219,9 @@ function createLayerDefinitions() {
               defaultColor: "#d9e4da",
             }),
           ],
-        },
-        {
+        }),
+        createDataRow({
           id: "victoria",
-          type: "layer",
           label: "Victoria",
           layerId: "victoria",
           hidden: true,
@@ -184,20 +243,18 @@ function createLayerDefinitions() {
               defaultColor: "#d9e4da",
             }),
           ],
-        },
+        }),
       ],
-    },
-    transport: {
+    }),
+    transport: createDataRow({
       id: "transport",
       label: "Transport",
-      type: "layer",
       layerId: "transport",
       defaultExpanded: true,
       rows: LOCAL_LAYERS.filter((l) => l.group === "transport").map(localLayerToRow),
-    },
-    olympics: {
+    }),
+    olympics: createDataRow({
       id: "olympics",
-      type: "layer",
       label: "Olympics",
       layerId: "olympics",
       rows: [
@@ -222,39 +279,19 @@ function createLayerDefinitions() {
           valueFormat: "pixels",
           initialValue: 3.5,
         }),
-        {
-          id: "olympics-gold",
-          type: "layer",
-          label: "Gold",
-          layerId: "olympicsGold",
-          rows: [],
-        },
-        {
-          id: "olympics-silver",
-          type: "layer",
-          label: "Silver",
-          layerId: "olympicsSilver",
-          rows: [],
-        },
-        {
-          id: "olympics-bronze",
-          type: "layer",
-          label: "Bronze",
-          layerId: "olympicsBronze",
-          rows: [],
-        },
+        createDataRow({ id: "olympics-gold", label: "Gold", layerId: "olympicsGold", rows: [] }),
+        createDataRow({ id: "olympics-silver", label: "Silver", layerId: "olympicsSilver", rows: [] }),
+        createDataRow({ id: "olympics-bronze", label: "Bronze", layerId: "olympicsBronze", rows: [] }),
       ],
-    },
-    empires: {
+    }),
+    empires: createDataRow({
       id: "empires",
-      type: "layer",
       layerId: "empires",
       label: "Empires",
       defaultExpanded: true,
       rows: [
-        {
+        createDataRow({
           id: "roman",
-          type: "layer",
           label: "Roman",
           layerId: "roman",
           rows: [
@@ -275,10 +312,9 @@ function createLayerDefinitions() {
               defaultColor: "#c89a42",
             }),
           ],
-        },
-        {
+        }),
+        createDataRow({
           id: "mongol",
-          type: "layer",
           label: "Mongol",
           layerId: "mongol",
           rows: [
@@ -299,10 +335,9 @@ function createLayerDefinitions() {
               defaultColor: "#d96f44",
             }),
           ],
-        },
-        {
+        }),
+        createDataRow({
           id: "british",
-          type: "layer",
           label: "British",
           layerId: "british",
           rows: [
@@ -323,9 +358,9 @@ function createLayerDefinitions() {
               defaultColor: "#f07a58",
             }),
           ],
-        },
+        }),
       ],
-    },
+    }),
   };
 }
 
@@ -368,14 +403,27 @@ function getDefinitionChildOrder(definitionIndex, parentId, { includeHidden = fa
     .map((row) => row.id);
 }
 
+function getRowStateKey(row) {
+  return row?.type === "layer" ? (row.id ?? row.layerId ?? null) : row?.id ?? null;
+}
+
+function getRowRuntimeTargetId(row) {
+  return row?.runtimeLayerId ?? row?.layerId ?? row?.id ?? null;
+}
+
 export {
   ROOT_PARENT_ID,
   ROOT_ROW_IDS,
   SHARED_COLOR_PRESETS,
   SHARED_COLOR_STORAGE_KEY,
   createLayerDefinitions,
+  createDataRow,
+  createFilterRow,
   createRowDefinitionIndex,
+  createSortRow,
   createSliderRow,
   createStyleRow,
   getDefinitionChildOrder,
+  getRowRuntimeTargetId,
+  getRowStateKey,
 };

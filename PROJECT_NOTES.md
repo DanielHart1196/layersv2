@@ -5,6 +5,44 @@
 - This file is the local architecture note set for the MapLibre Atlas app.
 - Keep this file active and current, not archival.
 
+## Product Model
+- Atlas/Layers is an open geodata canvas, not only a layer editor.
+- Datasets are public building blocks intended to be reusable by everyone.
+- The main shareable artifact is usually a view:
+  - a row tree
+  - styling/filter/sort state
+  - camera/projection state
+  - potentially many datasets combined
+- Most user activity should stay map-adjacent on the main home/map surface:
+  - viewing
+  - composing
+  - styling
+  - filtering
+  - adding datasets
+  - adding data points
+- Dataset management, saved views, and contribution management can live in panels/modals or lightweight settings surfaces, but should stay connected to the main map workflow.
+
+## Dataset Model
+- Preserve raw import/provenance, but normalize imports into a canonical internal dataset model.
+- Accept many upload formats at the boundary, but prefer a small number of internal geometry families:
+  - `point`
+  - `line`
+  - `area`
+- PMTiles is a derived render artifact, not the canonical data model.
+- Canonical feature data should remain available for:
+  - filtering
+  - sorting
+  - field discovery
+  - value discovery
+  - future moderation/query workflows
+
+## View Model
+- A view is a shareable composition over one or more datasets.
+- Dataset contribution and view sharing are different concerns:
+  - users contribute datasets/data
+  - users share views/compositions
+- Prefer treating share URLs and saved states as views, not ad hoc runtime snapshots.
+
 ## Working Rules
 - Prefer small, self-contained changes.
 - Keep behavior-preserving extraction separate from behavior-changing work.
@@ -14,19 +52,60 @@
 
 ## Shared Row Model
 - Atlas layer panel behavior should come from one shared row system.
+- A layer should be modeled as a data row plus its child rows, not as a separate controller concept.
 - Parent rows and child rows should use the same default behavior for:
   - expand/collapse
   - visibility
   - drag/reorder
   - render-order derivation
-- Child rows should be regular shared rows:
-  - `layer`
-  - `fill`
-  - `line`
-  - `slider`
-  - future `filter` rows should follow the same model
+- Every visible panel item should be a row from the same architectural system.
+- No row type should require bespoke controller logic to receive core row behavior.
+- Differences between rows should live in row config and target resolution, not in parallel controller paths.
+- "Shared row system" means the same structural source code and the same runtime semantics.
+- It is not enough for rows to look unified in definitions or UI markup if `layer` rows still have privileged controller or renderer behavior.
+- If a behavior works end-to-end only for `layer` rows, the shared-row refactor is incomplete.
+- Current preferred row families:
+  - `data`
+  - `filter`
+  - `sort`
+  - `point-style`
+  - `line-style`
+  - `fill-style`
 - Do not add bespoke shell markup, bespoke chevron handling, or bespoke controller logic for a layer if it can be expressed through the shared row structure.
 - Top-level categories like `Earth`, `Transport`, and `Empires` should be modeled as normal shared layer rows, not a separate weaker `group` concept.
+- `Earth` and `Ocean` remain the deliberate ordering/runtime exceptions.
+
+## Row Semantics
+- Shared row behavior should include:
+  - enable/disable
+  - expand/collapse
+  - persistence
+  - ordering
+  - inherited visibility
+  - target resolution
+- Parent disable/enable state should inherit generically through the row tree; row types should not opt into this one by one.
+- A row should declare what it is and what it targets; the shared row engine should derive:
+  - what state it owns
+  - what state it inherits
+  - what runtime target it affects
+  - how it persists
+- The contract for visibility/enablement must be identical across row families.
+- Style rows, filter rows, sort rows, and data rows must all participate through the same persistence, target-resolution, and runtime-application pipeline.
+- Do not accept "bridge" refactors that make rows share shape while preserving special runtime behavior for `layer` rows.
+- If a row kind cannot yet support the shared runtime contract, call that out explicitly instead of treating it as already unified.
+- Filter rows should be generic query rows with presentation hints, not bespoke business widgets.
+- Examples:
+  - Olympics `Year` is a filter row with slider UI.
+  - Olympics `Gold` / `Silver` / `Bronze` are filter rows with toggle UI.
+  - Numeric threshold filters such as `Height >= X` should also be filter rows, with slider UI where appropriate.
+
+## Default Child Rows
+- New data rows should materialize the relevant styling rows by default.
+- Preferred defaults:
+  - point dataset -> point-style row
+  - line dataset -> line-style row
+  - area dataset -> fill-style row + line-style row
+- Additional filters/sorts can be predefined per dataset, but should still use the same shared row system.
 
 ## Ordering
 - Ordering should be definition-driven.

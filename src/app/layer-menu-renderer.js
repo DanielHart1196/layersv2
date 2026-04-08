@@ -1,3 +1,5 @@
+import { getRowRuntimeTargetId, getRowStateKey } from "../core/layer-definitions.js";
+
 function formatRowValue(row, value) {
   if (row?.valueFormat === "points") {
     return `${Number(value) || 0}pt`;
@@ -527,7 +529,7 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
     row.classList.toggle("is-hidden", inheritedHidden || state?.visible === false);
     label.addEventListener("click", (event) => {
       event.stopPropagation();
-      onToggleVisibility(definition.layerId);
+      onToggleVisibility(definition);
     });
   } else if (!isExpandable) {
     label.addEventListener("click", (event) => {
@@ -571,7 +573,7 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
   return row;
 }
 
-function createSliderRow(row, value, onInput) {
+function createSliderRow(row, value, onInput, { inheritedHidden = false } = {}) {
   const wrapper = document.createElement("label");
   wrapper.className = "layer-menu-row layer-menu-row-slider";
   const { header, valueLabel } = (() => {
@@ -587,12 +589,14 @@ function createSliderRow(row, value, onInput) {
   input.max = String(row.max);
   input.step = String(row.step);
   input.value = String(value);
+  input.disabled = inheritedHidden;
   input.addEventListener("input", () => {
     const nextValue = Number(input.value);
     valueLabel.textContent = formatRowValue(row, nextValue);
     onInput(nextValue);
   });
 
+  wrapper.classList.toggle("is-hidden", inheritedHidden);
   wrapper.append(header, input);
   return wrapper;
 }
@@ -918,10 +922,10 @@ function createColorRow(row, value, onInput, requestRender) {
 // Shell: grabber + visibility toggle + label + optional remove button.
 // Body: controls declared by the row definition (color, sliders).
 
-function createStyleRow(row, value, onInput, requestRender, { parentId, reorderApi, isVisible, onToggleVisible, onRemove } = {}) {
+function createStyleRow(row, value, onInput, requestRender, { parentId, reorderApi, isVisible, inheritedHidden = false, onToggleVisible, onRemove } = {}) {
   const wrapper = document.createElement("div");
   wrapper.className = `layer-menu-row layer-menu-row-style`;
-  wrapper.classList.toggle("is-hidden", !isVisible);
+  wrapper.classList.toggle("is-hidden", inheritedHidden || !isVisible);
 
   // ── Shell header ────────────────────────────────────────────────────────────
   const header = document.createElement("div");
@@ -1116,14 +1120,14 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
   const state = layerModel.getState();
 
   rows.forEach((row) => {
-    const rowStateKey = row.type === "layer" ? (row.layerId ?? row.id) : row.id;
+    const rowStateKey = getRowStateKey(row);
     const childRows = row.id ? reorderApi.getOrderedRows(row.id) : [];
     const isDynamic = onRemoveRow && layerModel.isDynamic(row.id);
 
     if (row.type === "slider") {
       const slider = createSliderRow(row, getDisplayRowValue(row, layerModel, appearanceState), (nextValue) => {
         onRowInput(row, nextValue);
-      });
+      }, { inheritedHidden });
       slider.style.setProperty("--row-depth", String(depth));
       fragment.append(slider);
       return;
@@ -1145,7 +1149,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       const isVisible = layerModel.isRowVisible(row.id);
       const el = document.createElement("div");
       el.className = "layer-menu-row layer-menu-row-meta";
-      el.classList.toggle("is-hidden", !isVisible);
+      el.classList.toggle("is-hidden", inheritedHidden || !isVisible);
       el.style.setProperty("--row-depth", String(depth));
 
       const header = document.createElement("div");
@@ -1201,6 +1205,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
           parentId: parentId ?? null,
           reorderApi: parentId ? reorderApi : null,
           isVisible,
+          inheritedHidden,
           onToggleVisible: () => {
             layerModel.toggleRowVisible(row.id);
             reapplyRowTargets(row, layerModel, onRowInput);
@@ -1276,10 +1281,15 @@ function renderLayerMenuRows({
       layerModel.toggleExpanded(layerId);
       render();
     };
-    const onToggleVisibility = (layerId) => {
-      const nextVisible = layerModel.toggleVisibility(layerId);
+    const onToggleVisibility = (row) => {
+      const stateKey = getRowStateKey(row);
+      const runtimeTargetId = getRowRuntimeTargetId(row);
+      if (!stateKey || !runtimeTargetId) {
+        return;
+      }
+      const nextVisible = layerModel.toggleVisibility(stateKey);
       if (typeof nextVisible === "boolean") {
-        onRowInput({ target: { kind: "layer-style", layerId, key: "visible" } }, nextVisible);
+        onRowInput({ target: { kind: "layer-style", layerId: runtimeTargetId, key: "visible" } }, nextVisible);
       }
       render();
     };

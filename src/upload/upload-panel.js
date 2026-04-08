@@ -1,22 +1,20 @@
-import { parseFile, getFileType, SUPPORTED_EXTENSIONS } from "./parse-file.js";
+import { parseFile, SUPPORTED_EXTENSIONS } from "./parse-file.js";
 import { rowsToFeatures } from "./csv-mapper.js";
+import { summarizeFeatureComplexity } from "./feature-complexity.js";
 import { insertLayer } from "./insert-layer.js";
-
-const LARGE_FILE_THRESHOLD = 5 * 1024 * 1024; // 5 MB
-
-// ─── Mount ────────────────────────────────────────────────────────────────────
 
 export function mountUploadPanel({ onLayerCreated }) {
   const panel = createPanel();
   document.body.appendChild(panel);
 
   let state = {
-    step: "drop",       // drop | map-columns | tile-consent | confirm | uploading | done
+    step: "drop", // drop | map-columns | confirm | uploading | done
     file: null,
-    parsed: null,       // result from parseFile()
-    mapping: null,      // CSV column mapping (user-confirmed)
-    features: null,     // final features array ready to insert
-    usePmtiles: false,  // whether to generate a PMTiles file
+    parsed: null,
+    mapping: null,
+    features: null,
+    complexity: null,
+    usePmtiles: false,
     name: "",
     viewAccess: "unlisted",
   };
@@ -25,38 +23,50 @@ export function mountUploadPanel({ onLayerCreated }) {
     const content = panel.querySelector(".upload-panel-content");
     content.innerHTML = "";
 
-    if (state.step === "drop")          content.append(renderDrop());
-    if (state.step === "map-columns")   content.append(renderColumnMap());
-    if (state.step === "tile-consent")  content.append(renderTileConsent());
-    if (state.step === "confirm")       content.append(renderConfirm());
-    if (state.step === "uploading")     content.append(renderUploading());
-    if (state.step === "done")          content.append(renderDone());
+    if (state.step === "drop") content.append(renderDrop());
+    if (state.step === "map-columns") content.append(renderColumnMap());
+    if (state.step === "confirm") content.append(renderConfirm());
+    if (state.step === "uploading") content.append(renderUploading());
+    if (state.step === "done") content.append(renderDone());
   }
 
-  // ── Step 1: Drop ────────────────────────────────────────────────────────────
+  function applyFeatures(features) {
+    state.features = features;
+    state.complexity = summarizeFeatureComplexity(features);
+    state.usePmtiles = state.complexity.recommendPmtiles;
+  }
 
   function renderDrop() {
     const el = html(`
       <div class="upload-step">
         <div class="upload-dropzone" id="uploadDropzone">
           <p class="upload-dropzone-hint">Drop a file or click to browse</p>
-          <p class="upload-dropzone-formats">${SUPPORTED_EXTENSIONS.join("  ·  ")}</p>
+          <p class="upload-dropzone-formats">${SUPPORTED_EXTENSIONS.join("  |  ")}</p>
           <input type="file" class="upload-file-input" accept="${SUPPORTED_EXTENSIONS.join(",")}" />
         </div>
         <p class="upload-error" id="uploadError" hidden></p>
       </div>
     `);
 
-    const zone  = el.querySelector("#uploadDropzone");
+    const zone = el.querySelector("#uploadDropzone");
     const input = el.querySelector(".upload-file-input");
     const error = el.querySelector("#uploadError");
 
     zone.addEventListener("click", () => input.click());
-    input.addEventListener("click", (e) => e.stopPropagation());
-    zone.addEventListener("dragover", (e) => { e.preventDefault(); zone.classList.add("is-over"); });
+    input.addEventListener("click", (event) => event.stopPropagation());
+    zone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      zone.classList.add("is-over");
+    });
     zone.addEventListener("dragleave", () => zone.classList.remove("is-over"));
-    zone.addEventListener("drop", (e) => { e.preventDefault(); zone.classList.remove("is-over"); handleFile(e.dataTransfer.files[0]); });
-    input.addEventListener("change", () => handleFile(input.files[0]));
+    zone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      zone.classList.remove("is-over");
+      void handleFile(event.dataTransfer.files[0]);
+    });
+    input.addEventListener("change", () => {
+      void handleFile(input.files[0]);
+    });
 
     async function handleFile(file) {
       if (!file) return;
@@ -67,30 +77,23 @@ export function mountUploadPanel({ onLayerCreated }) {
         error.hidden = false;
         return;
       }
-      state.file   = file;
+
+      state.file = file;
       state.parsed = parsed;
-      state.name   = file.name.replace(/\.[^.]+$/, "");
+      state.name = file.name.replace(/\.[^.]+$/, "");
 
       if (parsed.type === "csv") {
         state.mapping = { ...parsed.mapping };
         state.step = "map-columns";
       } else {
-        state.features = parsed.features;
-        // Large non-CSV files: offer PMTiles generation
-        if (file.size > LARGE_FILE_THRESHOLD) {
-          state.step = "tile-consent";
-        } else {
-          state.usePmtiles = false;
-          state.step = "confirm";
-        }
+        applyFeatures(parsed.features);
+        state.step = "confirm";
       }
       render();
     }
 
     return el;
   }
-
-  // ── Step 2: Column mapping (CSV only) ───────────────────────────────────────
 
   function renderColumnMap() {
     const { headers, rows, mapping } = state.parsed;
@@ -111,36 +114,37 @@ export function mountUploadPanel({ onLayerCreated }) {
       </div>
     `);
 
-    // Column role selectors
     const mapContainer = el.querySelector("#uploadColMap");
-    for (const role of roles) {
+    roles.forEach((role) => {
       const row = html(`
         <div class="upload-col-row">
           <label class="upload-col-label">${role}</label>
           <select class="upload-col-select" data-role="${role}">
-            <option value="">— none —</option>
-            ${headers.map((h) => `<option value="${h}" ${mapping[role] === h ? "selected" : ""}>${h}</option>`).join("")}
+            <option value="">- none -</option>
+            ${headers.map((header) => `<option value="${header}" ${mapping[role] === header ? "selected" : ""}>${header}</option>`).join("")}
           </select>
         </div>
       `);
-      row.querySelector("select").addEventListener("change", (e) => {
-        state.mapping[role] = e.target.value || null;
+      row.querySelector("select").addEventListener("change", (event) => {
+        state.mapping[role] = event.target.value || null;
         updatePreview();
       });
       mapContainer.append(row);
-    }
+    });
 
-    // Preview table
     function updatePreview() {
       const table = el.querySelector("#uploadPreview");
       table.innerHTML = `
-        <thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead>
-        <tbody>${preview.map((row) => `<tr>${headers.map((h) => `<td>${row[h] ?? ""}</td>`).join("")}</tr>`).join("")}</tbody>
+        <thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead>
+        <tbody>${preview.map((row) => `<tr>${headers.map((header) => `<td>${row[header] ?? ""}</td>`).join("")}</tr>`).join("")}</tbody>
       `;
     }
     updatePreview();
 
-    el.querySelector("#uploadBack").addEventListener("click", () => { state.step = "drop"; render(); });
+    el.querySelector("#uploadBack").addEventListener("click", () => {
+      state.step = "drop";
+      render();
+    });
     el.querySelector("#uploadNext").addEventListener("click", () => {
       const error = el.querySelector("#uploadError");
       if (!state.mapping.lat || !state.mapping.lng) {
@@ -148,79 +152,52 @@ export function mountUploadPanel({ onLayerCreated }) {
         error.hidden = false;
         return;
       }
-      state.features = rowsToFeatures(state.parsed.rows, state.mapping);
-      if (state.features.length === 0) {
+
+      const features = rowsToFeatures(state.parsed.rows, state.mapping);
+      if (features.length === 0) {
         error.textContent = "No valid rows found. Check lat/lng columns contain numbers.";
         error.hidden = false;
         return;
       }
-      state.usePmtiles = false;
+
+      applyFeatures(features);
       state.step = "confirm";
       render();
     });
 
     return el;
   }
-
-  // ── Step 3: Tile consent (large files only) ──────────────────────────────────
-
-  function renderTileConsent() {
-    const sizeMb = (state.file.size / 1024 / 1024).toFixed(1);
-    const el = html(`
-      <div class="upload-step">
-        <h3 class="upload-step-title">Large file detected</h3>
-        <p class="upload-step-sub">
-          This file is ${sizeMb} MB. Generate optimised tiles for fast map rendering?
-          This runs in your browser and may take a minute.
-        </p>
-        <div class="upload-actions upload-actions-col">
-          <button class="upload-btn upload-btn-primary" id="uploadYesTiles">Yes, generate tiles</button>
-          <button class="upload-btn upload-btn-secondary" id="uploadNoTiles">No, upload as-is</button>
-          <button class="upload-btn upload-btn-ghost" id="uploadBack">Back</button>
-        </div>
-      </div>
-    `);
-
-    el.querySelector("#uploadYesTiles").addEventListener("click", () => {
-      state.usePmtiles = true;
-      state.step = "confirm";
-      render();
-    });
-    el.querySelector("#uploadNoTiles").addEventListener("click", () => {
-      state.usePmtiles = false;
-      state.step = "confirm";
-      render();
-    });
-    el.querySelector("#uploadBack").addEventListener("click", () => { state.step = "drop"; render(); });
-
-    return el;
-  }
-
-  // ── Step 4: Confirm ─────────────────────────────────────────────────────────
 
   function renderConfirm() {
     const count = state.features.length;
-    const types = [...new Set(state.features.map((f) => f.geometry?.type))].join(", ");
-    const tileNote = state.usePmtiles
-      ? `<div class="upload-summary-row"><span>Rendering</span><strong>Optimised tiles</strong></div>`
-      : "";
+    const types = [...new Set(state.features.map((feature) => feature.geometry?.type))].join(", ");
+    const complexity = state.complexity ?? summarizeFeatureComplexity(state.features);
+    const recommendation = complexity.recommendPmtiles
+      ? `PMTiles recommended. ${complexity.recommendationReason}`
+      : complexity.recommendationReason;
 
     const el = html(`
       <div class="upload-step">
         <h3 class="upload-step-title">Ready to upload</h3>
+        <p class="upload-step-sub">${recommendation}</p>
         <div class="upload-summary">
           <div class="upload-summary-row"><span>Features</span><strong>${count.toLocaleString()}</strong></div>
           <div class="upload-summary-row"><span>Type</span><strong>${types}</strong></div>
-          ${tileNote}
+          <div class="upload-summary-row"><span>Vertices</span><strong>${complexity.vertexCount.toLocaleString()}</strong></div>
+          <div class="upload-summary-row"><span>Rendering</span><strong>${state.usePmtiles ? "Optimised tiles" : "Flat GeoJSON"}</strong></div>
         </div>
         <label class="upload-field-label">Layer name
           <input class="upload-field-input" type="text" value="${state.name}" id="uploadName" />
         </label>
+        <label class="upload-field-label">
+          <input type="checkbox" id="uploadUsePmtiles" ${state.usePmtiles ? "checked" : ""} />
+          Generate PMTiles for faster rendering
+        </label>
         <label class="upload-field-label">Visibility
           <select class="upload-field-input" id="uploadAccess">
-            <option value="unlisted" selected>Unlisted (anyone with the link)</option>
-            <option value="public">Public</option>
-            <option value="private">Private</option>
+            <option value="unlisted" ${state.viewAccess === "unlisted" ? "selected" : ""}>Unlisted (anyone with the link)</option>
+            <option value="public" ${state.viewAccess === "public" ? "selected" : ""}>Public</option>
+            <option value="private" ${state.viewAccess === "private" ? "selected" : ""}>Private</option>
           </select>
         </label>
         <div class="upload-actions">
@@ -231,12 +208,17 @@ export function mountUploadPanel({ onLayerCreated }) {
       </div>
     `);
 
-    el.querySelector("#uploadName").addEventListener("input", (e) => { state.name = e.target.value; });
-    el.querySelector("#uploadAccess").addEventListener("change", (e) => { state.viewAccess = e.target.value; });
+    el.querySelector("#uploadName").addEventListener("input", (event) => {
+      state.name = event.target.value;
+    });
+    el.querySelector("#uploadUsePmtiles").addEventListener("change", (event) => {
+      state.usePmtiles = event.target.checked;
+    });
+    el.querySelector("#uploadAccess").addEventListener("change", (event) => {
+      state.viewAccess = event.target.value;
+    });
     el.querySelector("#uploadBack").addEventListener("click", () => {
-      if (state.parsed.type === "csv") state.step = "map-columns";
-      else if (state.file.size > LARGE_FILE_THRESHOLD) state.step = "tile-consent";
-      else state.step = "drop";
+      state.step = state.parsed.type === "csv" ? "map-columns" : "drop";
       render();
     });
     el.querySelector("#uploadConfirm").addEventListener("click", async () => {
@@ -246,6 +228,7 @@ export function mountUploadPanel({ onLayerCreated }) {
         error.hidden = false;
         return;
       }
+
       state.step = "uploading";
       render();
 
@@ -271,19 +254,20 @@ export function mountUploadPanel({ onLayerCreated }) {
         state.step = "confirm";
         render();
         const errorEl = panel.querySelector("#uploadError");
-        if (errorEl) { errorEl.textContent = err.message; errorEl.hidden = false; }
+        if (errorEl) {
+          errorEl.textContent = err.message;
+          errorEl.hidden = false;
+        }
       }
     });
 
     return el;
   }
 
-  // ── Step 5: Uploading ───────────────────────────────────────────────────────
-
   function renderUploading() {
     return html(`
       <div class="upload-step upload-step-uploading">
-        <p class="upload-uploading-label">Uploading…</p>
+        <p class="upload-uploading-label">Uploading...</p>
         <div class="upload-progress-track">
           <div class="upload-progress-bar" style="width:0%"></div>
         </div>
@@ -291,8 +275,6 @@ export function mountUploadPanel({ onLayerCreated }) {
       </div>
     `);
   }
-
-  // ── Step 6: Done ────────────────────────────────────────────────────────────
 
   function renderDone() {
     const el = html(`
@@ -305,14 +287,12 @@ export function mountUploadPanel({ onLayerCreated }) {
       </div>
     `);
     el.querySelector("#uploadAnother").addEventListener("click", () => {
-      state = { step: "drop", file: null, parsed: null, mapping: null, features: null, usePmtiles: false, name: "", viewAccess: "unlisted" };
+      state = { step: "drop", file: null, parsed: null, mapping: null, features: null, complexity: null, usePmtiles: false, name: "", viewAccess: "unlisted" };
       render();
     });
     el.querySelector("#uploadClose").addEventListener("click", () => closePanel());
     return el;
   }
-
-  // ── Panel chrome ────────────────────────────────────────────────────────────
 
   function closePanel() {
     panel.classList.remove("is-open");
@@ -325,14 +305,12 @@ export function mountUploadPanel({ onLayerCreated }) {
   return {
     open({ parentId } = {}) {
       panel.classList.add("is-open");
-      state = { step: "drop", file: null, parsed: null, mapping: null, features: null, usePmtiles: false, name: "", viewAccess: "unlisted", parentId: parentId ?? null };
+      state = { step: "drop", file: null, parsed: null, mapping: null, features: null, complexity: null, usePmtiles: false, name: "", viewAccess: "unlisted", parentId: parentId ?? null };
       render();
     },
     close: closePanel,
   };
 }
-
-// ─── Panel shell HTML ─────────────────────────────────────────────────────────
 
 function createPanel() {
   return html(`
@@ -340,7 +318,7 @@ function createPanel() {
       <div class="upload-panel-inner">
         <div class="upload-panel-header">
           <span class="upload-panel-title">Add layer</span>
-          <button class="upload-panel-close" aria-label="Close">✕</button>
+          <button class="upload-panel-close" aria-label="Close">X</button>
         </div>
         <div class="upload-panel-content"></div>
       </div>
@@ -349,7 +327,7 @@ function createPanel() {
 }
 
 function html(str) {
-  const t = document.createElement("template");
-  t.innerHTML = str.trim();
-  return t.content.firstElementChild;
+  const template = document.createElement("template");
+  template.innerHTML = str.trim();
+  return template.content.firstElementChild;
 }

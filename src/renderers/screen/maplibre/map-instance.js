@@ -15,6 +15,13 @@ import {
   localLayerFillId,
   localLayerLineId,
 } from "../../../config/local-layers.js";
+import {
+  ROOT_PARENT_ID,
+  ROOT_ROW_IDS,
+  createLayerDefinitions,
+  createRowDefinitionIndex,
+  getDefinitionChildOrder,
+} from "../../../core/layer-definitions.js";
 
 let protocolInstalled = false;
 
@@ -179,13 +186,18 @@ function updateScaleOverlay(map, overlay) {
     return;
   }
 
+  // Sample scale at the viewport center so globe mode still has a valid
+  // earth-surface segment when the globe disc no longer reaches the edges.
+  const centerY = height / 2;
+  const centerX = width / 2;
+  const halfSampleWidth = SCALE_BAR_MAX_WIDTH_PX / 2;
   const leftPoint = {
-    x: SCALE_BAR_SCREEN_OFFSET_X,
-    y: Math.max(0, height - SCALE_BAR_SCREEN_OFFSET_Y),
+    x: Math.max(0, centerX - halfSampleWidth),
+    y: centerY,
   };
   const rightPoint = {
-    x: Math.min(width, SCALE_BAR_SCREEN_OFFSET_X + SCALE_BAR_MAX_WIDTH_PX),
-    y: leftPoint.y,
+    x: Math.min(width, centerX + halfSampleWidth),
+    y: centerY,
   };
 
   const leftLngLat = map.unproject([leftPoint.x, leftPoint.y]);
@@ -267,14 +279,12 @@ function getLogicalLayerBundles() {
   };
 }
 
-// Default child orders — must mirror layer-model.js buildDefaultLayerState()
-const DEFAULT_GROUP_CHILD_ORDERS = {
-  earth:     ["ocean", "land", "africa", "australia", "victoria", "japan", "outline", "countriesLand", "graticules"],
-  transport: ["transportRail"],
-  olympics:  ["olympics-gold", "olympics-silver", "olympics-bronze"],
-  empires:   ["roman", "mongol", "british"],
-};
-const DEFAULT_ROOT_ORDER = ["earth", "transport", "olympics", "empires"];
+const STATIC_LAYER_DEFINITIONS = createLayerDefinitions();
+const STATIC_ROW_DEFINITION_INDEX = createRowDefinitionIndex(STATIC_LAYER_DEFINITIONS);
+
+function getDefaultChildOrder(parentId) {
+  return getDefinitionChildOrder(STATIC_ROW_DEFINITION_INDEX, parentId);
+}
 
 // Ordering rules:
 // - Earth group: always pinned to the bottom of the render stack, regardless
@@ -286,13 +296,13 @@ const DEFAULT_ROOT_ORDER = ["earth", "transport", "olympics", "empires"];
 //   item is moved last and ends up highest.
 function applyFullLayerOrder(map, layerState) {
   const bundles = getLogicalLayerBundles();
-  const rootOrder = layerState["__root__"]?.rowOrder ?? DEFAULT_ROOT_ORDER;
+  const rootOrder = layerState[ROOT_PARENT_ID]?.rowOrder ?? ROOT_ROW_IDS;
 
   const moveLayer = (id) => { if (map.getLayer(id)) map.moveLayer(id, undefined); };
 
   // Earth: always bottom — process first. Ocean: always bottom within earth.
   const earthBundle = bundles["earth"] ?? {};
-  const earthChildOrder = layerState["earth"]?.rowOrder ?? DEFAULT_GROUP_CHILD_ORDERS["earth"] ?? [];
+  const earthChildOrder = layerState.earth?.rowOrder ?? getDefaultChildOrder("earth");
   const nonOceanEarth = earthChildOrder.filter((id) => id !== "ocean");
   (earthBundle["ocean"] ?? []).forEach(moveLayer); // ocean first = very bottom
   for (const childId of [...nonOceanEarth].reverse()) {
@@ -302,7 +312,7 @@ function applyFullLayerOrder(map, layerState) {
   // All other groups: reversed UI order so higher = renders on top.
   const nonEarthGroups = rootOrder.filter((id) => id !== "earth");
   for (const groupId of [...nonEarthGroups].reverse()) {
-    const childOrder = layerState[groupId]?.rowOrder ?? DEFAULT_GROUP_CHILD_ORDERS[groupId] ?? [];
+    const childOrder = layerState[groupId]?.rowOrder ?? getDefaultChildOrder(groupId);
     const groupBundle = bundles[groupId] ?? {};
     
     // Special handling for empires: use dynamic ordering from registry
@@ -725,11 +735,10 @@ function findRegistryEntry(layerId) {
 }
 
 // Returns the rowOrder for an empire layer, falling back to default row IDs.
-// Row IDs in the model follow the pattern `${empireId}-fill`, `${empireId}-line`.
 function getEmpireLayerOrder(layerState, empireId) {
   const customOrder = layerState[empireId]?.rowOrder;
   if (customOrder && Array.isArray(customOrder)) return customOrder;
-  return [`${empireId}-fill`, `${empireId}-line`];
+  return getDefaultChildOrder(empireId);
 }
 
 // Maps empire row IDs (e.g. "roman-fill") to their MapLibre layer IDs.

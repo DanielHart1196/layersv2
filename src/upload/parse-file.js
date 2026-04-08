@@ -1,21 +1,23 @@
 import Papa from "papaparse";
 import { gpx, kml } from "@tmcw/togeojson";
-import { detectColumns, rowsToFeatures } from "./csv-mapper.js";
+import { detectColumns } from "./csv-mapper.js";
 
-export const SUPPORTED_EXTENSIONS = [".csv", ".xlsx", ".geojson", ".json", ".gpx"];
+export const SUPPORTED_EXTENSIONS = [".csv", ".xlsx", ".geojson", ".json", ".gpx", ".kml", ".zip"];
 
 export function getFileType(file) {
   const name = file.name.toLowerCase();
   if (name.endsWith(".csv"))                      return "csv";
   if (name.endsWith(".xlsx"))                     return "xlsx";
   if (name.endsWith(".gpx"))                      return "gpx";
+  if (name.endsWith(".kml"))                      return "kml";
+  if (name.endsWith(".zip"))                      return "shapefile-zip";
   if (name.endsWith(".geojson") || name.endsWith(".json")) return "geojson";
   return null;
 }
 
 // Returns { type, headers, rows, features, mapping, error }
 // For CSV/XLSX: returns headers + rows so the UI can show the column mapper
-// For GeoJSON/GPX: returns features directly, no mapping needed
+// For GeoJSON/GPX/KML/shapefile zip: returns features directly, no mapping needed
 export async function parseFile(file) {
   const type = getFileType(file);
   if (!type) {
@@ -55,6 +57,23 @@ export async function parseFile(file) {
     const xml = new DOMParser().parseFromString(text, "text/xml");
     const geojson = gpx(xml);
     return { type: "gpx", features: normaliseFeatures(geojson.features) };
+  }
+
+  if (type === "kml") {
+    const text = await file.text();
+    const xml = new DOMParser().parseFromString(text, "text/xml");
+    const geojson = kml(xml);
+    return { type: "kml", features: normaliseFeatures(geojson.features) };
+  }
+
+  if (type === "shapefile-zip") {
+    const { default: shp } = await import("shpjs");
+    const buffer = await file.arrayBuffer();
+    const geojson = await shp(buffer);
+    const features = Array.isArray(geojson)
+      ? geojson.flatMap((collection) => collection?.features ?? [])
+      : geojson?.features ?? [];
+    return { type: "shapefile-zip", features: normaliseFeatures(features) };
   }
 
   if (type === "geojson") {

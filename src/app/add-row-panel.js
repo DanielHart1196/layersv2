@@ -69,7 +69,7 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getF
         <div class="arp-type-divider">Style</div>
         <button class="arp-type-item arp-type-item-inline" data-type="fill">Fill</button>
         <button class="arp-type-item arp-type-item-inline" data-type="line">Line</button>
-        <button class="arp-type-item arp-type-item-inline" data-type="slider">Slider</button>
+        <button class="arp-type-item arp-type-item-inline" data-type="point">Point</button>
       </div>
     `);
 
@@ -390,8 +390,9 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getF
   }
 
   panel.querySelector(".arp-close").addEventListener("click", close);
-  // Dismiss on backdrop click
+  // Dismiss on backdrop click, but don't let inner clicks bubble to document.
   panel.addEventListener("click", (e) => { if (e.target === panel) close(); });
+  panel.querySelector(".arp-inner").addEventListener("click", (e) => e.stopPropagation());
 
   return { open, close };
 }

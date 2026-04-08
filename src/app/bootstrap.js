@@ -69,13 +69,26 @@ async function bootstrapApplication() {
         return;
       }
 
+      // Skip map update if the row has been disabled.
+      if (!layerModel.isRowVisible(row.id)) {
+        return;
+      }
+
       screenRuntime.setLayerStyleValue(update.layerId, update.key, update.value);
 
       // Persist style changes as new defaults for Supabase layers.
-      const rowDef = layerModel.getRowById(update.layerId);
-      if (rowDef?.layerRef && SUPABASE_UUID.test(rowDef.layerRef)) {
-        debouncedUpdateDefaultStyle(rowDef.layerRef, update.key, update.value);
+      if (SUPABASE_UUID.test(update.layerId)) {
+        debouncedUpdateDefaultStyle(update.layerId, update.key, update.value);
       }
+    },
+    onRemoveRow: (rowId, parentId, row) => {
+      const removed = layerModel.removeRow(rowId, parentId);
+      if (!removed) return;
+      // If removing a dynamic layer row, also detach it from the map.
+      if (row?.type === "layer" && row?.layerRef) {
+        screenRuntime.detachDynamicLayer(row.layerRef);
+      }
+      rerenderLayerMenu();
     },
   });
   enableLayerMenuControls({

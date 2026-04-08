@@ -241,7 +241,7 @@ function hideCustomColorRemoveButton(runtime) {
 }
 
 function getRenderedLayerRow(parentId, rowId) {
-  return document.querySelector(`.layer-menu-row-layer[data-parent-id="${parentId}"][data-row-id="${rowId}"]`);
+  return document.querySelector(`.layer-menu-row[data-parent-id="${parentId}"][data-row-id="${rowId}"]`);
 }
 
 function getAdjacentPreviewOrder(rowIds, rowId, direction) {
@@ -492,7 +492,7 @@ function createRowHeader(labelText, valueText = null, className, options = {}) {
   };
 }
 
-function createLayerRow(definition, state, parentId, inheritedHidden, onToggleExpanded, onToggleVisibility, reorderApi, dragState) {
+function createLayerRow(definition, state, parentId, inheritedHidden, onToggleExpanded, onToggleVisibility, reorderApi, dragState, onRemove = null) {
   const row = document.createElement("div");
   row.className = "layer-menu-row layer-menu-row-layer";
   const expandStateKey = definition.layerId ?? definition.id;
@@ -543,6 +543,16 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
 
   if (grabber && isReorderable) {
     setupPointerReorderGrabber(grabber, parentId, definition.id, reorderApi);
+  }
+
+  if (onRemove) {
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "layer-menu-row-remove";
+    removeBtn.setAttribute("aria-label", "Remove layer");
+    removeBtn.textContent = "×";
+    removeBtn.addEventListener("click", (e) => { e.stopPropagation(); onRemove(definition); });
+    header.append(removeBtn);
   }
 
   if (isExpandable) {
@@ -904,98 +914,122 @@ function createColorRow(row, value, onInput, requestRender) {
   return wrapper;
 }
 
-function createFillRow(row, value, onInput, requestRender) {
+// ── Unified style row (fill / line / point) ───────────────────────────────────
+// Shell: grabber + visibility toggle + label + optional remove button.
+// Body: controls declared by the row definition (color, sliders).
+
+function createStyleRow(row, value, onInput, requestRender, { parentId, reorderApi, isVisible, onToggleVisible, onRemove } = {}) {
   const wrapper = document.createElement("div");
-  wrapper.className = "layer-menu-row layer-menu-row-fill";
+  wrapper.className = `layer-menu-row layer-menu-row-style`;
+  wrapper.classList.toggle("is-hidden", !isVisible);
 
-  const colorValue = value?.color ?? "#8C6A2A";
-  const opacityValue = Number(value?.opacity ?? 100);
+  // ── Shell header ────────────────────────────────────────────────────────────
+  const header = document.createElement("div");
+  header.className = "layer-menu-row-header layer-menu-style-header";
 
-  const colorRow = createColorRow({
-    id: `${row.id}-color`,
-    label: row.label,
-    type: "color",
-    storageKey: row.storageKey,
-    presets: row.presets,
-  }, colorValue, (nextColor) => {
-    onInput(
-      { target: row.colorTarget },
-      nextColor,
-    );
-  }, requestRender);
-  colorRow.classList.add("layer-menu-row-fill-color");
+  const leading = document.createElement("div");
+  leading.className = "layer-menu-row-leading";
 
-  const sliderBlock = createSliderBlock({
-    label: "Opacity",
-    row,
-    value: opacityValue,
-    onInput: (nextOpacity) => {
-      onInput(
-        { target: row.opacityTarget },
-        nextOpacity,
-      );
-    },
-  });
+  if (parentId && reorderApi) {
+    wrapper.dataset.rowId = row.id;
+    wrapper.dataset.parentId = parentId;
+    if (reorderApi.dragState?.parentId === parentId && reorderApi.dragState?.rowId === row.id) {
+      wrapper.classList.add("is-dragging");
+    }
+    const grabber = document.createElement("button");
+    grabber.type = "button";
+    grabber.className = "layer-menu-row-grabber";
+    grabber.setAttribute("aria-label", "Reorder row");
+    grabber.innerHTML = "<span></span><span></span>";
+    leading.append(grabber);
+    setupPointerReorderGrabber(grabber, parentId, row.id, reorderApi);
+  }
 
-  wrapper.append(colorRow, sliderBlock);
-  return wrapper;
-}
+  const visBtn = document.createElement("button");
+  visBtn.type = "button";
+  visBtn.className = "layer-menu-row-toggle";
+  visBtn.setAttribute("aria-label", isVisible ? "Disable row" : "Enable row");
+  const labelSpan = document.createElement("span");
+  labelSpan.className = "layer-menu-row-label";
+  labelSpan.textContent = row.label;
+  visBtn.append(labelSpan);
+  visBtn.addEventListener("click", (e) => { e.stopPropagation(); onToggleVisible?.(); });
+  leading.append(visBtn);
 
-function createLineRow(row, value, onInput, requestRender) {
-  const wrapper = document.createElement("div");
-  wrapper.className = "layer-menu-row layer-menu-row-line";
+  header.append(leading);
 
-  const weightValue = Number(value?.weight ?? 100);
-  const colorValue = value?.color ?? "#C89A42";
-  const opacityValue = Number(value?.opacity ?? 100);
+  if (onRemove) {
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "layer-menu-row-remove";
+    removeBtn.setAttribute("aria-label", "Remove row");
+    removeBtn.textContent = "×";
+    removeBtn.addEventListener("click", (e) => { e.stopPropagation(); onRemove(); });
+    header.append(removeBtn);
+  }
 
-  const weightRow = createSliderBlock({
-    label: "Line",
-    row: {
-      ...row,
-      min: row.weightMin,
-      max: row.weightMax,
-      step: row.weightStep,
-    },
-    value: weightValue,
-    onInput: (nextWeight) => {
-      onInput(
-        { target: row.weightTarget },
-        nextWeight,
-      );
-    },
-  });
+  wrapper.append(header);
 
-  const colorRow = createColorRow({
-    id: `${row.id}-color`,
-    label: "Color",
-    type: "color",
-    storageKey: row.storageKey,
-    presets: row.presets,
-  }, colorValue, (nextColor) => {
-    onInput(
-      { target: row.colorTarget },
-      nextColor,
-    );
-  }, requestRender);
-  colorRow.classList.add("layer-menu-row-line-color");
+  // ── Body: controls ─────────────────────────────────────────────────────────
+  const body = document.createElement("div");
+  body.className = "layer-menu-style-body";
 
-  const opacityRow = createSliderBlock({
-    label: "Opacity",
-    row: {
-      ...row,
-      valueFormat: "percent",
-    },
-    value: opacityValue,
-    onInput: (nextOpacity) => {
-      onInput(
-        { target: row.opacityTarget },
-        nextOpacity,
-      );
-    },
-  });
+  if (row.type === "fill") {
+    const colorValue = value?.color ?? "#8C6A2A";
+    const opacityValue = Number(value?.opacity ?? 100);
+    const colorRow = createColorRow({
+      id: `${row.id}-color`, label: "Color", type: "color",
+      storageKey: row.storageKey, presets: row.presets,
+    }, colorValue, (nextColor) => onInput({ target: row.colorTarget }, nextColor), requestRender);
+    colorRow.classList.add("layer-menu-row-fill-color");
+    const opacityBlock = createSliderBlock({
+      label: "Opacity", row, value: opacityValue,
+      onInput: (v) => onInput({ target: row.opacityTarget }, v),
+    });
+    body.append(colorRow, opacityBlock);
+  }
 
-  wrapper.append(weightRow, colorRow, opacityRow);
+  if (row.type === "line") {
+    const weightValue = Number(value?.weight ?? 1);
+    const colorValue = value?.color ?? "#C89A42";
+    const opacityValue = Number(value?.opacity ?? 100);
+    const weightBlock = createSliderBlock({
+      label: "Weight", row: { ...row, min: row.weightMin, max: row.weightMax, step: row.weightStep, valueFormat: "pixels" },
+      value: weightValue, onInput: (v) => onInput({ target: row.weightTarget }, v),
+    });
+    const colorRow = createColorRow({
+      id: `${row.id}-color`, label: "Color", type: "color",
+      storageKey: row.storageKey, presets: row.presets,
+    }, colorValue, (nextColor) => onInput({ target: row.colorTarget }, nextColor), requestRender);
+    colorRow.classList.add("layer-menu-row-line-color");
+    const opacityBlock = createSliderBlock({
+      label: "Opacity", row: { ...row, valueFormat: "percent" },
+      value: opacityValue, onInput: (v) => onInput({ target: row.opacityTarget }, v),
+    });
+    body.append(weightBlock, colorRow, opacityBlock);
+  }
+
+  if (row.type === "point") {
+    const radiusValue = Number(value?.radius ?? 6);
+    const colorValue = value?.color ?? "#e74c3c";
+    const opacityValue = Number(value?.opacity ?? 80);
+    const radiusBlock = createSliderBlock({
+      label: "Radius", row: { ...row, min: row.radiusMin, max: row.radiusMax, step: row.radiusStep, valueFormat: "pixels" },
+      value: radiusValue, onInput: (v) => onInput({ target: row.radiusTarget }, v),
+    });
+    const colorRow = createColorRow({
+      id: `${row.id}-color`, label: "Color", type: "color",
+      storageKey: row.storageKey, presets: row.presets,
+    }, colorValue, (nextColor) => onInput({ target: row.colorTarget }, nextColor), requestRender);
+    colorRow.classList.add("layer-menu-row-point-color");
+    const opacityBlock = createSliderBlock({
+      label: "Opacity", row: { ...row, valueFormat: "percent" },
+      value: opacityValue, onInput: (v) => onInput({ target: row.opacityTarget }, v),
+    });
+    body.append(radiusBlock, colorRow, opacityBlock);
+  }
+
+  wrapper.append(body);
   return wrapper;
 }
 
@@ -1053,13 +1087,38 @@ function createAddButton(depth, parentId, onAddRow) {
   return btn;
 }
 
-function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth = 0, parentId = null, inheritedHidden = false, onAddRow = null) {
+function makeRemoveButton(row, parentId, onRemoveRow) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "layer-menu-row-remove";
+  btn.setAttribute("aria-label", "Remove row");
+  btn.textContent = "×";
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    onRemoveRow(row.id, parentId, row);
+  });
+  return btn;
+}
+
+// Re-dispatches all stored values for a row's targets through onRowInput.
+// Used when toggling row visibility so the map sees the enable/disable immediately.
+function reapplyRowTargets(row, layerModel, onRowInput) {
+  const value = layerModel.getRowValue(row);
+  if (!value || typeof value !== "object") return;
+  if (row.colorTarget  && value.color   != null) onRowInput({ target: row.colorTarget  }, value.color);
+  if (row.opacityTarget && value.opacity != null) onRowInput({ target: row.opacityTarget }, value.opacity);
+  if (row.weightTarget && value.weight  != null) onRowInput({ target: row.weightTarget  }, value.weight);
+  if (row.radiusTarget && value.radius  != null) onRowInput({ target: row.radiusTarget  }, value.radius);
+}
+
+function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth = 0, parentId = null, inheritedHidden = false, onAddRow = null, onRemoveRow = null) {
   const fragment = document.createDocumentFragment();
   const state = layerModel.getState();
 
   rows.forEach((row) => {
     const rowStateKey = row.type === "layer" ? (row.layerId ?? row.id) : row.id;
     const childRows = row.id ? reorderApi.getOrderedRows(row.id) : [];
+    const isDynamic = onRemoveRow && layerModel.isDynamic(row.id);
 
     if (row.type === "slider") {
       const slider = createSliderRow(row, getDisplayRowValue(row, layerModel, appearanceState), (nextValue) => {
@@ -1079,41 +1138,79 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       return;
     }
 
-    if (row.type === "filter") {
+    if (row.type === "filter" || row.type === "sort") {
+      const labelText = row.type === "filter"
+        ? `${row.label}: ${row.field} ${row.op} ${row.value}`
+        : `${row.label}: ${row.field} ${row.direction === "asc" ? "↑" : "↓"}`;
+      const isVisible = layerModel.isRowVisible(row.id);
       const el = document.createElement("div");
       el.className = "layer-menu-row layer-menu-row-meta";
+      el.classList.toggle("is-hidden", !isVisible);
       el.style.setProperty("--row-depth", String(depth));
-      const { header } = createRowHeader(`${row.label}: ${row.field} ${row.op} ${row.value}`, null, "layer-menu-row-header");
+
+      const header = document.createElement("div");
+      header.className = "layer-menu-row-header";
+      const leading = document.createElement("div");
+      leading.className = "layer-menu-row-leading";
+
+      if (parentId) {
+        el.dataset.rowId = row.id;
+        el.dataset.parentId = parentId;
+        if (reorderApi.dragState?.parentId === parentId && reorderApi.dragState?.rowId === row.id) {
+          el.classList.add("is-dragging");
+        }
+        const grabber = document.createElement("button");
+        grabber.type = "button";
+        grabber.className = "layer-menu-row-grabber";
+        grabber.setAttribute("aria-label", "Reorder row");
+        grabber.innerHTML = "<span></span><span></span>";
+        leading.append(grabber);
+        setupPointerReorderGrabber(grabber, parentId, row.id, reorderApi);
+      }
+
+      const visBtn = document.createElement("button");
+      visBtn.type = "button";
+      visBtn.className = "layer-menu-row-toggle";
+      visBtn.setAttribute("aria-label", isVisible ? "Disable row" : "Enable row");
+      const labelSpan = document.createElement("span");
+      labelSpan.className = "layer-menu-row-label";
+      labelSpan.textContent = labelText;
+      visBtn.append(labelSpan);
+      visBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        layerModel.toggleRowVisible(row.id);
+        reapplyRowTargets(row, layerModel, onRowInput);
+        onToggleExpanded.__requestRender();
+      });
+      leading.append(visBtn);
+      header.append(leading);
+      if (isDynamic) header.append(makeRemoveButton(row, parentId, onRemoveRow));
       el.append(header);
       fragment.append(el);
       return;
     }
 
-    if (row.type === "sort") {
-      const el = document.createElement("div");
-      el.className = "layer-menu-row layer-menu-row-meta";
-      el.style.setProperty("--row-depth", String(depth));
-      const { header } = createRowHeader(`${row.label}: ${row.field} ${row.direction === "asc" ? "↑" : "↓"}`, null, "layer-menu-row-header");
-      el.append(header);
-      fragment.append(el);
-      return;
-    }
-
-    if (row.type === "fill") {
-      const fillRow = createFillRow(row, getDisplayRowValue(row, layerModel, appearanceState), (syntheticRow, nextValue) => {
-        onRowInput(syntheticRow, nextValue);
-      }, onToggleExpanded.__requestRender);
-      fillRow.style.setProperty("--row-depth", String(depth));
-      fragment.append(fillRow);
-      return;
-    }
-
-    if (row.type === "line") {
-      const lineRow = createLineRow(row, getDisplayRowValue(row, layerModel, appearanceState), (syntheticRow, nextValue) => {
-        onRowInput(syntheticRow, nextValue);
-      }, onToggleExpanded.__requestRender);
-      lineRow.style.setProperty("--row-depth", String(depth));
-      fragment.append(lineRow);
+    if (row.type === "fill" || row.type === "line" || row.type === "point") {
+      const isVisible = layerModel.isRowVisible(row.id);
+      const styleRow = createStyleRow(
+        row,
+        getDisplayRowValue(row, layerModel, appearanceState),
+        (syntheticRow, nextValue) => onRowInput(syntheticRow, nextValue),
+        onToggleExpanded.__requestRender,
+        {
+          parentId: parentId ?? null,
+          reorderApi: parentId ? reorderApi : null,
+          isVisible,
+          onToggleVisible: () => {
+            layerModel.toggleRowVisible(row.id);
+            reapplyRowTargets(row, layerModel, onRowInput);
+            onToggleExpanded.__requestRender();
+          },
+          onRemove: isDynamic ? () => onRemoveRow(row.id, parentId, row) : null,
+        },
+      );
+      styleRow.style.setProperty("--row-depth", String(depth));
+      fragment.append(styleRow);
       return;
     }
 
@@ -1126,6 +1223,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       onToggleVisibility,
       reorderApi,
       reorderApi.dragState,
+      isDynamic ? (r) => onRemoveRow(r.id, parentId, r) : null,
     );
     layerRow.style.setProperty("--row-depth", String(depth));
     fragment.append(layerRow);
@@ -1133,7 +1231,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
     if (row.type === "layer" && row.layerId && state[rowStateKey]?.expanded) {
       const nextInheritedHidden = inheritedHidden || (state[rowStateKey]?.visible === false);
       if (childRows.length) {
-        fragment.append(buildRows(childRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden, onAddRow));
+        fragment.append(buildRows(childRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden, onAddRow, onRemoveRow));
       }
       if (onAddRow) {
         const addBtn = createAddButton(depth + 1, row.id, onAddRow);
@@ -1150,6 +1248,7 @@ function renderLayerMenuRows({
   layerModel,
   onRowInput,
   onAddRow,
+  onRemoveRow,
 }) {
   if (!panel || !layerModel) {
     return () => {};
@@ -1305,6 +1404,7 @@ function renderLayerMenuRows({
         layerModel.getRootParentId(),
         false,
         onAddRow ?? null,
+        onRemoveRow ?? null,
       ),
     );
 

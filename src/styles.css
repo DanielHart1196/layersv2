@@ -410,24 +410,32 @@ ul {
   justify-items: stretch;
 }
 
-.layer-menu-row-fill {
+.layer-menu-row-style {
   display: grid;
-  gap: 12px;
   cursor: default;
 }
 
-.layer-menu-row-line {
+.layer-menu-style-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.layer-menu-style-body {
   display: grid;
   gap: 12px;
-  cursor: default;
+  padding-top: 12px;
 }
 
-.layer-menu-row-fill-color {
-  padding: 0;
-  border: 0;
+.layer-menu-row-style.is-hidden .layer-menu-style-body {
+  opacity: 0.4;
+  pointer-events: none;
 }
 
-.layer-menu-row-line-color {
+.layer-menu-row-fill-color,
+.layer-menu-row-line-color,
+.layer-menu-row-point-color {
   padding: 0;
   border: 0;
   box-shadow: none;
@@ -1120,6 +1128,23 @@ body.is-reordering-rows {
 
 .layer-menu-add-row:hover {
   color: rgba(154, 210, 255, 0.7);
+}
+
+.layer-menu-row-remove {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.25);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 120ms;
+}
+
+.layer-menu-row-remove:hover {
+  color: rgba(255, 100, 100, 0.8);
 }
 
 /* ─── Add row panel (arp) ──────────────────────────────────────────────────── */

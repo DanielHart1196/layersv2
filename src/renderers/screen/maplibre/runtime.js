@@ -132,6 +132,9 @@ function createMaplibreScreenRuntime({
     loadDynamicLayer({ layerId, geojson, tilesUrl, style }) {
       mapInstance?.attachDynamicLayer?.(layerId, geojson, tilesUrl, style);
     },
+    detachDynamicLayer(layerId) {
+      mapInstance?.detachDynamicLayer?.(layerId);
+    },
   };
 }
 

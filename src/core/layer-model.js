@@ -7,66 +7,52 @@ function createLayerModel() {
   const SHARED_COLOR_STORAGE_KEY = "layerv2.colors.customColors";
   const SHARED_COLOR_PRESETS = ["#000000", "#FFFFFF", "#d94b4b", "#e58a2b", "#e5c84a", "#5b8c5a", "#4b6ed9", "#8c5bd6"];
 
-  function createFillRow({
+  function createStyleRow({
     id,
-    label = "Fill",
+    type,
+    label,
     layerId,
     storageKey = null,
     presets = [],
-    defaultColor = "#000000",
-    defaultOpacity = 100,
+    defaultColor,
+    defaultOpacity,
+    defaultWeight,
+    defaultRadius,
   }) {
-    return {
-      id,
-      type: "fill",
-      label,
-      colorTarget: { kind: "layer-style", layerId, key: "fillColor" },
-      opacityTarget: { kind: "layer-style", layerId, key: "fillOpacity" },
-      storageKey,
-      presets,
-      min: 0,
-      max: 100,
-      step: 1,
-      valueFormat: "percent",
-      initialState: {
-        fillColor: defaultColor,
-        fillOpacity: defaultOpacity,
-      },
-    };
-  }
-
-  function createLineRow({
-    id,
-    label = "Line",
-    layerId,
-    storageKey = null,
-    presets = [],
-    defaultColor = "#000000",
-    defaultOpacity = 100,
-    defaultWeight = 1,
-  }) {
-    return {
-      id,
-      type: "line",
-      label,
-      colorTarget: { kind: "layer-style", layerId, key: "lineColor" },
-      opacityTarget: { kind: "layer-style", layerId, key: "lineOpacity" },
-      weightTarget: { kind: "layer-style", layerId, key: "lineWeight" },
-      storageKey,
-      presets,
-      min: 0,
-      max: 100,
-      step: 1,
-      valueFormat: "pixels",
-      weightMin: 0,
-      weightMax: 10,
-      weightStep: 0.1,
-      initialState: {
-        lineColor: defaultColor,
-        lineOpacity: defaultOpacity,
-        lineWeight: defaultWeight,
-      },
-    };
+    const resolvedLabel = label ?? (type === "fill" ? "Fill" : type === "line" ? "Line" : "Point");
+    const base = { id, type, label: resolvedLabel, storageKey, presets, min: 0, max: 100, step: 1 };
+    if (type === "fill") {
+      return {
+        ...base,
+        valueFormat: "percent",
+        colorTarget:   { kind: "layer-style", layerId, key: "fillColor" },
+        opacityTarget: { kind: "layer-style", layerId, key: "fillOpacity" },
+        initialState: { fillColor: defaultColor ?? "#000000", fillOpacity: defaultOpacity ?? 100 },
+      };
+    }
+    if (type === "line") {
+      return {
+        ...base,
+        valueFormat: "percent",
+        weightMin: 0, weightMax: 10, weightStep: 0.1,
+        colorTarget:   { kind: "layer-style", layerId, key: "lineColor" },
+        opacityTarget: { kind: "layer-style", layerId, key: "lineOpacity" },
+        weightTarget:  { kind: "layer-style", layerId, key: "lineWeight" },
+        initialState: { lineColor: defaultColor ?? "#000000", lineOpacity: defaultOpacity ?? 100, lineWeight: defaultWeight ?? 1 },
+      };
+    }
+    if (type === "point") {
+      return {
+        ...base,
+        valueFormat: "percent",
+        radiusMin: 1, radiusMax: 30, radiusStep: 0.5,
+        colorTarget:   { kind: "layer-style", layerId, key: "pointColor" },
+        opacityTarget: { kind: "layer-style", layerId, key: "pointOpacity" },
+        radiusTarget:  { kind: "layer-style", layerId, key: "pointRadius" },
+        initialState: { pointColor: defaultColor ?? "#e74c3c", pointOpacity: defaultOpacity ?? 80, pointRadius: defaultRadius ?? 6 },
+      };
+    }
+    return null;
   }
 
   function createSliderRow({
@@ -103,16 +89,16 @@ function createLayerModel() {
       layerId: entry.id,
       hidden: entry.defaultVisible === false,
       rows: [
-        ...(entry.fill ? [createFillRow({
-          id: `${entry.id}-fill`,
+        ...(entry.fill ? [createStyleRow({
+          id: `${entry.id}-fill`, type: "fill",
           layerId: entry.id,
           storageKey: SHARED_COLOR_STORAGE_KEY,
           presets: SHARED_COLOR_PRESETS,
           defaultColor: entry.fill.color,
           defaultOpacity: entry.fill.opacity,
         })] : []),
-        ...(entry.line ? [createLineRow({
-          id: `${entry.id}-line`,
+        ...(entry.line ? [createStyleRow({
+          id: `${entry.id}-line`, type: "line",
           layerId: entry.id,
           storageKey: SHARED_COLOR_STORAGE_KEY,
           presets: SHARED_COLOR_PRESETS,
@@ -140,7 +126,7 @@ function createLayerModel() {
           layerId: "ocean",
           pinnedOrder: "start",
           rows: [
-            createFillRow({
+            createStyleRow({ type: "fill",
               id: "ocean-fill",
               layerId: "ocean",
               storageKey: SHARED_COLOR_STORAGE_KEY,
@@ -156,14 +142,14 @@ function createLayerModel() {
           label: "Australia",
           layerId: "australia",
           rows: [
-            createFillRow({
+            createStyleRow({ type: "fill",
               id: "australia-fill",
               layerId: "australia",
               storageKey: SHARED_COLOR_STORAGE_KEY,
               presets: SHARED_COLOR_PRESETS,
               defaultColor: "#6EAA6E",
             }),
-            createLineRow({
+            createStyleRow({ type: "line",
               id: "australia-line",
               layerId: "australia",
               storageKey: SHARED_COLOR_STORAGE_KEY,
@@ -179,14 +165,14 @@ function createLayerModel() {
           layerId: "victoria",
           hidden: true,
           rows: [
-            createFillRow({
+            createStyleRow({ type: "fill",
               id: "victoria-fill",
               layerId: "victoria",
               storageKey: SHARED_COLOR_STORAGE_KEY,
               presets: SHARED_COLOR_PRESETS,
               defaultColor: "#6EAA6E",
             }),
-            createLineRow({
+            createStyleRow({ type: "line",
               id: "victoria-line",
               layerId: "victoria",
               storageKey: SHARED_COLOR_STORAGE_KEY,
@@ -268,14 +254,14 @@ function createLayerModel() {
           label: "Roman",
           layerId: "roman",
           rows: [
-            createFillRow({
+            createStyleRow({ type: "fill",
               id: "roman-fill",
               layerId: "roman",
               storageKey: SHARED_COLOR_STORAGE_KEY,
               presets: SHARED_COLOR_PRESETS,
               defaultColor: "#8c6a2a",
             }),
-            createLineRow({
+            createStyleRow({ type: "line",
               id: "roman-line",
               layerId: "roman",
               storageKey: SHARED_COLOR_STORAGE_KEY,
@@ -290,14 +276,14 @@ function createLayerModel() {
           label: "Mongol",
           layerId: "mongol",
           rows: [
-            createFillRow({
+            createStyleRow({ type: "fill",
               id: "mongol-fill",
               layerId: "mongol",
               storageKey: SHARED_COLOR_STORAGE_KEY,
               presets: SHARED_COLOR_PRESETS,
               defaultColor: "#b85c38",
             }),
-            createLineRow({
+            createStyleRow({ type: "line",
               id: "mongol-line",
               layerId: "mongol",
               storageKey: SHARED_COLOR_STORAGE_KEY,
@@ -312,14 +298,14 @@ function createLayerModel() {
           label: "British",
           layerId: "british",
           rows: [
-            createFillRow({
+            createStyleRow({ type: "fill",
               id: "british-fill",
               layerId: "british",
               storageKey: SHARED_COLOR_STORAGE_KEY,
               presets: SHARED_COLOR_PRESETS,
               defaultColor: "#c84b31",
             }),
-            createLineRow({
+            createStyleRow({ type: "line",
               id: "british-line",
               layerId: "british",
               storageKey: SHARED_COLOR_STORAGE_KEY,
@@ -447,6 +433,12 @@ function createLayerModel() {
         return;
       }
 
+      // Per-row visible toggle — keyed by the row's own ID.
+      const rowRecord = ensureLayerState(row.id);
+      if (typeof rowRecord.rowVisible !== "boolean") {
+        rowRecord.rowVisible = true;
+      }
+
       const layerId =
         row.colorTarget?.layerId ??
         row.opacityTarget?.layerId ??
@@ -567,7 +559,10 @@ function createLayerModel() {
         const parent = rowDefinitionsById.get(parentId) ?? layerDefinitions[parentId];
         if (!parent) return;
         if (!Array.isArray(parent.rows)) parent.rows = [];
+        const correctLayerId = parent.layerRef ?? null;
         rows.forEach((row) => {
+          // Migrate: fix style target layerIds that were stored before the mapLayerId fix.
+          if (correctLayerId) migrateRowTargets(row, correctLayerId);
           parent.rows.push(row);
           rowDefinitionsById.set(row.id, row);
           dynamicIds.add(row.id);
@@ -632,6 +627,14 @@ function createLayerModel() {
       };
     }
 
+    if (row?.type === "point") {
+      return {
+        color: layerState[row.colorTarget?.layerId]?.[row.colorTarget?.key] ?? null,
+        opacity: layerState[row.opacityTarget?.layerId]?.[row.opacityTarget?.key] ?? null,
+        radius: layerState[row.radiusTarget?.layerId]?.[row.radiusTarget?.key] ?? null,
+      };
+    }
+
     const target = row?.target;
     if (target?.kind !== "layer-style") {
       return null;
@@ -685,6 +688,18 @@ function createLayerModel() {
     return record.visible;
   }
 
+  function isRowVisible(rowId) {
+    return layerState[rowId]?.rowVisible !== false;
+  }
+
+  function toggleRowVisible(rowId) {
+    if (!layerState[rowId]) layerState[rowId] = {};
+    const current = layerState[rowId].rowVisible !== false;
+    layerState[rowId].rowVisible = !current;
+    persistLayerState();
+    return !current;
+  }
+
   function reorderChildRow(parentId, rowId, targetRowId, placement = "before") {
     if (!getParentRows(parentId).length) {
       return null;
@@ -713,6 +728,44 @@ function createLayerModel() {
     return nextOrder.slice();
   }
 
+  // Fixes style target layerIds on a row — used during hydration to repair rows
+  // created before the mapLayerId fix (when uid was used instead of layerRef).
+  function migrateRowTargets(row, correctLayerId) {
+    const fix = (t) => { if (t?.kind === "layer-style" && t.layerId !== correctLayerId) t.layerId = correctLayerId; };
+    fix(row.colorTarget);
+    fix(row.opacityTarget);
+    fix(row.weightTarget);
+    fix(row.radiusTarget);
+    fix(row.target);
+  }
+
+  // Removes a dynamic row from its parent. Returns the removed row or null if not removable.
+  function removeRow(rowId, parentId) {
+    if (!dynamicIds.has(rowId)) return null;
+
+    if (parentId === ROOT_PARENT_ID) {
+      const idx = rootDynamicRows.findIndex((r) => r.id === rowId);
+      if (idx !== -1) rootDynamicRows.splice(idx, 1);
+    } else {
+      const parentDef = rowDefinitionsById.get(parentId) ?? layerDefinitions[parentId];
+      if (parentDef?.rows) {
+        const idx = parentDef.rows.findIndex((r) => r.id === rowId);
+        if (idx !== -1) parentDef.rows.splice(idx, 1);
+      }
+      if (staticParentAdditions.has(parentId)) {
+        const additions = staticParentAdditions.get(parentId).filter((r) => r.id !== rowId);
+        if (additions.length) staticParentAdditions.set(parentId, additions);
+        else staticParentAdditions.delete(parentId);
+      }
+    }
+
+    rowDefinitionsById.delete(rowId);
+    dynamicIds.delete(rowId);
+    persistDynamicDefs();
+    persistLayerState();
+    return rowId;
+  }
+
   // Appends a new child row to any parent row (layer or group).
   // config is used by filter/sort types.
   function addRowToLayer(layerId, rowType, config = {}) {
@@ -722,27 +775,41 @@ function createLayerModel() {
     }
 
     const uid = `${layerId}-dyn-${rowType}-${Date.now()}`;
+    // Style targets must reference the actual map layer ID.
+    // For Supabase-backed rows, the map uses layerRef (UUID); the model row uses its own uid.
+    const mapLayerId = parentDef.layerRef ?? layerId;
     let newRow;
     if (rowType === "fill") {
-      newRow = createFillRow({
+      newRow = createStyleRow({ type: "fill",
         id: uid,
         label: "Fill",
-        layerId,
+        layerId: mapLayerId,
         storageKey: SHARED_COLOR_STORAGE_KEY,
         presets: SHARED_COLOR_PRESETS,
         defaultColor: "#8C6A2A",
         defaultOpacity: 80,
       });
     } else if (rowType === "line") {
-      newRow = createLineRow({
+      newRow = createStyleRow({ type: "line",
         id: uid,
         label: "Line",
-        layerId,
+        layerId: mapLayerId,
         storageKey: SHARED_COLOR_STORAGE_KEY,
         presets: SHARED_COLOR_PRESETS,
         defaultColor: "#000000",
         defaultOpacity: 100,
         defaultWeight: 1,
+      });
+    } else if (rowType === "point") {
+      newRow = createStyleRow({ type: "point",
+        id: uid,
+        label: "Point",
+        layerId: mapLayerId,
+        storageKey: SHARED_COLOR_STORAGE_KEY,
+        presets: SHARED_COLOR_PRESETS,
+        defaultColor: "#e74c3c",
+        defaultOpacity: 80,
+        defaultRadius: 6,
       });
     } else if (rowType === "slider") {
       newRow = createSliderRow({
@@ -785,14 +852,19 @@ function createLayerModel() {
     dynamicIds.add(newRow.id);
 
     if (newRow.initialState) {
-      if (!layerState[layerId]) {
-        layerState[layerId] = {};
+      if (!layerState[mapLayerId]) {
+        layerState[mapLayerId] = {};
       }
       Object.entries(newRow.initialState).forEach(([key, value]) => {
-        if (layerState[layerId][key] === undefined) {
-          layerState[layerId][key] = value;
+        if (layerState[mapLayerId][key] === undefined) {
+          layerState[mapLayerId][key] = value;
         }
       });
+      // Per-row visibility — keyed by row ID, not target layer ID.
+      if (!layerState[newRow.id]) layerState[newRow.id] = {};
+      if (typeof layerState[newRow.id].rowVisible !== "boolean") {
+        layerState[newRow.id].rowVisible = true;
+      }
     }
 
     // Track so we can re-attach to the parent on hydration.
@@ -885,11 +957,15 @@ function createLayerModel() {
     getState,
     getSupabaseLayers,
     isExpanded,
+    isRowVisible,
+    isDynamic: (rowId) => dynamicIds.has(rowId),
     normalizeChildRowOrder,
     reorderChildRow,
+    removeRow,
     setChildRowOrder,
     setRowValue,
     toggleExpanded,
+    toggleRowVisible,
     toggleVisibility,
   };
 }

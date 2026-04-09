@@ -1,8 +1,9 @@
-import { supabase } from "../../lib/supabase.js";
+import { requireSupabase } from "../../lib/supabase.js";
 
 // Merges a partial style patch into the layer's default_style in Supabase.
 // key/value pairs map directly to default_style fields (color, opacity, radius, weight).
 export async function updateLayerDefaultStyle(layerId, patch) {
+  const supabase = requireSupabase();
   // Read current default_style first, then merge.
   const { data: layer, error: readError } = await supabase
     .from("layers")
@@ -24,6 +25,7 @@ export async function updateLayerDefaultStyle(layerId, patch) {
 
 // Returns all public/unlisted layers from Supabase as catalog entries.
 export async function getSupabaseCatalog() {
+  const supabase = requireSupabase();
   const { data, error } = await supabase
     .from("layers")
     .select("id, name, geometry_type")
@@ -35,13 +37,14 @@ export async function getSupabaseCatalog() {
   return data.map((l) => ({
     id: l.id,
     label: l.name,
-    group: "My layers",
+    group: "Uploaded layers",
     geometryType: l.geometry_type ?? "mixed",
   }));
 }
 
 // Returns sorted distinct values for a specific property field, sampled from up to 200 features.
 export async function getLayerFieldValues(layerId, field) {
+  const supabase = requireSupabase();
   const { data, error } = await supabase
     .from("features")
     .select("properties")
@@ -66,6 +69,7 @@ export async function getLayerFieldValues(layerId, field) {
 
 // Returns sorted unique property field names for a layer, sampled from up to 20 features.
 export async function getLayerFields(layerId) {
+  const supabase = requireSupabase();
   const { data, error } = await supabase
     .from("features")
     .select("properties")
@@ -87,6 +91,7 @@ export async function getLayerFields(layerId) {
 const MAX_GEOJSON_FEATURES = 10_000;
 
 export async function loadLayerFromSupabase(layerId) {
+  const supabase = requireSupabase();
   const { data: layer, error: layerError } = await supabase
     .from("layers")
     .select("name, geometry_type, default_style, tiles_url, feature_count")

@@ -20,7 +20,7 @@
 //   line: { color, opacity (0–100), weight (px), cap ("butt"|"round"|"square"), join ("miter"|"round"|"bevel") }
 //
 // OTHER FLAGS:
-//   group         — "earth" | "transport" — which section of the layer menu
+//   group         — "earth" — built-in Earth base content
 //   deferred      — true = loads after browser idle (use for hidden-by-default layers)
 //   defaultVisible — false = hidden in the menu on first load
 //   inInitialStyle — true = baked into the MapLibre initial style (fastest possible render)
@@ -61,22 +61,6 @@ export const LOCAL_LAYERS = [
     },
     fill: null,
     line: { color: "#8FA9BC", opacity: 100, weight: 1 },
-  },
-
-  // ── Transport ──────────────────────────────────────────────────────────────
-
-  {
-    id: "transportRail",
-    label: "Rail (SA)",
-    group: "transport",
-    deferred: false,
-    defaultVisible: true,
-    source: {
-      kind: "geojson",
-      url: "/data/transport/rail-sa.geojson",
-    },
-    fill: null,
-    line: { color: "#f07a58", opacity: 92, weight: 3.5, cap: "round", join: "round" },
   },
 ];
 

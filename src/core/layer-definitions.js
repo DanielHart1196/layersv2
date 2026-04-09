@@ -1,7 +1,7 @@
 import { LOCAL_LAYERS } from "../config/local-layers.js";
 
 const ROOT_PARENT_ID = "__root__";
-const ROOT_ROW_IDS = ["earth", "transport", "olympics", "empires"];
+const ROOT_ROW_IDS = ["earth"];
 const SHARED_COLOR_STORAGE_KEY = "layerv2.colors.customColors";
 const SHARED_COLOR_PRESETS = ["#000000", "#FFFFFF", "#d94b4b", "#e58a2b", "#e5c84a", "#5b8c5a", "#4b6ed9", "#8c5bd6"];
 
@@ -74,6 +74,7 @@ function createStyleRow({
   type,
   label,
   layerId,
+  runtimeTargetId = null,
   storageKey = null,
   presets = [],
   defaultColor,
@@ -82,7 +83,23 @@ function createStyleRow({
   defaultRadius,
 }) {
   const resolvedLabel = label ?? (type === "fill" ? "Fill" : type === "line" ? "Line" : "Point");
-  const base = { id, type, label: resolvedLabel, storageKey, presets, min: 0, max: 100, step: 1 };
+  const resolvedRuntimeTargetId = runtimeTargetId
+    ?? (type === "fill"
+      ? `${layerId}::fill`
+      : type === "line"
+        ? `${layerId}::line`
+        : `${layerId}::point-fill`);
+  const base = {
+    id,
+    type,
+    label: resolvedLabel,
+    runtimeTargetId: resolvedRuntimeTargetId,
+    storageKey,
+    presets,
+    min: 0,
+    max: 100,
+    step: 1,
+  };
   if (type === "fill") {
     return {
       ...base,
@@ -197,168 +214,6 @@ function createLayerDefinitions() {
           ],
         }),
         ...LOCAL_LAYERS.filter((l) => l.group === "earth").map(localLayerToRow),
-        createDataRow({
-          id: "australia",
-          label: "Australia",
-          layerId: "australia",
-          rows: [
-            createStyleRow({
-              type: "fill",
-              id: "australia-fill",
-              layerId: "australia",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#6EAA6E",
-            }),
-            createStyleRow({
-              type: "line",
-              id: "australia-line",
-              layerId: "australia",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#d9e4da",
-            }),
-          ],
-        }),
-        createDataRow({
-          id: "victoria",
-          label: "Victoria",
-          layerId: "victoria",
-          hidden: true,
-          rows: [
-            createStyleRow({
-              type: "fill",
-              id: "victoria-fill",
-              layerId: "victoria",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#6EAA6E",
-            }),
-            createStyleRow({
-              type: "line",
-              id: "victoria-line",
-              layerId: "victoria",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#d9e4da",
-            }),
-          ],
-        }),
-      ],
-    }),
-    transport: createDataRow({
-      id: "transport",
-      label: "Transport",
-      layerId: "transport",
-      defaultExpanded: true,
-      rows: LOCAL_LAYERS.filter((l) => l.group === "transport").map(localLayerToRow),
-    }),
-    olympics: createDataRow({
-      id: "olympics",
-      label: "Olympics",
-      layerId: "olympics",
-      rows: [
-        createSliderRow({
-          id: "olympics-year",
-          label: "Year",
-          layerId: "olympics",
-          key: "selectedYear",
-          min: 1996,
-          max: 2024,
-          step: 4,
-          initialValue: 2024,
-        }),
-        createSliderRow({
-          id: "olympics-radius",
-          label: "Radius",
-          layerId: "olympics",
-          key: "pointRadius",
-          min: 1,
-          max: 12,
-          step: 0.1,
-          valueFormat: "pixels",
-          initialValue: 3.5,
-        }),
-        createDataRow({ id: "olympics-gold", label: "Gold", layerId: "olympicsGold", rows: [] }),
-        createDataRow({ id: "olympics-silver", label: "Silver", layerId: "olympicsSilver", rows: [] }),
-        createDataRow({ id: "olympics-bronze", label: "Bronze", layerId: "olympicsBronze", rows: [] }),
-      ],
-    }),
-    empires: createDataRow({
-      id: "empires",
-      layerId: "empires",
-      label: "Empires",
-      defaultExpanded: true,
-      rows: [
-        createDataRow({
-          id: "roman",
-          label: "Roman",
-          layerId: "roman",
-          rows: [
-            createStyleRow({
-              type: "fill",
-              id: "roman-fill",
-              layerId: "roman",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#8c6a2a",
-            }),
-            createStyleRow({
-              type: "line",
-              id: "roman-line",
-              layerId: "roman",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#c89a42",
-            }),
-          ],
-        }),
-        createDataRow({
-          id: "mongol",
-          label: "Mongol",
-          layerId: "mongol",
-          rows: [
-            createStyleRow({
-              type: "fill",
-              id: "mongol-fill",
-              layerId: "mongol",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#b85c38",
-            }),
-            createStyleRow({
-              type: "line",
-              id: "mongol-line",
-              layerId: "mongol",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#d96f44",
-            }),
-          ],
-        }),
-        createDataRow({
-          id: "british",
-          label: "British",
-          layerId: "british",
-          rows: [
-            createStyleRow({
-              type: "fill",
-              id: "british-fill",
-              layerId: "british",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#c84b31",
-            }),
-            createStyleRow({
-              type: "line",
-              id: "british-line",
-              layerId: "british",
-              storageKey: SHARED_COLOR_STORAGE_KEY,
-              presets: SHARED_COLOR_PRESETS,
-              defaultColor: "#f07a58",
-            }),
-          ],
-        }),
       ],
     }),
   };

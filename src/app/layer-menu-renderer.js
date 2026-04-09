@@ -16,8 +16,6 @@ function formatRowValue(row, value) {
   return String(value ?? "");
 }
 
-const SETTINGS_BACKGROUND_STORAGE_KEY = "layerv2.layerMenuAppearance.v1";
-const SCREEN_BACKGROUND_STORAGE_KEY = "layerv2.screenAppearance.v1";
 const SETTINGS_BACKGROUND_PRESETS = ["#000000", "#FFFFFF", "#d94b4b", "#e58a2b", "#e5c84a", "#5b8c5a", "#4b6ed9", "#8c5bd6"];
 const DEFAULT_SETTINGS_BACKGROUND = {
   color: "#FFFFFF",
@@ -133,57 +131,6 @@ function saveStoredColors(storageKey, colors) {
   }
 
   window.localStorage?.setItem(storageKey, JSON.stringify(colors.slice(0, 10)));
-}
-
-function loadAppearanceState(storageKey, defaults) {
-  try {
-    const raw = window.localStorage?.getItem(storageKey);
-    if (!raw) {
-      return { ...defaults };
-    }
-
-    const parsed = JSON.parse(raw);
-    const nextState = {
-      color: normalizeHexColor(parsed?.color) ?? defaults.color,
-      opacity: Math.max(0, Math.min(100, Number(parsed?.opacity) || 0)),
-    };
-
-    if (storageKey === SCREEN_BACKGROUND_STORAGE_KEY && parsed?.version !== 1) {
-      nextState.opacity = defaults.opacity;
-      saveAppearanceState(storageKey, nextState);
-    }
-
-    return nextState;
-  } catch (_error) {
-    return { ...defaults };
-  }
-}
-
-function saveAppearanceState(storageKey, state) {
-  try {
-    window.localStorage?.setItem(storageKey, JSON.stringify({
-      version: 1,
-      ...state,
-    }));
-  } catch (_error) {
-    // Ignore storage failures and keep the runtime usable.
-  }
-}
-
-function loadSettingsBackgroundState() {
-  return loadAppearanceState(SETTINGS_BACKGROUND_STORAGE_KEY, DEFAULT_SETTINGS_BACKGROUND);
-}
-
-function saveSettingsBackgroundState(state) {
-  saveAppearanceState(SETTINGS_BACKGROUND_STORAGE_KEY, state);
-}
-
-function loadScreenBackgroundState() {
-  return loadAppearanceState(SCREEN_BACKGROUND_STORAGE_KEY, DEFAULT_SCREEN_BACKGROUND);
-}
-
-function saveScreenBackgroundState(state) {
-  saveAppearanceState(SCREEN_BACKGROUND_STORAGE_KEY, state);
 }
 
 function applySettingsBackground(panel, appearanceButton, state) {
@@ -1113,6 +1060,9 @@ function reapplyRowTargets(row, layerModel, onRowInput) {
   if (row.opacityTarget && value.opacity != null) onRowInput({ target: row.opacityTarget }, value.opacity);
   if (row.weightTarget && value.weight  != null) onRowInput({ target: row.weightTarget  }, value.weight);
   if (row.radiusTarget && value.radius  != null) onRowInput({ target: row.radiusTarget  }, value.radius);
+  if (row.runtimeTargetId) {
+    onRowInput({ target: { kind: "runtime-style", runtimeTargetId: row.runtimeTargetId, key: "visible" } }, layerModel.isRowVisible(row.id));
+  }
 }
 
 function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth = 0, parentId = null, inheritedHidden = false, onAddRow = null, onRemoveRow = null) {
@@ -1264,10 +1214,7 @@ function renderLayerMenuRows({
   let activeDragState = null;
 
   function render(nextUiState = null) {
-    const appearanceState = {
-      settings: loadSettingsBackgroundState(),
-      screen: loadScreenBackgroundState(),
-    };
+    const appearanceState = layerModel.getAppearanceState();
     const appearanceButton = document.getElementById("layerMenuAppearanceButton");
     const screenButton = document.getElementById("layerMenuScreenButton");
     applySettingsBackground(panel, appearanceButton, appearanceState.settings);
@@ -1343,25 +1290,17 @@ function renderLayerMenuRows({
     const onPanelRowInput = (row, nextValue) => {
       const target = row?.target ?? row?.colorTarget ?? row?.opacityTarget ?? row?.weightTarget;
       if (target?.kind === "settings-background") {
-        const nextState = { ...loadSettingsBackgroundState() };
-        if (target.key === "color") {
-          nextState.color = normalizeHexColor(nextValue) ?? nextState.color;
-        } else if (target.key === "opacity") {
-          nextState.opacity = Math.max(0, Math.min(100, Number(nextValue) || 0));
-        }
-        saveSettingsBackgroundState(nextState);
+        const nextState = layerModel.setAppearanceValue("settings", target.key, nextValue)
+          ?? layerModel.getAppearanceState().settings
+          ?? { ...DEFAULT_SETTINGS_BACKGROUND };
         applySettingsBackground(panel, appearanceButton, nextState);
         return;
       }
 
       if (target?.kind === "screen-background") {
-        const nextState = { ...loadScreenBackgroundState() };
-        if (target.key === "color") {
-          nextState.color = normalizeHexColor(nextValue) ?? nextState.color;
-        } else if (target.key === "opacity") {
-          nextState.opacity = Math.max(0, Math.min(100, Number(nextValue) || 0));
-        }
-        saveScreenBackgroundState(nextState);
+        const nextState = layerModel.setAppearanceValue("screen", target.key, nextValue)
+          ?? layerModel.getAppearanceState().screen
+          ?? { ...DEFAULT_SCREEN_BACKGROUND };
         applyScreenBackground(nextState, screenButton);
         return;
       }

@@ -3,6 +3,15 @@ import { rowsToFeatures } from "./csv-mapper.js";
 import { summarizeFeatureComplexity } from "./feature-complexity.js";
 import { insertLayer } from "./insert-layer.js";
 
+function inferGeometryType(features = []) {
+  const types = new Set(features.map((feature) => feature?.geometry?.type).filter(Boolean));
+  if (types.size > 1) return "mixed";
+  if (types.has("Point") || types.has("MultiPoint")) return "point";
+  if (types.has("LineString") || types.has("MultiLineString")) return "line";
+  if (types.has("Polygon") || types.has("MultiPolygon")) return "polygon";
+  return "mixed";
+}
+
 export function mountUploadPanel({ onLayerCreated }) {
   const panel = createPanel();
   document.body.appendChild(panel);
@@ -249,7 +258,12 @@ export function mountUploadPanel({ onLayerCreated }) {
         state.step = "done";
         state.layerId = layerId;
         render();
-        onLayerCreated?.({ layerId, name: state.name.trim(), parentId: state.parentId ?? null });
+        onLayerCreated?.({
+          layerId,
+          name: state.name.trim(),
+          parentId: state.parentId ?? null,
+          geometryType: inferGeometryType(state.features),
+        });
       } catch (err) {
         state.step = "confirm";
         render();

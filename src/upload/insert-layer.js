@@ -1,10 +1,11 @@
-import { supabase } from "../lib/supabase.js";
+import { requireSupabase } from "../lib/supabase.js";
 
 const BATCH_SIZE = 500;
 
 // Creates a layer row, stores files, and inserts all features in batches.
 // onProgress(pct, label) called throughout to report progress.
 export async function insertLayer({ name, viewAccess, features, rawFile, usePmtiles, onProgress }) {
+  const supabase = requireSupabase();
   // 1. Detect geometry type from features
   const types = new Set(features.map((f) => f.geometry?.type));
   const geometryType = types.size > 1 ? "mixed"

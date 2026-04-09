@@ -175,9 +175,11 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getF
           errorEl.hidden = false;
           return;
         }
-        const fallbackLabel = el.querySelector(`#arpLayerSelect option[value="${layerRef}"]`)?.textContent ?? layerRef;
+        const selectedOption = el.querySelector(`#arpLayerSelect option[value="${layerRef}"]`);
+        const fallbackLabel = selectedOption?.textContent ?? layerRef;
+        const geometryType = selectedOption?.dataset.geometryType ?? "mixed";
         close();
-        onAddLayer({ parentId: state.parentId, name: name || fallbackLabel, layerRef });
+        onAddLayer({ parentId: state.parentId, name: name || fallbackLabel, layerRef, geometryType });
       } else {
         close();
         onUploadRequested({ parentId: state.parentId, name });
@@ -200,7 +202,7 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getF
     return Object.entries(catalogByGroup)
       .map(([group, entries]) => `
         <optgroup label="${group}">
-          ${entries.map((e) => `<option value="${e.id}">${e.label}</option>`).join("")}
+          ${entries.map((e) => `<option value="${e.id}" data-geometry-type="${e.geometryType ?? "mixed"}">${e.label}</option>`).join("")}
         </optgroup>
       `).join("");
   }

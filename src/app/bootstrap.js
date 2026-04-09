@@ -35,11 +35,20 @@ async function bootstrapApplication() {
     getRuntimeVectors: () => editableStore.getCollections(),
   });
 
-  screenRuntime.mount(document.getElementById("mapStage"));
+  let mapStartupError = null;
+  try {
+    screenRuntime.mount(document.getElementById("mapStage"));
+  } catch (error) {
+    mapStartupError = error;
+    console.error("Map startup failed.", error);
+    document.body.dataset.mapStartup = "failed";
+  }
 
   // Re-attach any Supabase layers that were persisted from a previous session.
   // Fire-and-forget — failures are logged but don't block the rest of bootstrap.
-  reattachPersistedSupabaseLayers(layerModel, screenRuntime);
+  if (!mapStartupError) {
+    reattachPersistedSupabaseLayers(layerModel, screenRuntime);
+  }
 
   enableRefreshControls({
     wrapper: document.getElementById("mobileRefresh"),
@@ -65,6 +74,11 @@ async function bootstrapApplication() {
         return;
       }
 
+      if (row?.target?.kind === "runtime-style") {
+        screenRuntime.setLayerStyleValue(row.target.runtimeTargetId, row.target.key, nextValue);
+        return;
+      }
+
       const update = layerModel.setRowValue(row, nextValue);
       if (!update) {
         return;
@@ -75,7 +89,7 @@ async function bootstrapApplication() {
         return;
       }
 
-      screenRuntime.setLayerStyleValue(update.layerId, update.key, update.value);
+      screenRuntime.setLayerStyleValue(update.runtimeTargetId ?? update.layerId, update.key, update.value);
 
       // Persist style changes as new defaults for Supabase layers.
       if (SUPABASE_UUID.test(update.layerId)) {
@@ -101,12 +115,13 @@ async function bootstrapApplication() {
     rerenderLayerMenu,
   });
   const uploadPanel = mountUploadPanel({
-    onLayerCreated: async ({ layerId, name, parentId }) => {
+    onLayerCreated: async ({ layerId, name, parentId, geometryType }) => {
       try {
         const added = await addDataRowAndAttach({
           parentId: parentId ?? layerModel.getRootParentId(),
           name,
           layerRef: layerId,
+          geometryType,
           layerModel,
           screenRuntime,
         });
@@ -118,11 +133,12 @@ async function bootstrapApplication() {
   });
 
   const addRowPanel = mountAddRowPanel({
-    async onAddLayer({ parentId, name, layerRef }) {
+    async onAddLayer({ parentId, name, layerRef, geometryType }) {
       const added = await addDataRowAndAttach({
         parentId,
         name,
         layerRef,
+        geometryType,
         layerModel,
         screenRuntime,
       });
@@ -167,6 +183,7 @@ async function bootstrapApplication() {
       print: printRenderer.getContract(),
     },
     screenRuntime: screenRuntime.getStatus(),
+    mapStartupError: mapStartupError ? String(mapStartupError?.message ?? mapStartupError) : null,
     shareUrl: createShareStateUrl(viewState),
     rerenderLayerMenu,
   };
@@ -233,18 +250,25 @@ async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
   }
 }
 
-async function addDataRowAndAttach({ parentId, name, layerRef, layerModel, screenRuntime }) {
+async function addDataRowAndAttach({ parentId, name, layerRef, geometryType, layerModel, screenRuntime }) {
   const resolvedParentId = parentId ?? layerModel.getRootParentId();
-  const added = layerModel.addDataRow(resolvedParentId, { name, layerRef });
-  if (!added) {
-    return null;
-  }
-
   if (!SUPABASE_UUID.test(layerRef)) {
+    const added = layerModel.addDataRow(resolvedParentId, { name, layerRef, geometryType });
+    if (!added) {
+      return null;
+    }
     return added;
   }
 
   const { layer, geojson } = await loadLayerFromSupabase(layerRef);
+  const added = layerModel.addDataRow(resolvedParentId, {
+    name,
+    layerRef,
+    geometryType: geometryType ?? layer.geometry_type ?? "mixed",
+  });
+  if (!added) {
+    return null;
+  }
   if (geojson || layer.tiles_url) {
     screenRuntime.loadDynamicLayer({ layerId: layerRef, geojson, tilesUrl: layer.tiles_url ?? null, style: layer.default_style });
   }

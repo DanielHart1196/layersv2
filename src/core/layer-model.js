@@ -14,6 +14,9 @@ import {
 function createLayerModel() {
   const STORAGE_KEY = "layerv2.layerState.v1";
   const DEFS_STORAGE_KEY = "layerv2.dynamicDefs.v1";
+  const APPEARANCE_STATE_KEY = "__appearance__";
+  const LEGACY_SETTINGS_BACKGROUND_STORAGE_KEY = "layerv2.layerMenuAppearance.v1";
+  const LEGACY_SCREEN_BACKGROUND_STORAGE_KEY = "layerv2.screenAppearance.v1";
   const layerDefinitions = createLayerDefinitions();
   const rootDynamicRows = []; // top-level user-added layers
   const dynamicIds = new Set(); // IDs of all dynamically added rows
@@ -93,6 +96,7 @@ function createLayerModel() {
   }
 
   function buildDefaultLayerState() {
+    const appearanceDefaults = loadLegacyAppearanceDefaults();
     const state = {
       [ROOT_PARENT_ID]: {
         rowOrder: getDefaultChildOrder(ROOT_PARENT_ID),
@@ -100,6 +104,7 @@ function createLayerModel() {
       earth: {
         rowOrder: getDefaultChildOrder("earth"),
       },
+      [APPEARANCE_STATE_KEY]: appearanceDefaults,
     };
 
     const ensureLayerState = (layerId) => {
@@ -140,6 +145,12 @@ function createLayerModel() {
       if (typeof rowRecord.rowVisible !== "boolean") {
         rowRecord.rowVisible = true;
       }
+      if (typeof row.runtimeTargetId === "string" && typeof rowRecord.runtimeTargetId !== "string") {
+        rowRecord.runtimeTargetId = row.runtimeTargetId;
+      }
+      if (rowRecord.parentRowId === undefined) {
+        rowRecord.parentRowId = parentRowId;
+      }
 
       const layerId =
         row.colorTarget?.layerId ??
@@ -171,11 +182,11 @@ function createLayerModel() {
 
   const layerState = hydrateLayerState();
   hydrateDynamicDefs(); // must run after hydrateLayerState so state exists for dynamic rows
+  delete layerState.transport;
+  delete layerState.olympics;
+  delete layerState.empires;
   layerState[ROOT_PARENT_ID].rowOrder = normalizeChildRowOrder(ROOT_PARENT_ID, layerState[ROOT_PARENT_ID]?.rowOrder);
   layerState.earth.rowOrder = normalizeChildRowOrder("earth", layerState.earth?.rowOrder);
-  layerState.transport.rowOrder = normalizeChildRowOrder("transport", layerState.transport?.rowOrder);
-  layerState.olympics.rowOrder = normalizeChildRowOrder("olympics", layerState.olympics?.rowOrder);
-  layerState.empires.rowOrder = normalizeChildRowOrder("empires", layerState.empires?.rowOrder);
 
   function hydrateLayerState() {
     const baseState = buildDefaultLayerState();
@@ -342,6 +353,69 @@ function createLayerModel() {
     return structuredClone(layerState);
   }
 
+  function normalizeAppearanceColor(value, fallback) {
+    const normalized = String(value ?? "").trim().replace(/^#*/, "");
+    if (/^[0-9a-fA-F]{6}$/.test(normalized)) {
+      return `#${normalized.toUpperCase()}`;
+    }
+    return fallback;
+  }
+
+  function readLegacyAppearanceState(storageKey, defaults) {
+    try {
+      const raw = window.localStorage?.getItem(storageKey);
+      if (!raw) {
+        return { ...defaults };
+      }
+      const parsed = JSON.parse(raw);
+      return {
+        color: normalizeAppearanceColor(parsed?.color, defaults.color),
+        opacity: Math.max(0, Math.min(100, Number(parsed?.opacity) || 0)),
+      };
+    } catch (_error) {
+      return { ...defaults };
+    }
+  }
+
+  function loadLegacyAppearanceDefaults() {
+    return {
+      settings: readLegacyAppearanceState(LEGACY_SETTINGS_BACKGROUND_STORAGE_KEY, { color: "#FFFFFF", opacity: 0 }),
+      screen: readLegacyAppearanceState(LEGACY_SCREEN_BACKGROUND_STORAGE_KEY, { color: "#000000", opacity: 100 }),
+    };
+  }
+
+  function getAppearanceState() {
+    const appearance = layerState[APPEARANCE_STATE_KEY];
+    return structuredClone(appearance && typeof appearance === "object"
+      ? appearance
+      : loadLegacyAppearanceDefaults());
+  }
+
+  function setAppearanceValue(kind, key, value) {
+    if (!layerState[APPEARANCE_STATE_KEY] || typeof layerState[APPEARANCE_STATE_KEY] !== "object") {
+      layerState[APPEARANCE_STATE_KEY] = loadLegacyAppearanceDefaults();
+    }
+    if (!layerState[APPEARANCE_STATE_KEY][kind] || typeof layerState[APPEARANCE_STATE_KEY][kind] !== "object") {
+      layerState[APPEARANCE_STATE_KEY][kind] = kind === "screen"
+        ? { color: "#000000", opacity: 100 }
+        : { color: "#FFFFFF", opacity: 0 };
+    }
+
+    if (key === "color") {
+      layerState[APPEARANCE_STATE_KEY][kind].color = normalizeAppearanceColor(
+        value,
+        layerState[APPEARANCE_STATE_KEY][kind].color,
+      );
+    } else if (key === "opacity") {
+      layerState[APPEARANCE_STATE_KEY][kind].opacity = Math.max(0, Math.min(100, Number(value) || 0));
+    } else {
+      return null;
+    }
+
+    persistLayerState();
+    return structuredClone(layerState[APPEARANCE_STATE_KEY][kind]);
+  }
+
   function getRowValue(row) {
     if (row?.type === "fill") {
       return {
@@ -468,6 +542,122 @@ function createLayerModel() {
     fix(row.weightTarget);
     fix(row.radiusTarget);
     fix(row.target);
+  }
+
+  function normalizeDatasetGeometryType(geometryType) {
+    if (geometryType === "point") return "point";
+    if (geometryType === "line") return "line";
+    if (geometryType === "polygon" || geometryType === "area") return "polygon";
+    return "mixed";
+  }
+
+  function createDefaultDatasetRows(rowId, mapLayerId, geometryType) {
+    const normalizedType = normalizeDatasetGeometryType(geometryType);
+    if (normalizedType === "point") {
+      return [
+        createStyleRow({
+          type: "point",
+          id: `${rowId}-point`,
+          layerId: mapLayerId,
+          runtimeTargetId: `${mapLayerId}::point-fill`,
+          storageKey: SHARED_COLOR_STORAGE_KEY,
+          presets: SHARED_COLOR_PRESETS,
+          defaultColor: "#e74c3c",
+          defaultOpacity: 80,
+          defaultRadius: 6,
+        }),
+        createStyleRow({
+          type: "line",
+          id: `${rowId}-line`,
+          layerId: mapLayerId,
+          runtimeTargetId: `${mapLayerId}::point-stroke`,
+          storageKey: SHARED_COLOR_STORAGE_KEY,
+          presets: SHARED_COLOR_PRESETS,
+          defaultColor: "#ffffff",
+          defaultOpacity: 100,
+          defaultWeight: 1,
+        }),
+      ];
+    }
+    if (normalizedType === "line") {
+      return [createStyleRow({
+        type: "line",
+        id: `${rowId}-line`,
+        layerId: mapLayerId,
+        runtimeTargetId: `${mapLayerId}::line`,
+        storageKey: SHARED_COLOR_STORAGE_KEY,
+        presets: SHARED_COLOR_PRESETS,
+        defaultColor: "#3498db",
+        defaultOpacity: 90,
+        defaultWeight: 2,
+      })];
+    }
+    if (normalizedType === "polygon") {
+      return [
+        createStyleRow({
+          type: "fill",
+          id: `${rowId}-fill`,
+          layerId: mapLayerId,
+          runtimeTargetId: `${mapLayerId}::fill`,
+          storageKey: SHARED_COLOR_STORAGE_KEY,
+          presets: SHARED_COLOR_PRESETS,
+          defaultColor: "#2ecc71",
+          defaultOpacity: 60,
+        }),
+        createStyleRow({
+          type: "line",
+          id: `${rowId}-line`,
+          layerId: mapLayerId,
+          runtimeTargetId: `${mapLayerId}::line`,
+          storageKey: SHARED_COLOR_STORAGE_KEY,
+          presets: SHARED_COLOR_PRESETS,
+          defaultColor: "#1f7a45",
+          defaultOpacity: 100,
+          defaultWeight: 1,
+        }),
+      ];
+    }
+    return [];
+  }
+
+  function initializeDynamicChildRowState(rows, mapLayerId, parentRowId) {
+    rows.forEach((row) => {
+      rowDefinitionsById.set(row.id, row);
+      dynamicIds.add(row.id);
+      if (!layerState[row.id]) {
+        layerState[row.id] = {};
+      }
+      if (typeof layerState[row.id].rowVisible !== "boolean") {
+        layerState[row.id].rowVisible = true;
+      }
+      if (typeof row.runtimeTargetId === "string" && typeof layerState[row.id].runtimeTargetId !== "string") {
+        layerState[row.id].runtimeTargetId = row.runtimeTargetId;
+      }
+      if (layerState[row.id].parentRowId === undefined) {
+        layerState[row.id].parentRowId = parentRowId ?? null;
+      }
+      if (row.initialState) {
+        if (!layerState[mapLayerId]) {
+          layerState[mapLayerId] = {};
+        }
+        Object.entries(row.initialState).forEach(([key, value]) => {
+          if (layerState[mapLayerId][key] === undefined) {
+            layerState[mapLayerId][key] = value;
+          }
+        });
+      }
+      if (Array.isArray(row.rows) && row.rows.length) {
+        row.rows.forEach((childRow) => {
+          if (!layerState[childRow.id]) {
+            layerState[childRow.id] = {};
+          }
+          if (layerState[childRow.id].parentRowId === undefined) {
+            layerState[childRow.id].parentRowId = row.id;
+          }
+        });
+        initializeDynamicChildRowState(row.rows, mapLayerId, row.id);
+      }
+    });
   }
 
   // Removes a dynamic row from its parent. Returns the removed row or null if not removable.
@@ -607,15 +797,17 @@ function createLayerModel() {
 
   // Adds a new data row (type: "layer") pointing to an entry in the layer catalog.
   // layerRef is the catalog layer ID (e.g. "land", or a Supabase UUID later).
-  function addDataRow(parentId, { name, layerRef }) {
+  function addDataRow(parentId, { name, layerRef, geometryType = "mixed" }) {
     const uid = `dyn-${Date.now()}`;
+    const mapLayerId = layerRef ?? uid;
+    const rows = createDefaultDatasetRows(uid, mapLayerId, geometryType);
     const newRow = createDataRow({
       id: uid,
       label: name || layerRef,
       layerId: uid,
       layerRef,
-      rows: [],
-      runtimeLayerId: layerRef ?? uid,
+      rows,
+      runtimeLayerId: mapLayerId,
     });
 
     if (parentId === ROOT_PARENT_ID) {
@@ -630,9 +822,10 @@ function createLayerModel() {
     }
 
     rowDefinitionsById.set(newRow.id, newRow);
+    initializeDynamicChildRowState(rows, mapLayerId, newRow.id);
     dynamicIds.add(newRow.id);
     layerState[uid] = {
-      expanded: false,
+      expanded: rows.length > 0,
       visible: true,
       runtimeTargetId: newRow.runtimeLayerId,
       parentRowId: parentId === ROOT_PARENT_ID ? null : parentId,
@@ -684,6 +877,7 @@ function createLayerModel() {
     addRowToLayer,
     getChildRows,
     getDefinitions,
+    getAppearanceState,
     getRootRows,
     getRootParentId,
     getRowById,
@@ -697,6 +891,7 @@ function createLayerModel() {
     reorderChildRow,
     removeRow,
     setChildRowOrder,
+    setAppearanceValue,
     setRowValue,
     toggleExpanded,
     toggleRowVisible,

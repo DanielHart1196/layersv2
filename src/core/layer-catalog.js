@@ -1,7 +1,9 @@
 import { LOCAL_LAYERS } from "../config/local-layers.js";
 
 function localEntries() {
-  return LOCAL_LAYERS.map((l) => ({
+  return LOCAL_LAYERS
+    .filter((entry) => entry.group !== "earth")
+    .map((l) => ({
     id: l.id,
     label: l.label,
     group: l.group ?? "other",
@@ -9,7 +11,7 @@ function localEntries() {
       l.fill && l.line ? "polygon+line"
       : l.fill          ? "polygon"
       :                   "line",
-  }));
+    }));
 }
 
 function groupEntries(entries) {

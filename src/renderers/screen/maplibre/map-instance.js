@@ -31,6 +31,11 @@ const OLYMPICS_SOURCE_ID = "atlas-olympics";
 const OLYMPICS_GOLD_LAYER_ID = "atlas-olympics-gold";
 const OLYMPICS_SILVER_LAYER_ID = "atlas-olympics-silver";
 const OLYMPICS_BRONZE_LAYER_ID = "atlas-olympics-bronze";
+const OLYMPICS_RUNTIME_TARGET_LAYER_IDS = {
+  olympicsGold: [OLYMPICS_GOLD_LAYER_ID],
+  olympicsSilver: [OLYMPICS_SILVER_LAYER_ID],
+  olympicsBronze: [OLYMPICS_BRONZE_LAYER_ID],
+};
 const AUSTRALIA_TILE_IDS = ["a", "b", "c", "d", "e", "f", "g", "h"];
 const AUSTRALIA_OUTLINE_TILE_SOURCE_LAYER = "coastlines";
 const AUSTRALIA_OUTLINE_SOURCE_IDS = AUSTRALIA_TILE_IDS.map((tileId) => `atlas-australia-outline-${tileId}`);
@@ -227,7 +232,7 @@ function getDynamicLayerMaplibreIds(runtimeTargetId, map) {
     return [];
   }
 
-  return [`${sourceId}-fill`, `${sourceId}-line`, `${sourceId}-circle`]
+  return [`${sourceId}-fill`, `${sourceId}-line`, `${sourceId}-circle-fill`, `${sourceId}-circle-stroke`]
     .filter((id) => map.getLayer(id));
 }
 
@@ -283,6 +288,41 @@ function getMaplibreLayerIdsForRuntimeTarget(runtimeTargetId, map) {
     return [];
   }
 
+  const dynamicTargetMatch = /^(.+)::(fill|line|point-fill|point-stroke)$/.exec(runtimeTargetId);
+  if (dynamicTargetMatch) {
+    const [, baseLayerId, subtarget] = dynamicTargetMatch;
+    const sourceId = `dynamic-${baseLayerId}`;
+    if (map.getSource(sourceId)) {
+      if (subtarget === "fill") {
+        return map.getLayer(`${sourceId}-fill`) ? [`${sourceId}-fill`] : [];
+      }
+      if (subtarget === "line") {
+        return map.getLayer(`${sourceId}-line`) ? [`${sourceId}-line`] : [];
+      }
+      if (subtarget === "point-fill") {
+        return map.getLayer(`${sourceId}-circle-fill`) ? [`${sourceId}-circle-fill`] : [];
+      }
+      if (subtarget === "point-stroke") {
+        return map.getLayer(`${sourceId}-circle-stroke`) ? [`${sourceId}-circle-stroke`] : [];
+      }
+    }
+
+    const localEntry = LOCAL_LAYERS.find((entry) => entry.id === baseLayerId);
+    if (localEntry) {
+      if (subtarget === "fill" && localEntry.fill) {
+        return [localLayerFillId(baseLayerId)];
+      }
+      if (subtarget === "line" && localEntry.line) {
+        return [localLayerLineId(baseLayerId)];
+      }
+    }
+  }
+
+  const olympicsLayerIds = OLYMPICS_RUNTIME_TARGET_LAYER_IDS[runtimeTargetId];
+  if (olympicsLayerIds) {
+    return olympicsLayerIds.slice();
+  }
+
   const localEntry = LOCAL_LAYERS.find((entry) => entry.id === runtimeTargetId);
   if (localEntry) {
     return localLayerMaplibreIds(localEntry);
@@ -302,50 +342,49 @@ function getMaplibreLayerIdsForRuntimeTarget(runtimeTargetId, map) {
   return getDynamicLayerMaplibreIds(runtimeTargetId, map);
 }
 
-function getLogicalLayerBundles() {
-  const earthLocalLayers = LOCAL_LAYERS.filter((l) => l.group === "earth");
-  const transportLocalLayers = LOCAL_LAYERS.filter((l) => l.group === "transport");
-  return {
-    __root__: {
-      earth: [
-        "atlas-water",
-        ...earthLocalLayers.flatMap(localLayerMaplibreIds),
-        ...AUSTRALIA_FILL_LAYER_IDS,
-        ...AUSTRALIA_OUTLINE_LINE_LAYER_IDS,
-        VICTORIA_FILL_LAYER_ID,
-        ...VICTORIA_OUTLINE_LINE_LAYER_IDS,
-      ],
-      transport: transportLocalLayers.flatMap(localLayerMaplibreIds),
-      olympics: [OLYMPICS_GOLD_LAYER_ID, OLYMPICS_SILVER_LAYER_ID, OLYMPICS_BRONZE_LAYER_ID],
-      empires: [
-        ROMAN_FILL_LAYER_ID,
-        ROMAN_LINE_LAYER_ID,
-        MONGOL_FILL_LAYER_ID,
-        MONGOL_LINE_LAYER_ID,
-        BRITISH_FILL_LAYER_ID,
-        BRITISH_LINE_LAYER_ID,
-      ],
-    },
-    earth: {
-      ocean: ["atlas-water"],
-      australia: [...AUSTRALIA_FILL_LAYER_IDS, ...AUSTRALIA_OUTLINE_LINE_LAYER_IDS],
-      victoria: [VICTORIA_FILL_LAYER_ID, ...VICTORIA_OUTLINE_LINE_LAYER_IDS],
-      ...Object.fromEntries(earthLocalLayers.map((l) => [l.id, localLayerMaplibreIds(l)])),
-    },
-    transport: {
-      ...Object.fromEntries(transportLocalLayers.map((l) => [l.id, localLayerMaplibreIds(l)])),
-    },
-    olympics: {
-      "olympics-gold": [OLYMPICS_GOLD_LAYER_ID],
-      "olympics-silver": [OLYMPICS_SILVER_LAYER_ID],
-      "olympics-bronze": [OLYMPICS_BRONZE_LAYER_ID],
-    },
-    empires: {
-      roman: [ROMAN_FILL_LAYER_ID, ROMAN_LINE_LAYER_ID],
-      mongol: [MONGOL_FILL_LAYER_ID, MONGOL_LINE_LAYER_ID],
-      british: [BRITISH_FILL_LAYER_ID, BRITISH_LINE_LAYER_ID],
-    },
-  };
+function getOrderedChildLayerRowIds(layerState, parentRowId, defaultOrder = []) {
+  const isRoot = parentRowId === ROOT_PARENT_ID;
+  const childRowIds = Object.entries(layerState ?? {})
+    .filter(([, rowState]) => {
+      if (!rowState || typeof rowState !== "object" || typeof rowState.runtimeTargetId !== "string") {
+        return false;
+      }
+      return isRoot ? rowState.parentRowId == null : rowState.parentRowId === parentRowId;
+    })
+    .map(([rowId]) => rowId);
+
+  if (!childRowIds.length) {
+    return [];
+  }
+
+  const persistedOrder = isRoot
+    ? layerState?.[ROOT_PARENT_ID]?.rowOrder
+    : layerState?.[parentRowId]?.rowOrder;
+  const orderSource = Array.isArray(persistedOrder) ? persistedOrder : defaultOrder;
+  const ordered = Array.isArray(orderSource)
+    ? orderSource.filter((rowId) => childRowIds.includes(rowId))
+    : [];
+
+  childRowIds.forEach((rowId) => {
+    if (!ordered.includes(rowId)) {
+      ordered.push(rowId);
+    }
+  });
+
+  return ordered;
+}
+
+function moveRowSubtree(map, layerState, rowId, moveLayer) {
+  const childOrder = getOrderedChildLayerRowIds(layerState, rowId, getDefaultChildOrder(rowId));
+  if (childOrder.length) {
+    for (const childId of [...childOrder].reverse()) {
+      moveRowSubtree(map, layerState, childId, moveLayer);
+    }
+    return;
+  }
+
+  const runtimeTargetId = getRuntimeTargetIdFromState(layerState, rowId);
+  getMaplibreLayerIdsForRuntimeTarget(runtimeTargetId, map).forEach(moveLayer);
 }
 
 const STATIC_LAYER_DEFINITIONS = createLayerDefinitions();
@@ -360,54 +399,25 @@ function getDefaultChildOrder(parentId) {
 //   of its position in the UI. Processed first so everything else is on top.
 // - Ocean (within Earth): always pinned to the bottom within Earth. Processed
 //   first within the earth pass so it ends at the very bottom.
-// - Everything else: higher in the UI = higher z-index = renders on top.
-//   Achieved by iterating in reverse UI order (bottom-to-top), so the topmost
-//   item is moved last and ends up highest.
+// - Everything else derives from the shared row tree rather than hard-coded
+//   bundle groups. Higher in the UI = higher z-index = renders on top, so we
+//   iterate bottom-to-top and move leaf runtime targets recursively.
 function applyFullLayerOrder(map, layerState) {
-  const bundles = getLogicalLayerBundles();
-  const rootOrder = layerState[ROOT_PARENT_ID]?.rowOrder ?? ROOT_ROW_IDS;
-
   const moveLayer = (id) => { if (map.getLayer(id)) map.moveLayer(id, undefined); };
+  const rootOrder = getOrderedChildLayerRowIds(layerState, ROOT_PARENT_ID, ROOT_ROW_IDS);
 
   // Earth: always bottom — process first. Ocean: always bottom within earth.
-  const earthBundle = bundles["earth"] ?? {};
-  const earthChildOrder = layerState.earth?.rowOrder ?? getDefaultChildOrder("earth");
+  const earthChildOrder = getOrderedChildLayerRowIds(layerState, "earth", getDefaultChildOrder("earth"));
   const nonOceanEarth = earthChildOrder.filter((id) => id !== "ocean");
-  (earthBundle["ocean"] ?? []).forEach(moveLayer); // ocean first = very bottom
+  moveRowSubtree(map, layerState, "ocean", moveLayer);
   for (const childId of [...nonOceanEarth].reverse()) {
-    (earthBundle[childId] ?? []).forEach(moveLayer);
+    moveRowSubtree(map, layerState, childId, moveLayer);
   }
 
-  // All other groups: reversed UI order so higher = renders on top.
+  // All other top-level rows follow the shared row tree.
   const nonEarthGroups = rootOrder.filter((id) => id !== "earth");
   for (const groupId of [...nonEarthGroups].reverse()) {
-    const childOrder = layerState[groupId]?.rowOrder ?? getDefaultChildOrder(groupId);
-    const groupBundle = bundles[groupId] ?? null;
-
-    if (!groupBundle) {
-      const runtimeTargetId = getRuntimeTargetIdFromState(layerState, groupId);
-      getMaplibreLayerIdsForRuntimeTarget(runtimeTargetId, map).forEach(moveLayer);
-      continue;
-    }
-    
-    // Special handling for empires: use dynamic ordering from registry
-    if (groupId === "empires") {
-      for (const empireId of [...childOrder].reverse()) {
-        const empireEntry = EMPIRE_REGISTRY_ENTRIES.find(entry => entry.layerId === empireId);
-        if (empireEntry) {
-          const order = getEmpireLayerOrder(layerState, empireId);
-          const layers = getEmpireMapLibreLayers(empireEntry, order);
-          // Reverse order so first item in UI order renders on top
-          [...layers].reverse().forEach(moveLayer);
-        }
-      }
-    } else {
-      // Standard handling for other groups
-      for (const childId of [...childOrder].reverse()) {
-        const layerIds = groupBundle[childId] ?? getMaplibreLayerIdsForRuntimeTarget(getRuntimeTargetIdFromState(layerState, childId), map);
-        layerIds.forEach(moveLayer);
-      }
-    }
+    moveRowSubtree(map, layerState, groupId, moveLayer);
   }
 }
 
@@ -450,7 +460,7 @@ function buildInitialStyleLayerSpecs(entry, layerState) {
       id: localLayerFillId(entry.id),
       type: "fill",
       source: sourceId,
-      layout: { visibility: getInheritedLayoutVisibility(layerState, entry.id) },
+      layout: { visibility: getInheritedLayoutVisibility(layerState, `${entry.id}::fill`) },
       paint: {
         "fill-color": getLayerStyleValue(layerState, entry.id, "fillColor", entry.fill.color),
         "fill-opacity": Number(getLayerStyleValue(layerState, entry.id, "fillOpacity", entry.fill.opacity)) / 100,
@@ -464,7 +474,7 @@ function buildInitialStyleLayerSpecs(entry, layerState) {
       id: localLayerLineId(entry.id),
       type: "line",
       source: sourceId,
-      layout: { visibility: getInheritedLayoutVisibility(layerState, entry.id) },
+      layout: { visibility: getInheritedLayoutVisibility(layerState, `${entry.id}::line`) },
       paint: {
         "line-color": getLayerStyleValue(layerState, entry.id, "lineColor", entry.line.color),
         "line-width": buildLineWidthExpression(getLayerStyleValue(layerState, entry.id, "lineWeight", entry.line.weight ?? 1)),
@@ -565,11 +575,18 @@ function getLayoutVisibility(layerState, layerId) {
   return getLayerStyleValue(layerState, layerId, "visible", true) ? "visible" : "none";
 }
 
+function isRowEnabled(layerState, rowId) {
+  if (typeof layerState?.[rowId]?.rowVisible === "boolean") {
+    return layerState[rowId].rowVisible;
+  }
+  return getLayerStyleValue(layerState, rowId, "visible", true);
+}
+
 function getInheritedLayoutVisibility(layerState, layerId) {
   let currentRowId = findRowStateKeyForRuntimeTarget(layerState, layerId) ?? layerId;
 
   while (currentRowId) {
-    if (!getLayerStyleValue(layerState, currentRowId, "visible", true)) {
+    if (!isRowEnabled(layerState, currentRowId)) {
       return "none";
     }
     currentRowId = layerState?.[currentRowId]?.parentRowId ?? null;
@@ -721,12 +738,14 @@ function toRegistryEntry(entry) {
     source: registrySource,
     fill: fill ? {
       id: localLayerFillId(id),
+      runtimeTargetId: `${id}::fill`,
       sourceLayer,
       defaultColor: fill.color,
       defaultOpacity: fill.opacity,
     } : null,
     line: line ? {
       id: localLayerLineId(id),
+      runtimeTargetId: `${id}::line`,
       sourceLayer,
       defaultColor: line.color,
       defaultOpacity: line.opacity,
@@ -829,23 +848,6 @@ function findRegistryEntry(layerId) {
   return FULL_REGISTRY.find(entry => entry.layerId === layerId);
 }
 
-// Returns the rowOrder for an empire layer, falling back to default row IDs.
-function getEmpireLayerOrder(layerState, empireId) {
-  const customOrder = layerState[empireId]?.rowOrder;
-  if (customOrder && Array.isArray(customOrder)) return customOrder;
-  return getDefaultChildOrder(empireId);
-}
-
-// Maps empire row IDs (e.g. "roman-fill") to their MapLibre layer IDs.
-function getEmpireMapLibreLayers(entry, order) {
-  const layers = [];
-  order.forEach((rowId) => {
-    if (rowId === `${entry.layerId}-fill` && entry.fill) layers.push(entry.fill.id);
-    else if (rowId === `${entry.layerId}-line` && entry.line) layers.push(entry.line.id);
-  });
-  return layers;
-}
-
 function attachStandardLayer(map, layerState, manifest, entry) {
   const { source, fill, line, layerId } = entry;
 
@@ -874,7 +876,7 @@ function attachStandardLayer(map, layerState, manifest, entry) {
       id: fill.id,
       type: "fill",
       source: source.id,
-      layout: { visibility: getInheritedLayoutVisibility(layerState, layerId) },
+      layout: { visibility: getInheritedLayoutVisibility(layerState, fill.runtimeTargetId ?? layerId) },
       paint: {
         "fill-color": getLayerStyleValue(layerState, layerId, "fillColor", fill.defaultColor),
         "fill-opacity": Number(getLayerStyleValue(layerState, layerId, "fillOpacity", fill.defaultOpacity ?? 100)) / 100,
@@ -893,7 +895,7 @@ function attachStandardLayer(map, layerState, manifest, entry) {
       source: source.id,
       layout: {
         ...line.extraLayout,
-        visibility: getInheritedLayoutVisibility(layerState, layerId),
+        visibility: getInheritedLayoutVisibility(layerState, line.runtimeTargetId ?? layerId),
       },
       paint: {
         "line-color": getLayerStyleValue(layerState, layerId, "lineColor", line.defaultColor),
@@ -964,10 +966,10 @@ function applyRegistryStyleValue(entry, map, layerState, key, value) {
   
   if (key === "visible") {
     if (fill && map.getLayer(fill.id)) {
-      map.setLayoutProperty(fill.id, "visibility", getInheritedLayoutVisibility(layerState, layerId));
+      map.setLayoutProperty(fill.id, "visibility", getInheritedLayoutVisibility(layerState, fill.runtimeTargetId ?? layerId));
     }
     if (line && map.getLayer(line.id)) {
-      map.setLayoutProperty(line.id, "visibility", getInheritedLayoutVisibility(layerState, layerId));
+      map.setLayoutProperty(line.id, "visibility", getInheritedLayoutVisibility(layerState, line.runtimeTargetId ?? layerId));
     }
     if (circle) {
       circle.ids.forEach(id => {
@@ -1376,12 +1378,11 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     // guard skips them here automatically.
     void (async () => {
       try {
-        await Promise.all([
-          ...STANDARD_LAYER_REGISTRY
+        await Promise.all(
+          STANDARD_LAYER_REGISTRY
             .filter((entry) => !entry.deferred)
-            .map((entry) => attachStandardLayer(map, layerState, manifest, entry)),
-          attachOlympicsLayers(map, layerState),
-        ]);
+            .map((entry) => attachStandardLayer(map, layerState, manifest, entry))
+        );
 
         applyFullLayerOrder(map, layerState);
       } catch (error) {
@@ -1398,33 +1399,12 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         LOCAL_LAYERS
           .filter((l) => l.source.kind === "atlas-vector")
           .forEach((l) => prewarmTileSource(localLayerTileSourceId(l.id)));
-        [ROMAN_FILL_SOURCE_ID, MONGOL_FILL_SOURCE_ID, BRITISH_FILL_SOURCE_ID].forEach(prewarmTileSource);
-
-        // Deferred standard layers first (transport, local layers etc.)
+        // Deferred standard Earth layers first.
         await Promise.all(
           STANDARD_LAYER_REGISTRY
             .filter((entry) => entry.deferred)
             .map((entry) => attachStandardLayer(map, layerState, manifest, entry))
         );
-
-        applyFullLayerOrder(map, layerState);
-
-        // Empires after land is ordered — prevents them rendering above land
-        await Promise.all([
-          attachRomanEmpireLayer(map, layerState),
-          attachMongolEmpireLayer(map, layerState),
-          attachBritishEmpireLayer(map, layerState),
-        ]);
-
-        applyFullLayerOrder(map, layerState);
-
-        // Phase 3: Detailed land tiles — load after everything else is rendered
-        await Promise.all([
-          attachAustraliaFillLayer(map, layerState, manifest),
-          attachAustraliaOutlineLayer(map, layerState, manifest),
-          attachVictoriaFillLayers(map, layerState, manifest),
-          attachVictoriaOutlineLayers(map, layerState, manifest),
-        ]);
 
         applyFullLayerOrder(map, layerState);
       } catch (error) {
@@ -1501,18 +1481,22 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         if (map.getSource(dynSource)) {
           const dynFill   = `${dynSource}-fill`;
           const dynLine   = `${dynSource}-line`;
-          const dynCircle = `${dynSource}-circle`;
+          const dynCircleFill = `${dynSource}-circle-fill`;
+          const dynCircleStroke = `${dynSource}-circle-stroke`;
           if (key === "fillColor"   && map.getLayer(dynFill))   map.setPaintProperty(dynFill,   "fill-color",    String(value));
           if (key === "fillOpacity" && map.getLayer(dynFill))   map.setPaintProperty(dynFill,   "fill-opacity",  Number(value) / 100);
           if (key === "lineColor"   && map.getLayer(dynLine))   map.setPaintProperty(dynLine,   "line-color",    String(value));
           if (key === "lineOpacity" && map.getLayer(dynLine))   map.setPaintProperty(dynLine,   "line-opacity",  Number(value) / 100);
           if (key === "lineWeight"  && map.getLayer(dynLine))   map.setPaintProperty(dynLine,   "line-width",    Number(value));
-          if (key === "pointColor"  && map.getLayer(dynCircle)) map.setPaintProperty(dynCircle, "circle-color",  String(value));
-          if (key === "pointOpacity"&& map.getLayer(dynCircle)) map.setPaintProperty(dynCircle, "circle-opacity",Number(value) / 100);
-          if (key === "pointRadius" && map.getLayer(dynCircle)) map.setPaintProperty(dynCircle, "circle-radius", Number(value));
+          if (key === "pointColor"  && map.getLayer(dynCircleFill)) map.setPaintProperty(dynCircleFill, "circle-color",  String(value));
+          if (key === "pointOpacity"&& map.getLayer(dynCircleFill)) map.setPaintProperty(dynCircleFill, "circle-opacity",Number(value) / 100);
+          if (key === "pointRadius") {
+            if (map.getLayer(dynCircleFill)) map.setPaintProperty(dynCircleFill, "circle-radius", Number(value));
+            if (map.getLayer(dynCircleStroke)) map.setPaintProperty(dynCircleStroke, "circle-radius", Number(value));
+          }
           if (key === "visible") {
             const vis = value ? "visible" : "none";
-            [dynFill, dynLine, dynCircle].forEach((id) => { if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis); });
+            [dynFill, dynLine, dynCircleFill, dynCircleStroke].forEach((id) => { if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis); });
           }
           return;
         }
@@ -1553,8 +1537,17 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         map.addLayer({ id: `${sourceId}-line`, type: "line", source: sourceId, ...sourceLayerProp,
           paint: { "line-color": color, "line-opacity": opacity, "line-width": style?.weight ?? 2 } });
       } else {
-        map.addLayer({ id: `${sourceId}-circle`, type: "circle", source: sourceId, ...sourceLayerProp,
-          paint: { "circle-color": color, "circle-opacity": opacity, "circle-radius": style?.radius ?? 6 } });
+        map.addLayer({ id: `${sourceId}-circle-fill`, type: "circle", source: sourceId, ...sourceLayerProp,
+          paint: { "circle-color": color, "circle-opacity": opacity, "circle-radius": style?.radius ?? 6, "circle-stroke-width": 0 } });
+        map.addLayer({ id: `${sourceId}-circle-stroke`, type: "circle", source: sourceId, ...sourceLayerProp,
+          paint: {
+            "circle-color": "rgba(0,0,0,0)",
+            "circle-opacity": 0,
+            "circle-radius": style?.radius ?? 6,
+            "circle-stroke-color": style?.lineColor ?? "#ffffff",
+            "circle-stroke-opacity": (style?.lineOpacity ?? 100) / 100,
+            "circle-stroke-width": style?.lineWeight ?? 1,
+          } });
       }
 
       // Apply any style values already stored in layerState (e.g. from fill/line/point rows
@@ -1563,24 +1556,31 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       if (stored) {
         const dynFill2   = `${sourceId}-fill`;
         const dynLine2   = `${sourceId}-line`;
-        const dynCircle2 = `${sourceId}-circle`;
+        const dynCircleFill2 = `${sourceId}-circle-fill`;
+        const dynCircleStroke2 = `${sourceId}-circle-stroke`;
         if (stored.fillColor    !== undefined && map.getLayer(dynFill2))   map.setPaintProperty(dynFill2,   "fill-color",    String(stored.fillColor));
         if (stored.fillOpacity  !== undefined && map.getLayer(dynFill2))   map.setPaintProperty(dynFill2,   "fill-opacity",  Number(stored.fillOpacity) / 100);
         if (stored.lineColor    !== undefined && map.getLayer(dynLine2))   map.setPaintProperty(dynLine2,   "line-color",    String(stored.lineColor));
         if (stored.lineOpacity  !== undefined && map.getLayer(dynLine2))   map.setPaintProperty(dynLine2,   "line-opacity",  Number(stored.lineOpacity) / 100);
         if (stored.lineWeight   !== undefined && map.getLayer(dynLine2))   map.setPaintProperty(dynLine2,   "line-width",    Number(stored.lineWeight));
-        if (stored.pointColor   !== undefined && map.getLayer(dynCircle2)) map.setPaintProperty(dynCircle2, "circle-color",  String(stored.pointColor));
-        if (stored.pointOpacity !== undefined && map.getLayer(dynCircle2)) map.setPaintProperty(dynCircle2, "circle-opacity",Number(stored.pointOpacity) / 100);
-        if (stored.pointRadius  !== undefined && map.getLayer(dynCircle2)) map.setPaintProperty(dynCircle2, "circle-radius", Number(stored.pointRadius));
+        if (stored.pointColor   !== undefined && map.getLayer(dynCircleFill2)) map.setPaintProperty(dynCircleFill2, "circle-color",  String(stored.pointColor));
+        if (stored.pointOpacity !== undefined && map.getLayer(dynCircleFill2)) map.setPaintProperty(dynCircleFill2, "circle-opacity",Number(stored.pointOpacity) / 100);
+        if (stored.pointRadius  !== undefined) {
+          if (map.getLayer(dynCircleFill2)) map.setPaintProperty(dynCircleFill2, "circle-radius", Number(stored.pointRadius));
+          if (map.getLayer(dynCircleStroke2)) map.setPaintProperty(dynCircleStroke2, "circle-radius", Number(stored.pointRadius));
+        }
+        if (stored.lineColor    !== undefined && map.getLayer(dynCircleStroke2)) map.setPaintProperty(dynCircleStroke2, "circle-stroke-color", String(stored.lineColor));
+        if (stored.lineOpacity  !== undefined && map.getLayer(dynCircleStroke2)) map.setPaintProperty(dynCircleStroke2, "circle-stroke-opacity", Number(stored.lineOpacity) / 100);
+        if (stored.lineWeight   !== undefined && map.getLayer(dynCircleStroke2)) map.setPaintProperty(dynCircleStroke2, "circle-stroke-width", Number(stored.lineWeight));
         if (typeof stored.visible === "boolean") {
           const vis = stored.visible ? "visible" : "none";
-          [dynFill2, dynLine2, dynCircle2].forEach((id) => { if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis); });
+          [dynFill2, dynLine2, dynCircleFill2, dynCircleStroke2].forEach((id) => { if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis); });
         }
       }
     },
     detachDynamicLayer(layerId) {
       const sourceId = `dynamic-${layerId}`;
-      [`${sourceId}-circle`, `${sourceId}-fill`, `${sourceId}-line`].forEach((id) => {
+      [`${sourceId}-circle-fill`, `${sourceId}-circle-stroke`, `${sourceId}-fill`, `${sourceId}-line`].forEach((id) => {
         if (map.getLayer(id)) map.removeLayer(id);
       });
       if (map.getSource(sourceId)) map.removeSource(sourceId);

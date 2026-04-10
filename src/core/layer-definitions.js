@@ -263,7 +263,7 @@ function getRowStateKey(row) {
 }
 
 function getRowRuntimeTargetId(row) {
-  return row?.runtimeLayerId ?? row?.layerId ?? row?.id ?? null;
+  return row?.runtimeTargetId ?? row?.runtimeLayerId ?? row?.layerId ?? row?.id ?? null;
 }
 
 export {

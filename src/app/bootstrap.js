@@ -1,6 +1,7 @@
 import { createLayerModel } from "../core/layer-model.js";
 import { mountUploadPanel } from "../upload/upload-panel.js";
 import { mountAddRowPanel } from "./add-row-panel.js";
+import { mountDataTablePanel } from "./data-table-panel.js";
 import { getProjectionRegistry } from "../core/projection/projection-registry.js";
 import { createStyleModel } from "../core/style-model.js";
 import { createViewModel } from "../core/view-model.js";
@@ -57,6 +58,12 @@ async function bootstrapApplication() {
     hardReloadButton: document.getElementById("hardReloadButton"),
     clearCacheReloadButton: document.getElementById("clearCacheReloadButton"),
   });
+  const dataTablePanel = mountDataTablePanel({
+    async loadTablePreview(layerId, { limit, offset }) {
+      const { getLayerTablePreview } = await import("../sources/supabase/layer-loader.js");
+      return getLayerTablePreview(layerId, { limit, offset });
+    },
+  });
   const rerenderLayerMenu = renderLayerMenuRows({
     panel: document.getElementById("layerMenuPanel"),
     layerModel,
@@ -104,6 +111,16 @@ async function bootstrapApplication() {
         screenRuntime.detachDynamicLayer(row.layerRef);
       }
       rerenderLayerMenu();
+    },
+    onDataAction: (row) => {
+      if (!row?.layerRef || !SUPABASE_UUID.test(row.layerRef)) {
+        return;
+      }
+
+      dataTablePanel.open({
+        layerId: row.layerRef,
+        layerName: row.label ?? row.name ?? "Dataset",
+      });
     },
   });
   enableLayerMenuControls({
@@ -239,15 +256,31 @@ async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
         screenRuntime.loadDynamicLayer({ layerId, geojson, tilesUrl: layer.tiles_url ?? null, style: layer.default_style });
       }
       const row = layerModel.getRowById(rowId);
-      const stateKey = row ? getRowStateKey(row) : rowId;
-      const visible = layerModel.getState()?.[stateKey]?.visible;
-      if (typeof visible === "boolean") {
-        screenRuntime.setLayerStyleValue(layerId, "visible", visible);
+      if (row) {
+        applyPersistedRowVisibility(layerModel, screenRuntime, row);
       }
     } catch (err) {
       console.warn(`Failed to reattach layer ${layerId}:`, err.message);
     }
   }
+
+  screenRuntime.reapplyFullOrder?.();
+}
+
+function applyPersistedRowVisibility(layerModel, screenRuntime, row) {
+  const runtimeTargetId = getRowRuntimeTargetId(row);
+  if (runtimeTargetId) {
+    const visible = row.type === "layer"
+      ? layerModel.getState()?.[getRowStateKey(row)]?.visible
+      : layerModel.isRowVisible(row.id);
+    if (typeof visible === "boolean") {
+      screenRuntime.setLayerStyleValue(runtimeTargetId, "visible", visible);
+    }
+  }
+
+  layerModel.getChildRows(row.id).forEach((childRow) => {
+    applyPersistedRowVisibility(layerModel, screenRuntime, childRow);
+  });
 }
 
 async function addDataRowAndAttach({ parentId, name, layerRef, geometryType, layerModel, screenRuntime }) {

@@ -42,6 +42,9 @@ create table layers (
     "radius": 6
   }',
 
+  -- Canonical dataset field definitions used for table display, sorting, forms, and editing.
+  field_schema      jsonb       not null default '[]',
+
   -- Denormalised for display without a count query
   feature_count     int         not null default 0,
 

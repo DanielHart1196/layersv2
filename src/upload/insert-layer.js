@@ -4,7 +4,7 @@ const BATCH_SIZE = 500;
 
 // Creates a layer row, stores files, and inserts all features in batches.
 // onProgress(pct, label) called throughout to report progress.
-export async function insertLayer({ name, viewAccess, features, rawFile, usePmtiles, onProgress }) {
+export async function insertLayer({ name, viewAccess, features, fieldSchema = [], rawFile, usePmtiles, onProgress }) {
   const supabase = requireSupabase();
   // 1. Detect geometry type from features
   const types = new Set(features.map((f) => f.geometry?.type));
@@ -28,16 +28,33 @@ export async function insertLayer({ name, viewAccess, features, rawFile, usePmti
 
   // 3. Create the layer row (progress ~45%)
   onProgress?.(usePmtiles ? 42 : 5, "Creating layer…");
-  const { data: layer, error: layerError } = await supabase
+  const layerInsert = {
+    name,
+    view_access: viewAccess,
+    geometry_type: geometryType,
+    default_style: defaultStyleForType(geometryType),
+    field_schema: Array.isArray(fieldSchema) ? fieldSchema : [],
+  };
+  let { data: layer, error: layerError } = await supabase
     .from("layers")
-    .insert({
-      name,
-      view_access: viewAccess,
-      geometry_type: geometryType,
-      default_style: defaultStyleForType(geometryType),
-    })
+    .insert(layerInsert)
     .select("id")
     .single();
+
+  if (layerError && /field_schema/i.test(layerError.message ?? "")) {
+    const retry = await supabase
+      .from("layers")
+      .insert({
+        name,
+        view_access: viewAccess,
+        geometry_type: geometryType,
+        default_style: defaultStyleForType(geometryType),
+      })
+      .select("id")
+      .single();
+    layer = retry.data;
+    layerError = retry.error;
+  }
 
   if (layerError) throw new Error(`Failed to create layer: ${layerError.message}`);
   const layerId = layer.id;

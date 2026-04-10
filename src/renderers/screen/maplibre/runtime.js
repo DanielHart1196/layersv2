@@ -126,6 +126,9 @@ function createMaplibreScreenRuntime({
     reorderLayerGroup(parentId, orderedLayerIds) {
       mapInstance?.reorderLayerGroup?.(parentId, orderedLayerIds);
     },
+    reapplyFullOrder() {
+      mapInstance?.reapplyFullOrder?.();
+    },
     setLayerStyleValue(layerId, key, value) {
       mapInstance?.setLayerStyleValue?.(layerId, key, value);
     },

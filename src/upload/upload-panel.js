@@ -1,6 +1,7 @@
 import { parseFile, SUPPORTED_EXTENSIONS } from "./parse-file.js";
 import { rowsToFeatures } from "./csv-mapper.js";
 import { summarizeFeatureComplexity } from "./feature-complexity.js";
+import { inferFieldSchemaFromFeatures } from "./field-schema.js";
 import { insertLayer } from "./insert-layer.js";
 
 function inferGeometryType(features = []) {
@@ -22,6 +23,7 @@ export function mountUploadPanel({ onLayerCreated }) {
     parsed: null,
     mapping: null,
     features: null,
+    fieldSchema: [],
     complexity: null,
     usePmtiles: false,
     name: "",
@@ -41,6 +43,7 @@ export function mountUploadPanel({ onLayerCreated }) {
 
   function applyFeatures(features) {
     state.features = features;
+    state.fieldSchema = inferFieldSchemaFromFeatures(features);
     state.complexity = summarizeFeatureComplexity(features);
     state.usePmtiles = state.complexity.recommendPmtiles;
   }
@@ -246,6 +249,7 @@ export function mountUploadPanel({ onLayerCreated }) {
           name: state.name.trim(),
           viewAccess: state.viewAccess,
           features: state.features,
+          fieldSchema: state.fieldSchema,
           rawFile: state.file,
           usePmtiles: state.usePmtiles,
           onProgress: (pct, label) => {
@@ -301,7 +305,7 @@ export function mountUploadPanel({ onLayerCreated }) {
       </div>
     `);
     el.querySelector("#uploadAnother").addEventListener("click", () => {
-      state = { step: "drop", file: null, parsed: null, mapping: null, features: null, complexity: null, usePmtiles: false, name: "", viewAccess: "unlisted" };
+      state = { step: "drop", file: null, parsed: null, mapping: null, features: null, fieldSchema: [], complexity: null, usePmtiles: false, name: "", viewAccess: "unlisted" };
       render();
     });
     el.querySelector("#uploadClose").addEventListener("click", () => closePanel());
@@ -319,7 +323,7 @@ export function mountUploadPanel({ onLayerCreated }) {
   return {
     open({ parentId } = {}) {
       panel.classList.add("is-open");
-      state = { step: "drop", file: null, parsed: null, mapping: null, features: null, complexity: null, usePmtiles: false, name: "", viewAccess: "unlisted", parentId: parentId ?? null };
+      state = { step: "drop", file: null, parsed: null, mapping: null, features: null, fieldSchema: [], complexity: null, usePmtiles: false, name: "", viewAccess: "unlisted", parentId: parentId ?? null };
       render();
     },
     close: closePanel,

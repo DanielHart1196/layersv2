@@ -145,6 +145,9 @@ function createLayerModel() {
       if (typeof rowRecord.rowVisible !== "boolean") {
         rowRecord.rowVisible = true;
       }
+      if (typeof rowRecord.expanded !== "boolean") {
+        rowRecord.expanded = false;
+      }
       if (typeof row.runtimeTargetId === "string" && typeof rowRecord.runtimeTargetId !== "string") {
         rowRecord.runtimeTargetId = row.runtimeTargetId;
       }
@@ -279,6 +282,7 @@ function createLayerModel() {
         if (layerState[row.id].parentRowId === undefined) {
           layerState[row.id].parentRowId = null;
         }
+        initializeDynamicRowState(row.rows, row.runtimeLayerId ?? row.layerRef ?? row.layerId ?? row.id, row.id);
       });
 
       // Restore rows added to static parents (e.g. filter under "earth").
@@ -308,6 +312,7 @@ function createLayerModel() {
           if (layerState[row.id].parentRowId === undefined) {
             layerState[row.id].parentRowId = parentId;
           }
+          initializeDynamicRowState(row.rows, row.runtimeLayerId ?? row.layerRef ?? row.layerId ?? row.id, row.id);
         });
         staticParentAdditions.set(parentId, rows);
       });
@@ -462,6 +467,7 @@ function createLayerModel() {
     persistLayerState();
     return {
       layerId: target.layerId,
+      runtimeTargetId: row?.runtimeTargetId ?? target.layerId,
       key: target.key,
       value: nextValue,
     };
@@ -620,7 +626,7 @@ function createLayerModel() {
     return [];
   }
 
-  function initializeDynamicChildRowState(rows, mapLayerId, parentRowId) {
+  function initializeDynamicRowState(rows, mapLayerId, parentRowId) {
     rows.forEach((row) => {
       rowDefinitionsById.set(row.id, row);
       dynamicIds.add(row.id);
@@ -629,6 +635,9 @@ function createLayerModel() {
       }
       if (typeof layerState[row.id].rowVisible !== "boolean") {
         layerState[row.id].rowVisible = true;
+      }
+      if (typeof layerState[row.id].expanded !== "boolean") {
+        layerState[row.id].expanded = false;
       }
       if (typeof row.runtimeTargetId === "string" && typeof layerState[row.id].runtimeTargetId !== "string") {
         layerState[row.id].runtimeTargetId = row.runtimeTargetId;
@@ -655,7 +664,7 @@ function createLayerModel() {
             layerState[childRow.id].parentRowId = row.id;
           }
         });
-        initializeDynamicChildRowState(row.rows, mapLayerId, row.id);
+        initializeDynamicRowState(row.rows, mapLayerId, row.id);
       }
     });
   }
@@ -822,7 +831,7 @@ function createLayerModel() {
     }
 
     rowDefinitionsById.set(newRow.id, newRow);
-    initializeDynamicChildRowState(rows, mapLayerId, newRow.id);
+    initializeDynamicRowState(rows, mapLayerId, newRow.id);
     dynamicIds.add(newRow.id);
     layerState[uid] = {
       expanded: rows.length > 0,

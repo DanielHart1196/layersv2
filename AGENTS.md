@@ -46,6 +46,8 @@
   - same visibility/enable contract
   - same target-resolution contract
   - same runtime-application path
+- If a child style row owns a runtime target, startup restore and runtime updates must resolve through that child runtime target rather than falling back to the parent dataset id.
+- Do not describe built-in layers as using the shared row system if their fill/line visibility, ordering, or restore path still bypasses child style-row runtime targets.
 - Do not treat a refactor as successful just because rows share definitions or markup if `layer` rows still have privileged controller or renderer behavior.
 - If a behavior is truly implemented only for `layer` rows, say so plainly instead of describing the system as unified.
 - Do not add layer-specific shell markup, layer-specific chevron handling, or layer-specific expand/collapse controller paths when a layer can be expressed through the shared layer-row structure.
@@ -54,6 +56,7 @@
   - one data row
   - one style row
   - one filter or sort row
+- If a control is presented as a row in `layers`, its state should persist through the shared row/state storage by default rather than introducing a separate ad hoc localStorage path.
 - Do not rely on bridge refactors that preserve special `layer` behavior while making other row types only look unified.
 - Do not invent a new component pattern, alternate DOM structure, or parallel interaction model when an equivalent working pattern already exists in the codebase.
 - When extending an existing UI pattern to new data, copy the proven pattern first and only change the identifiers, labels, and state bindings required for the new item.
@@ -96,6 +99,8 @@
 - When the user asks to “add debugging” or “debug this” in `layers`, default to visible on-screen debug instrumentation, not console-only logs, unless the user explicitly asks for console logging.
 - When using temporary runtime debug instrumentation in `layers`, include a visible version token or other runtime identity marker if browser caching could cause mixed old/new JS to be mistaken for current behavior.
 - Before trusting a browser-based diagnosis in `layers`, verify that the page is actually running the intended current code when cache inconsistency is plausible.
+- Guard top-level integrations in `layers` so missing env/config does not fail module evaluation before bootstrap has a chance to bind the UI or show a visible error path.
+- If map startup can fail in `layers`, do not let that prevent the rest of the UI from binding unless the user explicitly wants fail-fast behavior.
 - During the current ES module migration in `layers`, do not import a module export under the same name as an existing local wrapper/helper in the target file. Alias imported names first to avoid shadowing or recursive self-calls.
 - During the current ES module migration in `layers`, keep temporary `window.Atlas...` compatibility exports in migrated files until the dependent graph is actually moved over. Do not remove them opportunistically mid-slice.
 - After each ES module migration slice in `layers`:

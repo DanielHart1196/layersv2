@@ -217,9 +217,6 @@ function createLayerModel() {
           }
         });
 
-        if (typeof baseState[layerId].lineWeight === "number" && baseState[layerId].lineWeight > 10) {
-          baseState[layerId].lineWeight = Math.max(0, Math.min(10, baseState[layerId].lineWeight / 100));
-        }
       });
 
       // Also restore state for dynamic layers (not in baseState).

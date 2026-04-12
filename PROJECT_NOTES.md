@@ -35,6 +35,10 @@
   - field discovery
   - value discovery
   - future moderation/query workflows
+- Dataset field definitions and feature field values are different layers of the model:
+  - dataset-level field definitions such as labels, types, required/optional status, and display order should live once on the dataset
+  - per-feature field values should remain on each feature record
+  - UI tables, sorting, filtering, upload cleanup, and future contribution forms should use dataset field definitions, not infer schema ad hoc from the currently loaded feature sample
 
 ## View Model
 - A view is a shareable composition over one or more datasets.

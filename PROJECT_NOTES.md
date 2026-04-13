@@ -200,6 +200,6 @@
 - Prefer public downloadable datasets over authenticated service endpoints for shipped Atlas layers.
 
 ## Git Notes
-- Primary branch: `main`
+- Primary branch: `master`
 - HTTPS push is working.
 - If `git push` appears to say `Everything up-to-date` unexpectedly, verify branch state and retry before assuming the push actually happened.

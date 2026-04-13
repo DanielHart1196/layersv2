@@ -4,9 +4,9 @@
 - If the user says `gp`, run:
   1. `git add .`
   2. `git commit -m "<assistant-chosen message>"`
-  3. `git push origin main`
+  3. `git push origin master`
 - Choose a concise, descriptive commit message based on the current diff.
-- If there are no staged changes after `git add .`, skip commit and still run `git push origin main`.
+- If there are no staged changes after `git add .`, skip commit and still run `git push origin master`.
 - Never ask to run `gp`; only run it when the user says `gp`.
 
 ## Screenshot Checks

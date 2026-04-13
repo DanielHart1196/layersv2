@@ -123,6 +123,29 @@ ul {
     inset 0 0 0 1px rgba(0, 0, 0, 0.88);
 }
 
+.map-debug-zoom {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 6;
+  min-width: 128px;
+  max-width: 160px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(8, 18, 26, 0.76);
+  border: 1px solid rgba(154, 210, 255, 0.18);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
+
+.map-debug-line + .map-debug-line {
+  margin-top: 4px;
+}
+
 .mobile-refresh {
   position: fixed;
   top: 14px;

@@ -51,13 +51,6 @@ async function bootstrapApplication() {
     reattachPersistedSupabaseLayers(layerModel, screenRuntime);
   }
 
-  enableRefreshControls({
-    wrapper: document.getElementById("mobileRefresh"),
-    button: document.getElementById("mobileRefreshButton"),
-    menu: document.getElementById("mobileRefreshMenu"),
-    hardReloadButton: document.getElementById("hardReloadButton"),
-    clearCacheReloadButton: document.getElementById("clearCacheReloadButton"),
-  });
   const dataTablePanel = mountDataTablePanel({
     async loadTablePreview(layerId, { limit, offset }) {
       const { getLayerTablePreview } = await import("../sources/supabase/layer-loader.js");
@@ -123,13 +116,21 @@ async function bootstrapApplication() {
       });
     },
   });
-  enableLayerMenuControls({
+  const layerMenuControls = enableLayerMenuControls({
     wrapper: document.getElementById("layerMenu"),
     button: document.getElementById("layerMenuButton"),
     panel: document.getElementById("layerMenuPanel"),
     appearanceButton: document.getElementById("layerMenuAppearanceButton"),
     screenButton: document.getElementById("layerMenuScreenButton"),
     rerenderLayerMenu,
+  });
+  enableRefreshControls({
+    wrapper: document.getElementById("mobileRefresh"),
+    button: document.getElementById("mobileRefreshButton"),
+    menu: document.getElementById("mobileRefreshMenu"),
+    hardReloadButton: document.getElementById("hardReloadButton"),
+    clearCacheReloadButton: document.getElementById("clearCacheReloadButton"),
+    onBeforeMenuOpen: () => layerMenuControls?.close?.(),
   });
   const uploadPanel = mountUploadPanel({
     onLayerCreated: async ({ layerId, name, parentId, geometryType }) => {

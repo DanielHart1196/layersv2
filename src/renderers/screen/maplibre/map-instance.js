@@ -133,35 +133,6 @@ function createScaleOverlay(container) {
   return overlay;
 }
 
-function createZoomDebugOverlay(container) {
-  const overlay = document.createElement("div");
-  overlay.className = "map-debug-zoom";
-  overlay.setAttribute("aria-hidden", "true");
-  overlay.innerHTML = `
-    <div class="map-debug-line" data-role="zoom">Zoom: --</div>
-    <div class="map-debug-line" data-role="size">Size: -- × --</div>
-  `;
-  container.append(overlay);
-  return overlay;
-}
-
-function updateZoomDebugOverlay(map, overlay, container) {
-  if (!overlay) {
-    return;
-  }
-  const zoom = map?.getZoom?.();
-  const width = container?.clientWidth ?? 0;
-  const height = container?.clientHeight ?? 0;
-  const zoomLine = overlay.querySelector("[data-role=zoom]");
-  const sizeLine = overlay.querySelector("[data-role=size]");
-  if (zoomLine) {
-    zoomLine.textContent = `Zoom: ${Number.isFinite(zoom) ? zoom.toFixed(2) : "--"}`;
-  }
-  if (sizeLine) {
-    sizeLine.textContent = `Size: ${width || "--"} × ${height || "--"}`;
-  }
-}
-
 function haversineDistanceMeters(a, b) {
   const toRadians = (value) => value * (Math.PI / 180);
   const lat1 = toRadians(a.lat);
@@ -1518,7 +1489,6 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
   ensureProtocol(manifest);
   const layerState = structuredClone(initialLayerState);
   const scaleOverlay = createScaleOverlay(container);
-  const zoomDebugOverlay = createZoomDebugOverlay(container);
   let scaleHideTimeout = null;
 
   function clearScaleHideTimeout() {
@@ -1585,26 +1555,21 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     console.error("[MapLibre]", message, event?.error);
   });
   map.on("movestart", () => {
-    updateZoomDebugOverlay(map, zoomDebugOverlay, container);
     showScaleOverlay();
   });
   map.on("move", () => {
-    updateZoomDebugOverlay(map, zoomDebugOverlay, container);
     showScaleOverlay();
   });
   map.on("moveend", () => {
-    updateZoomDebugOverlay(map, zoomDebugOverlay, container);
     showScaleOverlay();
     hideScaleOverlaySoon();
   });
   map.on("resize", () => {
-    updateZoomDebugOverlay(map, zoomDebugOverlay, container);
     if (scaleOverlay.classList.contains("is-visible")) {
       updateScaleOverlay(map, scaleOverlay);
     }
   });
   map.on("load", () => {
-    updateZoomDebugOverlay(map, zoomDebugOverlay, container);
     // Upgrade any layers that loaded with a fast initialUrl — swap to full
     // quality in the background. Non-blocking: map stays interactive.
     LOCAL_LAYERS.filter((l) => l.source.initialUrl).forEach((l) => {
@@ -1661,7 +1626,6 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     destroy() {
       clearScaleHideTimeout();
       scaleOverlay.remove();
-      zoomDebugOverlay.remove();
       map.remove();
     },
     getMap() {

@@ -99,6 +99,14 @@ function enableLayerMenuControls({
     });
   });
 
+  function closeLayerMenu() {
+    if (!panel.classList.contains("is-open")) {
+      return;
+    }
+    closeAppearanceRows(panel, appearanceControls, rerenderLayerMenu);
+    setLayerMenuOpen(wrapper, panel, button, false);
+  }
+
   button.addEventListener("click", () => {
     syncLayerMenuMaxHeight(wrapper, panel, button);
     const nextOpen = !panel.classList.contains("is-open");
@@ -122,14 +130,12 @@ function enableLayerMenuControls({
       return;
     }
 
-    closeAppearanceRows(panel, appearanceControls, rerenderLayerMenu);
-    setLayerMenuOpen(wrapper, panel, button, false);
+    closeLayerMenu();
   });
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && panel.classList.contains("is-open")) {
-      closeAppearanceRows(panel, appearanceControls, rerenderLayerMenu);
-      setLayerMenuOpen(wrapper, panel, button, false);
+      closeLayerMenu();
     }
   });
 
@@ -140,6 +146,10 @@ function enableLayerMenuControls({
 
     syncLayerMenuMaxHeight(wrapper, panel, button);
   });
+
+  return {
+    close: closeLayerMenu,
+  };
 }
 
 export { enableLayerMenuControls };

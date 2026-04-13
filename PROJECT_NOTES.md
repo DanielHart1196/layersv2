@@ -126,12 +126,19 @@
 - Parent visibility should be inherited generically by children.
 - Child preferences should persist even when the parent is turned off.
 - Child rows should appear greyed out when hidden by a disabled parent, not only when their own stored checkbox is off.
+- Current visibility-persistence finding:
+  - uploaded Supabase-backed top-level rows are persisting `visible` state in localStorage for both the local row id and the UUID-backed runtime layer state
+  - the current inconsistency appears to be in restore or later runtime application, not in whether the toggle was saved at all
+  - this is not yet fully explained; avoid assuming the persistence bug is solved until the post-boot runtime path is traced end-to-end
 
 ## Runtime Layer Model
 - Shared row/menu structure and MapLibre runtime order should stay aligned.
 - Avoid root-only or parent-only reorder algorithms.
 - If a runtime ordering exception is required, encode it as a narrow data-driven exception inside the shared ordering system.
 - Current point-runtime exception: dynamic point datasets collapse `Point` fill and `Line` stroke rows into one MapLibre `circle` layer, so fill/stroke styling and per-row visibility still work, but point fill-vs-stroke z-order is not independently reorderable at runtime.
+- Current runtime-debug finding:
+  - for uploaded Supabase-backed rows, both point and polygon layers currently appear to go through the same startup visibility replay path
+  - if one restored layer still comes back on incorrectly, the likely cause is a later runtime step overriding visibility rather than localStorage failing to save it
 
 ## MapLibre Role
 - MapLibre is the screen runtime shell for Atlas.

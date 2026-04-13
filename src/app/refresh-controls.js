@@ -28,6 +28,7 @@ function enableRefreshControls({
   menu,
   hardReloadButton,
   clearCacheReloadButton,
+  onBeforeMenuOpen,
   mobileMediaQuery = window.matchMedia("(max-width: 800px)"),
 }) {
   if (!wrapper || !button || !menu || !hardReloadButton || !clearCacheReloadButton) {
@@ -51,6 +52,7 @@ function enableRefreshControls({
 
   const openRefreshMenu = () => {
     longPressTriggered = true;
+    onBeforeMenuOpen?.();
     setRefreshMenuOpen(wrapper, menu, button, true);
   };
 
@@ -92,7 +94,11 @@ function enableRefreshControls({
     }
 
     event.preventDefault();
-    setRefreshMenuOpen(wrapper, menu, button, !menu.classList.contains("is-open"));
+    const nextOpen = !menu.classList.contains("is-open");
+    if (nextOpen) {
+      onBeforeMenuOpen?.();
+    }
+    setRefreshMenuOpen(wrapper, menu, button, nextOpen);
   });
 
   hardReloadButton.addEventListener("click", () => {

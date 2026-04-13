@@ -1,5 +1,12 @@
 import { requireSupabase } from "../../lib/supabase.js";
 
+function isMissingLayerError(error) {
+  const message = String(error?.message ?? "").toLowerCase();
+  return error?.code === "PGRST116"
+    || message.includes("0 rows")
+    || message.includes("no rows");
+}
+
 // Merges a partial style patch into the layer's default_style in Supabase.
 // key/value pairs map directly to default_style fields (color, opacity, radius, weight).
 export async function updateLayerDefaultStyle(layerId, patch) {
@@ -181,7 +188,13 @@ export async function loadLayerFromSupabase(layerId) {
     .eq("id", layerId)
     .single();
 
-  if (layerError) throw new Error(`Failed to load layer: ${layerError.message}`);
+  if (layerError) {
+    const error = new Error(`Failed to load layer: ${layerError.message}`);
+    if (isMissingLayerError(layerError)) {
+      error.code = "LAYER_NOT_FOUND";
+    }
+    throw error;
+  }
 
   // PMTiles available — use directly, no GeoJSON needed.
   if (layer.tiles_url) {

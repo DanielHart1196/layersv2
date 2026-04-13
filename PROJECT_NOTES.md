@@ -39,6 +39,7 @@
   - dataset-level field definitions such as labels, types, required/optional status, and display order should live once on the dataset
   - per-feature field values should remain on each feature record
   - UI tables, sorting, filtering, upload cleanup, and future contribution forms should use dataset field definitions, not infer schema ad hoc from the currently loaded feature sample
+- Destructive dataset deletion should stay deferred until user accounts/ownership are in place; the UI can prepare the confirmation flow earlier, but actual delete should wait until ownership and permissions are explicit.
 
 ## View Model
 - A view is a shareable composition over one or more datasets.
@@ -53,6 +54,7 @@
 - If a request conflicts with the current Atlas architecture, call that out before coding.
 - If a new repeated pitfall or architecture rule becomes clear, add it here.
 - When browser caching is plausible, verify the browser is running the intended code before trusting a diagnosis.
+- During diagnosis/debugging turns, do not make code changes unless the user explicitly asks to implement a fix; analysis, inspection, and explanation are not implicit permission to patch.
 
 ## Shared Row Model
 - Atlas layer panel behavior should come from one shared row system.
@@ -129,6 +131,7 @@
 - Shared row/menu structure and MapLibre runtime order should stay aligned.
 - Avoid root-only or parent-only reorder algorithms.
 - If a runtime ordering exception is required, encode it as a narrow data-driven exception inside the shared ordering system.
+- Current point-runtime exception: dynamic point datasets collapse `Point` fill and `Line` stroke rows into one MapLibre `circle` layer, so fill/stroke styling and per-row visibility still work, but point fill-vs-stroke z-order is not independently reorderable at runtime.
 
 ## MapLibre Role
 - MapLibre is the screen runtime shell for Atlas.

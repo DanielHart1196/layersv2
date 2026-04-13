@@ -105,6 +105,7 @@ function getFirstExistingLayerId(map, candidateIds) {
   return candidateIds.find((id) => map.getLayer(id)) ?? null;
 }
 
+
 function createScaleOverlay(container) {
   const overlay = document.createElement("div");
   overlay.className = "map-scale";
@@ -232,7 +233,7 @@ function getDynamicLayerMaplibreIds(runtimeTargetId, map) {
     return [];
   }
 
-  return [`${sourceId}-fill`, `${sourceId}-line`, `${sourceId}-circle-fill`, `${sourceId}-circle-stroke`]
+  return [`${sourceId}-fill`, `${sourceId}-line`, `${sourceId}-circle`]
     .filter((id) => map.getLayer(id));
 }
 
@@ -300,10 +301,10 @@ function getMaplibreLayerIdsForRuntimeTarget(runtimeTargetId, map) {
         return map.getLayer(`${sourceId}-line`) ? [`${sourceId}-line`] : [];
       }
       if (subtarget === "point-fill") {
-        return map.getLayer(`${sourceId}-circle-fill`) ? [`${sourceId}-circle-fill`] : [];
+        return map.getLayer(`${sourceId}-circle`) ? [`${sourceId}-circle`] : [];
       }
       if (subtarget === "point-stroke") {
-        return map.getLayer(`${sourceId}-circle-stroke`) ? [`${sourceId}-circle-stroke`] : [];
+        return map.getLayer(`${sourceId}-circle`) ? [`${sourceId}-circle`] : [];
       }
     }
 
@@ -494,6 +495,32 @@ function reapplyStoredDynamicRuntimeStyles(baseLayerId, map, layerState) {
   if (stored.pointRadius !== undefined) {
     applyRuntimeTargetStyle(`${baseLayerId}::point-fill`, "pointRadius", stored.pointRadius, map, layerState);
   }
+}
+
+function applyDynamicPointLayerState(baseLayerId, map, layerState) {
+  const circleLayerId = `dynamic-${baseLayerId}-circle`;
+  if (!map.getLayer(circleLayerId)) {
+    return false;
+  }
+
+  const baseVisible = getInheritedLayoutVisibility(layerState, baseLayerId) === "visible";
+  const fillVisible = getInheritedLayoutVisibility(layerState, `${baseLayerId}::point-fill`) === "visible";
+  const strokeVisible = getInheritedLayoutVisibility(layerState, `${baseLayerId}::point-stroke`) === "visible";
+  const pointColor = String(getLayerStyleValue(layerState, baseLayerId, "pointColor", "#e74c3c"));
+  const pointOpacity = Number(getLayerStyleValue(layerState, baseLayerId, "pointOpacity", 80)) / 100;
+  const pointRadius = Number(getLayerStyleValue(layerState, baseLayerId, "pointRadius", 6));
+  const lineColor = String(getLayerStyleValue(layerState, baseLayerId, "lineColor", "#ffffff"));
+  const lineOpacity = Number(getLayerStyleValue(layerState, baseLayerId, "lineOpacity", 100)) / 100;
+  const lineWeight = Number(getLayerStyleValue(layerState, baseLayerId, "lineWeight", 1));
+
+  map.setLayoutProperty(circleLayerId, "visibility", baseVisible && (fillVisible || strokeVisible) ? "visible" : "none");
+  map.setPaintProperty(circleLayerId, "circle-color", pointColor);
+  map.setPaintProperty(circleLayerId, "circle-opacity", baseVisible && fillVisible ? pointOpacity : 0);
+  map.setPaintProperty(circleLayerId, "circle-radius", pointRadius);
+  map.setPaintProperty(circleLayerId, "circle-stroke-color", lineColor);
+  map.setPaintProperty(circleLayerId, "circle-stroke-opacity", baseVisible && strokeVisible ? lineOpacity : 0);
+  map.setPaintProperty(circleLayerId, "circle-stroke-width", baseVisible && strokeVisible ? lineWeight : 0);
+  return true;
 }
 
 function getOrderedChildLayerRowIds(layerState, parentRowId, defaultOrder = []) {
@@ -759,6 +786,13 @@ function applyRuntimeTargetVisibility(runtimeTargetId, map, layerState) {
       map.setLayoutProperty("atlas-water", "visibility", getInheritedLayoutVisibility(layerState, "ocean::fill"));
     }
     return;
+  }
+
+  const pointRuntimeTarget = parseRuntimeTarget(runtimeTargetId);
+  if (pointRuntimeTarget?.subtarget === "point-fill" || pointRuntimeTarget?.subtarget === "point-stroke") {
+    if (applyDynamicPointLayerState(pointRuntimeTarget.baseLayerId, map, layerState)) {
+      return;
+    }
   }
 
   getMaplibreLayerIdsForRuntimeTarget(runtimeTargetId, map).forEach((id) => {
@@ -1624,11 +1658,10 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         if (map.getSource(dynSource)) {
           const dynFill   = `${dynSource}-fill`;
           const dynLine   = `${dynSource}-line`;
-          const dynCircleFill = `${dynSource}-circle-fill`;
-          const dynCircleStroke = `${dynSource}-circle-stroke`;
+          const dynCircle = `${dynSource}-circle`;
           if (key === "visible") {
             const vis = value ? "visible" : "none";
-            [dynFill, dynLine, dynCircleFill, dynCircleStroke].forEach((id) => { if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis); });
+            [dynFill, dynLine, dynCircle].forEach((id) => { if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis); });
           }
           return;
         }
@@ -1669,12 +1702,10 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         map.addLayer({ id: `${sourceId}-line`, type: "line", source: sourceId, ...sourceLayerProp,
           paint: { "line-color": color, "line-opacity": opacity, "line-width": style?.weight ?? 2 } });
       } else {
-        map.addLayer({ id: `${sourceId}-circle-fill`, type: "circle", source: sourceId, ...sourceLayerProp,
-          paint: { "circle-color": color, "circle-opacity": opacity, "circle-radius": style?.radius ?? 6, "circle-stroke-width": 0 } });
-        map.addLayer({ id: `${sourceId}-circle-stroke`, type: "circle", source: sourceId, ...sourceLayerProp,
+        map.addLayer({ id: `${sourceId}-circle`, type: "circle", source: sourceId, ...sourceLayerProp,
           paint: {
-            "circle-color": "rgba(0,0,0,0)",
-            "circle-opacity": 0,
+            "circle-color": color,
+            "circle-opacity": opacity,
             "circle-radius": style?.radius ?? 6,
             "circle-stroke-color": style?.lineColor ?? "#ffffff",
             "circle-stroke-opacity": (style?.lineOpacity ?? 100) / 100,
@@ -1692,11 +1723,13 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         ["fill", "line", "point-fill", "point-stroke"].forEach((subtarget) => {
           applyRuntimeTargetVisibility(`${layerId}::${subtarget}`, map, layerState);
         });
+      } else if (renderType !== "polygon" && renderType !== "line") {
+        applyDynamicPointLayerState(layerId, map, layerState);
       }
     },
     detachDynamicLayer(layerId) {
       const sourceId = `dynamic-${layerId}`;
-      [`${sourceId}-circle-fill`, `${sourceId}-circle-stroke`, `${sourceId}-fill`, `${sourceId}-line`].forEach((id) => {
+      [`${sourceId}-circle`, `${sourceId}-fill`, `${sourceId}-line`].forEach((id) => {
         if (map.getLayer(id)) map.removeLayer(id);
       });
       if (map.getSource(sourceId)) map.removeSource(sourceId);

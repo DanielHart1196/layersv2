@@ -112,12 +112,12 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getF
           <span class="arp-field-label">Source</span>
           <div class="arp-radio-group">
             <label class="arp-radio">
-              <input type="radio" name="arpSource" value="catalog" checked />
-              <span>Existing layer</span>
+              <input type="radio" name="arpSource" value="upload" checked />
+              <span>Upload file</span>
             </label>
             <label class="arp-radio">
-              <input type="radio" name="arpSource" value="upload" />
-              <span>Upload file</span>
+              <input type="radio" name="arpSource" value="catalog" />
+              <span>Existing layer</span>
             </label>
           </div>
         </div>
@@ -127,8 +127,12 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getF
             ${buildOptionGroups(getLayerCatalogByGroup())}
           </select>
         </div>
-        <div class="arp-source-section" id="arpUploadSection" hidden>
-          <p class="arp-upload-hint">Click "Continue to upload" to open the upload flow. The layer name above will be pre-filled.</p>
+        <div class="arp-source-section" id="arpUploadSection">
+          <div class="upload-dropzone" id="arpUploadDropzone">
+            <p class="upload-dropzone-hint">Drop a file or click to browse</p>
+            <p class="upload-dropzone-formats">CSV  |  XLSX  |  GeoJSON  |  JSON  |  GPX  |  KML  |  ZIP</p>
+            <input type="file" class="upload-file-input" id="arpUploadInput" accept=".csv,.xlsx,.geojson,.json,.gpx,.kml,.zip" />
+          </div>
         </div>
         <p class="arp-error" hidden></p>
         <div class="arp-actions">
@@ -146,6 +150,12 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getF
     const uploadSection  = el.querySelector("#arpUploadSection");
     const submitBtn      = el.querySelector("#arpSubmit");
     const errorEl        = el.querySelector(".arp-error");
+    const uploadZone     = el.querySelector("#arpUploadDropzone");
+    const uploadInput    = el.querySelector("#arpUploadInput");
+
+    catalogSection.hidden = true;
+    uploadSection.hidden = false;
+    submitBtn.textContent = "Continue to upload";
 
     el.querySelectorAll("input[name=arpSource]").forEach((radio) => {
       radio.addEventListener("change", () => {
@@ -156,6 +166,30 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getF
           ? "Continue to upload"
           : (isSubRow ? "Add row" : "Add layer");
       });
+    });
+
+    function requestUpload(file = null) {
+      const name = el.querySelector(".arp-name-input").value.trim();
+      close();
+      onUploadRequested({ parentId: state.parentId, name, file });
+    }
+
+    uploadZone?.addEventListener("click", () => uploadInput?.click());
+    uploadInput?.addEventListener("click", (event) => event.stopPropagation());
+    uploadZone?.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      uploadZone.classList.add("is-over");
+    });
+    uploadZone?.addEventListener("dragleave", () => uploadZone.classList.remove("is-over"));
+    uploadZone?.addEventListener("drop", (event) => {
+      event.preventDefault();
+      uploadZone.classList.remove("is-over");
+      const file = event.dataTransfer?.files?.[0] ?? null;
+      if (file) requestUpload(file);
+    });
+    uploadInput?.addEventListener("change", () => {
+      const file = uploadInput.files?.[0] ?? null;
+      if (file) requestUpload(file);
     });
 
     el.querySelector("#arpBack")?.addEventListener("click", () => {
@@ -181,8 +215,7 @@ export function mountAddRowPanel({ onAddLayer, onAddRow, onUploadRequested, getF
         close();
         onAddLayer({ parentId: state.parentId, name: name || fallbackLabel, layerRef, geometryType });
       } else {
-        close();
-        onUploadRequested({ parentId: state.parentId, name });
+        requestUpload();
       }
     });
 

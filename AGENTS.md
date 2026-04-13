@@ -29,6 +29,7 @@
 - If a prompt is underspecified in a way that risks rework, propose a concrete assumption set or ask a short clarifying question before making structural changes.
 - If the user asks a conversational alignment question like `do you know what I mean?`, `thoughts?`, or similar check-in phrasing ending in `?`, treat it as a pause to confirm understanding rather than implicit approval to implement immediately.
 - When the user asks a question, answer the question first and do not make code changes in the same turn unless they explicitly ask to implement, proceed, patch, change, fix, or similar.
+- When the user asks for diagnosis, explanation, or a code check, do not make code changes unless they explicitly ask for an edit, patch, or implementation, even if the likely fix seems obvious.
 - If a prompt is ambiguous between analysis and implementation, prefer analysis-only.
 - Treat question-led prompts like `can you see why...`, `are you confident...`, `what's causing...`, `does that make sense...`, and similar reasoning checks as non-implementation turns by default.
 - When a new rule, architecture decision, or repeated pitfall becomes clear during work, suggest adding it to `PROJECT_NOTES.md` rather than keeping it implicit.

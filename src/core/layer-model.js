@@ -20,6 +20,7 @@ function createLayerModel() {
   const layerDefinitions = createLayerDefinitions();
   const rootDynamicRows = []; // top-level user-added layers
   const dynamicIds = new Set(); // IDs of all dynamically added rows
+  const suppressedRowIds = new Set(); // session-only hidden rows for missing remote layers
   const staticParentAdditions = new Map(); // parentId → [rows] for rows added to static parents
   const rowDefinitionsById = new Map();
 
@@ -331,7 +332,7 @@ function createLayerModel() {
       return [];
     }
 
-    const visibleRows = getOrderableChildRows(parentId);
+    const visibleRows = getOrderableChildRows(parentId).filter((row) => !suppressedRowIds.has(row.id));
     const rowById = new Map(visibleRows.map((row) => [row.id, row]));
     const persistedOrder = normalizeChildRowOrder(parentId);
     const orderedRows = persistedOrder
@@ -878,6 +879,18 @@ function createLayerModel() {
     return results;
   }
 
+  function suppressRow(rowId) {
+    if (!rowDefinitionsById.has(rowId) && !layerDefinitions[rowId]) {
+      return false;
+    }
+    suppressedRowIds.add(rowId);
+    return true;
+  }
+
+  function isRowSuppressed(rowId) {
+    return suppressedRowIds.has(rowId);
+  }
+
   return {
     addDataRow,
     addRowToLayer,
@@ -890,6 +903,7 @@ function createLayerModel() {
     getRowValue,
     getState,
     getSupabaseLayers,
+    isRowSuppressed,
     isExpanded,
     isRowVisible,
     isDynamic: (rowId) => dynamicIds.has(rowId),
@@ -899,6 +913,7 @@ function createLayerModel() {
     setChildRowOrder,
     setAppearanceValue,
     setRowValue,
+    suppressRow,
     toggleExpanded,
     toggleRowVisible,
     toggleVisibility,

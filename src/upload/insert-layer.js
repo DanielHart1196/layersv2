@@ -2,6 +2,37 @@ import { requireSupabase } from "../lib/supabase.js";
 
 const BATCH_SIZE = 500;
 
+function slugifySegment(value, fallback = "layer") {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return normalized || fallback;
+}
+
+function sanitizeFileBaseName(filename, fallback = "file") {
+  const withoutExtension = String(filename ?? "").replace(/\.[^.]+$/, "");
+  const normalized = withoutExtension
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return normalized || fallback;
+}
+
+function sanitizeExtension(filename, fallback = "bin") {
+  const match = /\.([^.]+)$/.exec(String(filename ?? "").trim());
+  const normalized = match?.[1]?.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return normalized || fallback;
+}
+
+function buildUploadTimestamp() {
+  return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
 // Creates a layer row, stores files, and inserts all features in batches.
 // onProgress(pct, label) called throughout to report progress.
 export async function insertLayer({ name, viewAccess, features, fieldSchema = [], rawFile, usePmtiles, onProgress }) {
@@ -58,21 +89,28 @@ export async function insertLayer({ name, viewAccess, features, fieldSchema = []
 
   if (layerError) throw new Error(`Failed to create layer: ${layerError.message}`);
   const layerId = layer.id;
+  const folderName = `${slugifySegment(name, "layer")}_${layerId}`;
+  const uploadTimestamp = buildUploadTimestamp();
+  const originalBaseName = sanitizeFileBaseName(rawFile?.name, "upload");
+  const rawFileExt = sanitizeExtension(rawFile?.name, "bin");
+  const rawStoragePath = rawFile
+    ? `${folderName}/${originalBaseName}_${uploadTimestamp}.${rawFileExt}`
+    : null;
+  const pmtilesStoragePath = `${folderName}/${originalBaseName}_${uploadTimestamp}.pmtiles`;
 
   // 4. Upload raw file to storage (progress ~50%)
-  if (rawFile) {
+  if (rawFile && rawStoragePath) {
     onProgress?.(usePmtiles ? 45 : 8, "Storing original file…");
-    const ext = rawFile.name.split(".").pop();
     const { error: rawError } = await supabase.storage
       .from("layer-files")
-      .upload(`${layerId}/original.${ext}`, rawFile, { contentType: rawFile.type || "application/octet-stream" });
+      .upload(rawStoragePath, rawFile, { contentType: rawFile.type || "application/octet-stream" });
 
     if (rawError) {
       await supabase.from("layers").delete().eq("id", layerId);
       throw new Error(`Failed to store file: ${rawError.message}`);
     }
 
-    const { data: rawUrl } = supabase.storage.from("layer-files").getPublicUrl(`${layerId}/original.${ext}`);
+    const { data: rawUrl } = supabase.storage.from("layer-files").getPublicUrl(rawStoragePath);
     await supabase.from("layers").update({ file_url: rawUrl.publicUrl }).eq("id", layerId);
   }
 
@@ -81,14 +119,14 @@ export async function insertLayer({ name, viewAccess, features, fieldSchema = []
     onProgress?.(52, "Storing tiles…");
     const { error: tilesError } = await supabase.storage
       .from("layer-files")
-      .upload(`${layerId}/tiles.pmtiles`, pmtilesBuffer, { contentType: "application/x-protobuf" });
+      .upload(pmtilesStoragePath, pmtilesBuffer, { contentType: "application/x-protobuf" });
 
     if (tilesError) {
       await supabase.from("layers").delete().eq("id", layerId);
       throw new Error(`Failed to store tiles: ${tilesError.message}`);
     }
 
-    const { data: tilesUrl } = supabase.storage.from("layer-files").getPublicUrl(`${layerId}/tiles.pmtiles`);
+    const { data: tilesUrl } = supabase.storage.from("layer-files").getPublicUrl(pmtilesStoragePath);
     await supabase.from("layers").update({ tiles_url: tilesUrl.publicUrl }).eq("id", layerId);
   }
 

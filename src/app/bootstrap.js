@@ -165,8 +165,8 @@ async function bootstrapApplication() {
       const added = layerModel.addRowToLayer(parentId, rowType, config);
       if (added) rerenderLayerMenu();
     },
-    onUploadRequested({ parentId }) {
-      uploadPanel.open({ parentId });
+    onUploadRequested({ parentId, name, file }) {
+      uploadPanel.open({ parentId, name, file });
     },
     async getFieldsForParent(parentId) {
       const row = layerModel.getRowById(parentId);
@@ -249,6 +249,7 @@ async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
   const supabaseLayers = layerModel.getSupabaseLayers();
   if (!supabaseLayers.length) return;
 
+  let suppressedAny = false;
   for (const { rowId, layerId } of supabaseLayers) {
     try {
       const { layer, geojson } = await loadLayerFromSupabase(layerId);
@@ -260,10 +261,17 @@ async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
         applyPersistedRowVisibility(layerModel, screenRuntime, row);
       }
     } catch (err) {
+      if (err?.code === "LAYER_NOT_FOUND") {
+        suppressedAny = layerModel.suppressRow(rowId) || suppressedAny;
+        continue;
+      }
       console.warn(`Failed to reattach layer ${layerId}:`, err.message);
     }
   }
 
+  if (suppressedAny) {
+    window.LayerV2?.rerenderLayerMenu?.();
+  }
   screenRuntime.reapplyFullOrder?.();
 }
 
@@ -293,7 +301,16 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryType, lay
     return added;
   }
 
-  const { layer, geojson } = await loadLayerFromSupabase(layerRef);
+  let layerResult;
+  try {
+    layerResult = await loadLayerFromSupabase(layerRef);
+  } catch (err) {
+    if (err?.code === "LAYER_NOT_FOUND") {
+      return null;
+    }
+    throw err;
+  }
+  const { layer, geojson } = layerResult;
   const added = layerModel.addDataRow(resolvedParentId, {
     name,
     layerRef,

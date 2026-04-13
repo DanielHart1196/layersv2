@@ -48,6 +48,31 @@ export function mountUploadPanel({ onLayerCreated }) {
     state.usePmtiles = state.complexity.recommendPmtiles;
   }
 
+  async function processSelectedFile(file) {
+    if (!file) return { ok: false };
+
+    const parsed = await parseFile(file);
+    if (parsed.error) {
+      return { ok: false, error: parsed.error };
+    }
+
+    state.file = file;
+    state.parsed = parsed;
+    if (!state.name) {
+      state.name = file.name.replace(/\.[^.]+$/, "");
+    }
+
+    if (parsed.type === "csv") {
+      state.mapping = { ...parsed.mapping };
+      state.step = "map-columns";
+    } else {
+      applyFeatures(parsed.features);
+      state.step = "confirm";
+    }
+
+    return { ok: true };
+  }
+
   function renderDrop() {
     const el = html(`
       <div class="upload-step">
@@ -81,25 +106,14 @@ export function mountUploadPanel({ onLayerCreated }) {
     });
 
     async function handleFile(file) {
-      if (!file) return;
       error.hidden = true;
-      const parsed = await parseFile(file);
-      if (parsed.error) {
-        error.textContent = parsed.error;
-        error.hidden = false;
+      const result = await processSelectedFile(file);
+      if (!result?.ok) {
+        if (result?.error) {
+          error.textContent = result.error;
+          error.hidden = false;
+        }
         return;
-      }
-
-      state.file = file;
-      state.parsed = parsed;
-      state.name = file.name.replace(/\.[^.]+$/, "");
-
-      if (parsed.type === "csv") {
-        state.mapping = { ...parsed.mapping };
-        state.step = "map-columns";
-      } else {
-        applyFeatures(parsed.features);
-        state.step = "confirm";
       }
       render();
     }
@@ -114,7 +128,7 @@ export function mountUploadPanel({ onLayerCreated }) {
 
     const el = html(`
       <div class="upload-step">
-        <h3 class="upload-step-title">Map columns</h3>
+        <h3 class="upload-step-title">${state.file?.name || "Untitled upload"}</h3>
         <p class="upload-step-sub">${rows.length.toLocaleString()} rows · ${headers.length} columns</p>
         <div class="upload-col-map" id="uploadColMap"></div>
         <table class="upload-preview" id="uploadPreview"></table>
@@ -321,10 +335,24 @@ export function mountUploadPanel({ onLayerCreated }) {
   render();
 
   return {
-    open({ parentId } = {}) {
+    open({ parentId, name = "", file = null } = {}) {
       panel.classList.add("is-open");
-      state = { step: "drop", file: null, parsed: null, mapping: null, features: null, fieldSchema: [], complexity: null, usePmtiles: false, name: "", viewAccess: "unlisted", parentId: parentId ?? null };
+      state = { step: "drop", file: null, parsed: null, mapping: null, features: null, fieldSchema: [], complexity: null, usePmtiles: false, name, viewAccess: "unlisted", parentId: parentId ?? null };
       render();
+      if (file) {
+        void processSelectedFile(file).then((result) => {
+          if (!result?.ok) {
+            render();
+            const errorEl = panel.querySelector("#uploadError");
+            if (errorEl && result?.error) {
+              errorEl.textContent = result.error;
+              errorEl.hidden = false;
+            }
+            return;
+          }
+          render();
+        });
+      }
     },
     close: closePanel,
   };

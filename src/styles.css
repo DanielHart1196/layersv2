@@ -1446,6 +1446,25 @@ body.is-reordering-rows {
   color: rgba(255, 255, 255, 0.9);
 }
 
+.dtp-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dtp-delete {
+  border: 1px solid rgba(255, 110, 110, 0.35);
+  background: rgba(255, 110, 110, 0.12);
+  color: rgba(255, 160, 160, 0.95);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 6px 10px;
+  border-radius: 7px;
+}
+
 .dtp-close {
   background: none;
   border: none;
@@ -1462,6 +1481,7 @@ body.is-reordering-rows {
   gap: 12px;
   padding: 16px 20px 20px;
   min-height: 0;
+  position: relative;
 }
 
 .dtp-toolbar {
@@ -1539,6 +1559,92 @@ body.is-reordering-rows {
   border-radius: 10px;
   color: rgba(154, 210, 255, 0.5);
   text-align: center;
+}
+
+.dtp-confirm-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(7, 14, 20, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.dtp-confirm {
+  width: min(420px, 100%);
+  background: rgba(17, 29, 38, 0.98);
+  border: 1px solid rgba(255, 110, 110, 0.2);
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.dtp-confirm-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 230, 230, 0.95);
+}
+
+.dtp-confirm-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.dtp-confirm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dtp-confirm-label {
+  font-size: 12px;
+  color: rgba(255, 170, 170, 0.78);
+}
+
+.dtp-confirm-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 110, 110, 0.22);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.92);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  outline: none;
+}
+
+.dtp-confirm-input:focus {
+  border-color: rgba(255, 140, 140, 0.45);
+}
+
+.dtp-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.dtp-confirm-delete {
+  border: 1px solid rgba(255, 110, 110, 0.35);
+  background: rgba(255, 110, 110, 0.16);
+  color: rgba(255, 170, 170, 0.96);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 9px 14px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.dtp-confirm-delete:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .arp-btn {

@@ -33,7 +33,10 @@ function createPanelShell() {
           <div class="dtp-eyebrow">Data</div>
           <div class="dtp-title">Dataset</div>
         </div>
-        <button class="dtp-close" type="button" aria-label="Close data panel">×</button>
+        <div class="dtp-header-actions">
+          <button class="dtp-delete" type="button" aria-label="Delete layer">Delete</button>
+          <button class="dtp-close" type="button" aria-label="Close data panel">×</button>
+        </div>
       </div>
       <div class="dtp-content"></div>
     </div>
@@ -55,10 +58,14 @@ export function mountDataTablePanel({ loadTablePreview }) {
     rows: [],
     fields: [],
     hasMore: false,
+    deleteConfirmOpen: false,
+    deleteConfirmValue: "",
   };
 
   function close() {
     panel.classList.remove("is-open");
+    state.deleteConfirmOpen = false;
+    state.deleteConfirmValue = "";
   }
 
   async function loadPage(offset = 0) {
@@ -129,6 +136,37 @@ export function mountDataTablePanel({ loadTablePreview }) {
     `;
   }
 
+  function renderDeleteConfirm() {
+    const layerName = state.layerName || "Dataset";
+    const isMatch = state.deleteConfirmValue === layerName;
+
+    return `
+      <div class="dtp-confirm-backdrop">
+        <div class="dtp-confirm" role="dialog" aria-modal="true" aria-label="Delete layer confirmation">
+          <div class="dtp-confirm-title">Delete layer</div>
+          <p class="dtp-confirm-text">
+            Permanently delete the ${escapeHtml(layerName)} layer and all associated data?
+          </p>
+          <label class="dtp-confirm-field">
+            <span class="dtp-confirm-label">Please type ${escapeHtml(layerName)} to confirm.</span>
+            <input
+              class="dtp-confirm-input"
+              type="text"
+              value="${escapeHtml(state.deleteConfirmValue)}"
+              data-role="delete-confirm-input"
+              spellcheck="false"
+              autocomplete="off"
+            />
+          </label>
+          <div class="dtp-confirm-actions">
+            <button class="dtp-nav dtp-confirm-cancel" type="button" data-role="delete-cancel">Cancel</button>
+            <button class="dtp-confirm-delete" type="button" data-role="delete-submit" ${isMatch ? "" : "disabled"}>Delete</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   function render() {
     panel.querySelector(".dtp-title").textContent = state.layerName || "Dataset";
     const content = panel.querySelector(".dtp-content");
@@ -145,6 +183,7 @@ export function mountDataTablePanel({ loadTablePreview }) {
         </div>
       </div>
       ${renderTable()}
+      ${state.deleteConfirmOpen ? renderDeleteConfirm() : ""}
     `;
 
     content.querySelector("[data-dir=prev]")?.addEventListener("click", () => {
@@ -153,9 +192,27 @@ export function mountDataTablePanel({ loadTablePreview }) {
     content.querySelector("[data-dir=next]")?.addEventListener("click", () => {
       void loadPage(state.offset + state.limit);
     });
+    content.querySelector("[data-role=delete-cancel]")?.addEventListener("click", () => {
+      state.deleteConfirmOpen = false;
+      state.deleteConfirmValue = "";
+      render();
+    });
+    content.querySelector("[data-role=delete-confirm-input]")?.addEventListener("input", (event) => {
+      state.deleteConfirmValue = event.target.value;
+      const deleteButton = content.querySelector("[data-role=delete-submit]");
+      if (deleteButton) {
+        deleteButton.disabled = state.deleteConfirmValue !== (state.layerName || "Dataset");
+      }
+    });
   }
 
   panel.querySelector(".dtp-close")?.addEventListener("click", close);
+  panel.querySelector(".dtp-delete")?.addEventListener("click", () => {
+    state.deleteConfirmOpen = true;
+    state.deleteConfirmValue = "";
+    render();
+    panel.querySelector("[data-role=delete-confirm-input]")?.focus();
+  });
   panel.addEventListener("click", (event) => {
     if (event.target === panel) {
       close();
@@ -171,6 +228,8 @@ export function mountDataTablePanel({ loadTablePreview }) {
       state.rows = [];
       state.fields = [];
       state.hasMore = false;
+      state.deleteConfirmOpen = false;
+      state.deleteConfirmValue = "";
       panel.classList.add("is-open");
       render();
       void loadPage(0);

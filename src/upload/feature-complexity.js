@@ -1,22 +1,34 @@
+const PMTILES_FEATURE_THRESHOLD = 2500;
+const PMTILES_VERTEX_THRESHOLD = 50000;
+
 function countGeometryVertices(geometry) {
   if (!geometry) return 0;
+  const coordinates = geometry.coordinates;
 
   switch (geometry.type) {
     case "Point":
       return 1;
     case "MultiPoint":
     case "LineString":
-      return geometry.coordinates.length;
+      return Array.isArray(coordinates) ? coordinates.length : 0;
     case "MultiLineString":
     case "Polygon":
-      return geometry.coordinates.reduce((sum, ring) => sum + ring.length, 0);
+      return Array.isArray(coordinates)
+        ? coordinates.reduce((sum, ring) => sum + (Array.isArray(ring) ? ring.length : 0), 0)
+        : 0;
     case "MultiPolygon":
-      return geometry.coordinates.reduce(
-        (sum, polygon) => sum + polygon.reduce((polygonSum, ring) => polygonSum + ring.length, 0),
-        0,
-      );
+      return Array.isArray(coordinates)
+        ? coordinates.reduce(
+          (sum, polygon) => sum + (Array.isArray(polygon)
+            ? polygon.reduce((polygonSum, ring) => polygonSum + (Array.isArray(ring) ? ring.length : 0), 0)
+            : 0),
+          0,
+        )
+        : 0;
     case "GeometryCollection":
-      return geometry.geometries.reduce((sum, child) => sum + countGeometryVertices(child), 0);
+      return Array.isArray(geometry.geometries)
+        ? geometry.geometries.reduce((sum, child) => sum + countGeometryVertices(child), 0)
+        : 0;
     default:
       return 0;
   }
@@ -38,22 +50,20 @@ function summarizeFeatureComplexity(features = []) {
   const hasLine = [...geometryTypes].some((type) => type === "LineString" || type === "MultiLineString");
 
   const recommendPmtiles =
-    featureCount >= 5000
-    || vertexCount >= 50000
-    || (hasPolygon && (featureCount >= 750 || vertexCount >= 20000))
-    || (hasLine && (featureCount >= 1500 || vertexCount >= 30000));
+    featureCount >= PMTILES_FEATURE_THRESHOLD
+    || vertexCount >= PMTILES_VERTEX_THRESHOLD;
 
   let recommendationReason = "PMTiles are optional for this dataset.";
   if (recommendPmtiles) {
-    if (vertexCount >= 50000) {
+    if (vertexCount >= PMTILES_VERTEX_THRESHOLD) {
       recommendationReason = "Recommended because this dataset has a lot of geometry detail.";
-    } else if (featureCount >= 5000) {
+    } else if (featureCount >= PMTILES_FEATURE_THRESHOLD) {
       recommendationReason = "Recommended because this dataset has many features.";
-    } else if (hasPolygon) {
-      recommendationReason = "Recommended because polygon datasets benefit from tiled rendering.";
-    } else if (hasLine) {
-      recommendationReason = "Recommended because dense linework benefits from tiled rendering.";
     }
+  } else if (hasPolygon) {
+    recommendationReason = "GeoJSON should be fine unless polygon detail grows significantly.";
+  } else if (hasLine) {
+    recommendationReason = "GeoJSON should be fine unless line detail grows significantly.";
   }
 
   return {
@@ -65,4 +75,8 @@ function summarizeFeatureComplexity(features = []) {
   };
 }
 
-export { summarizeFeatureComplexity };
+export {
+  PMTILES_FEATURE_THRESHOLD,
+  PMTILES_VERTEX_THRESHOLD,
+  summarizeFeatureComplexity,
+};

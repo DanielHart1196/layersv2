@@ -86,13 +86,89 @@ export async function parseFile(file) {
   }
 }
 
+function sanitizePosition(value) {
+  return Array.isArray(value)
+    && value.length >= 2
+    && Number.isFinite(value[0])
+    && Number.isFinite(value[1]);
+}
+
+function sanitizeLineStringCoordinates(value) {
+  if (!Array.isArray(value)) return null;
+  const coords = value.filter(sanitizePosition);
+  return coords.length >= 2 ? coords : null;
+}
+
+function sanitizePolygonCoordinates(value) {
+  if (!Array.isArray(value)) return null;
+  const rings = value
+    .map((ring) => sanitizeLineStringCoordinates(ring))
+    .filter(Boolean);
+  return rings.length ? rings : null;
+}
+
+function sanitizeGeometry(geometry) {
+  if (!geometry || typeof geometry !== "object" || !geometry.type) {
+    return null;
+  }
+
+  switch (geometry.type) {
+    case "Point":
+      return sanitizePosition(geometry.coordinates)
+        ? { type: "Point", coordinates: geometry.coordinates }
+        : null;
+    case "MultiPoint": {
+      const coordinates = Array.isArray(geometry.coordinates)
+        ? geometry.coordinates.filter(sanitizePosition)
+        : null;
+      return coordinates?.length ? { type: "MultiPoint", coordinates } : null;
+    }
+    case "LineString": {
+      const coordinates = sanitizeLineStringCoordinates(geometry.coordinates);
+      return coordinates ? { type: "LineString", coordinates } : null;
+    }
+    case "MultiLineString": {
+      const coordinates = Array.isArray(geometry.coordinates)
+        ? geometry.coordinates.map((line) => sanitizeLineStringCoordinates(line)).filter(Boolean)
+        : null;
+      return coordinates?.length ? { type: "MultiLineString", coordinates } : null;
+    }
+    case "Polygon": {
+      const coordinates = sanitizePolygonCoordinates(geometry.coordinates);
+      return coordinates ? { type: "Polygon", coordinates } : null;
+    }
+    case "MultiPolygon": {
+      const coordinates = Array.isArray(geometry.coordinates)
+        ? geometry.coordinates.map((polygon) => sanitizePolygonCoordinates(polygon)).filter(Boolean)
+        : null;
+      return coordinates?.length ? { type: "MultiPolygon", coordinates } : null;
+    }
+    case "GeometryCollection": {
+      const geometries = Array.isArray(geometry.geometries)
+        ? geometry.geometries.map(sanitizeGeometry).filter(Boolean)
+        : null;
+      return geometries?.length ? { type: "GeometryCollection", geometries } : null;
+    }
+    default:
+      return null;
+  }
+}
+
 // Ensure every feature has a proper properties object and pull out time fields
 function normaliseFeatures(features) {
-  return features.map((f) => ({
-    type: "Feature",
-    geometry: f.geometry,
-    properties: f.properties ?? {},
-    valid_from: f.properties?.valid_from ?? f.properties?.time ?? f.properties?.start ?? null,
-    valid_to:   f.properties?.valid_to   ?? f.properties?.end  ?? null,
-  }));
+  return features
+    .map((f) => {
+      const geometry = sanitizeGeometry(f?.geometry);
+      if (!geometry) {
+        return null;
+      }
+      return {
+        type: "Feature",
+        geometry,
+        properties: f.properties ?? {},
+        valid_from: f.properties?.valid_from ?? f.properties?.time ?? f.properties?.start ?? null,
+        valid_to:   f.properties?.valid_to   ?? f.properties?.end  ?? null,
+      };
+    })
+    .filter(Boolean);
 }

@@ -1,6 +1,7 @@
 import { createLayerModel } from "../core/layer-model.js";
 import { mountUploadPanel } from "../upload/upload-panel.js";
 import { mountAddRowPanel } from "./add-row-panel.js";
+import { mountCreateLayerPanel } from "./create-layer-panel.js";
 import { mountDataTablePanel } from "./data-table-panel.js";
 import { getProjectionRegistry } from "../core/projection/projection-registry.js";
 import { createStyleModel } from "../core/style-model.js";
@@ -62,7 +63,11 @@ async function bootstrapApplication() {
     layerModel,
     onAddRow: ({ kind, depth, parentId, rowType }) => {
       if (kind === "open-add-panel") {
-        addRowPanel.open({ depth, parentId });
+        if (depth === 0) {
+          createLayerPanel.open({ parentId });
+        } else {
+          addRowPanel.open({ depth, parentId });
+        }
       } else if (kind === "row") {
         const added = layerModel.addRowToLayer(parentId, rowType);
         if (added) rerenderLayerMenu();
@@ -133,6 +138,31 @@ async function bootstrapApplication() {
     onBeforeMenuOpen: () => layerMenuControls?.close?.(),
   });
   const uploadPanel = mountUploadPanel({
+    onLayerCreated: async ({ layerId, name, parentId, geometryType }) => {
+      try {
+        const added = await addDataRowAndAttach({
+          parentId: parentId ?? layerModel.getRootParentId(),
+          name,
+          layerRef: layerId,
+          geometryType,
+          layerModel,
+          screenRuntime,
+        });
+        if (added) rerenderLayerMenu();
+      } catch (err) {
+        console.error("Failed to load uploaded layer onto map.", err);
+      }
+    },
+    onLayerUpdated: async ({ layerId }) => {
+      try {
+        await reloadSupabaseLayer(layerId, layerModel, screenRuntime);
+      } catch (err) {
+        console.error("Failed to refresh updated layer.", err);
+      }
+    },
+  });
+  const createLayerPanel = mountCreateLayerPanel({
+    getAppearanceState: () => layerModel.getAppearanceState(),
     onLayerCreated: async ({ layerId, name, parentId, geometryType }) => {
       try {
         const added = await addDataRowAndAttach({
@@ -253,9 +283,9 @@ async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
   let suppressedAny = false;
   for (const { rowId, layerId } of supabaseLayers) {
     try {
-      const { layer, geojson } = await loadLayerFromSupabase(layerId);
-      if (geojson || layer.tiles_url) {
-        screenRuntime.loadDynamicLayer({ layerId, geojson, tilesUrl: layer.tiles_url ?? null, style: layer.default_style });
+      const { layer, geojson, tilesUrl } = await loadLayerFromSupabase(layerId);
+      if (geojson || tilesUrl) {
+        screenRuntime.loadDynamicLayer({ layerId, geojson, tilesUrl, style: layer.default_style });
       }
       const row = layerModel.getRowById(rowId);
       if (row) {
@@ -311,7 +341,7 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryType, lay
     }
     throw err;
   }
-  const { layer, geojson } = layerResult;
+  const { layer, geojson, tilesUrl } = layerResult;
   const added = layerModel.addDataRow(resolvedParentId, {
     name,
     layerRef,
@@ -320,8 +350,8 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryType, lay
   if (!added) {
     return null;
   }
-  if (geojson || layer.tiles_url) {
-    screenRuntime.loadDynamicLayer({ layerId: layerRef, geojson, tilesUrl: layer.tiles_url ?? null, style: layer.default_style });
+  if (geojson || tilesUrl) {
+    screenRuntime.loadDynamicLayer({ layerId: layerRef, geojson, tilesUrl, style: layer.default_style });
   }
 
   const runtimeTargetId = getRowRuntimeTargetId(added);
@@ -332,6 +362,24 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryType, lay
   }
 
   return added;
+}
+
+async function reloadSupabaseLayer(layerId, layerModel, screenRuntime) {
+  const { layer, geojson, tilesUrl } = await loadLayerFromSupabase(layerId);
+  screenRuntime.detachDynamicLayer(layerId);
+  if (geojson || tilesUrl) {
+    screenRuntime.loadDynamicLayer({ layerId, geojson, tilesUrl, style: layer.default_style });
+  }
+
+  const targetRow = layerModel.getSupabaseLayers().find((entry) => entry.layerId === layerId);
+  if (!targetRow) {
+    return;
+  }
+  const row = layerModel.getRowById(targetRow.rowId);
+  if (row) {
+    applyPersistedRowVisibility(layerModel, screenRuntime, row);
+  }
+  screenRuntime.reapplyFullOrder?.();
 }
 
 export { bootstrapApplication };

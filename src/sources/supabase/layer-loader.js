@@ -7,11 +7,49 @@ function isMissingLayerError(error) {
     || message.includes("no rows");
 }
 
+function mergeSchemaFields(datasetRows) {
+  const fields = [];
+  const seenKeys = new Set();
+
+  datasetRows.forEach((dataset) => {
+    const schema = Array.isArray(dataset?.field_schema) ? dataset.field_schema : [];
+    schema.forEach((field) => {
+      const key = String(field?.key ?? "");
+      if (!key || seenKeys.has(key) || field?.visible === false) {
+        return;
+      }
+      fields.push({
+        key,
+        label: field.label ?? key,
+        type: field.type ?? "text",
+        source: "property",
+      });
+      seenKeys.add(key);
+    });
+  });
+
+  return { fields, seenKeys };
+}
+
+async function loadLayerDatasets(layerId) {
+  const supabase = requireSupabase();
+  const { data, error } = await supabase
+    .from("datasets")
+    .select("id, layer_id, name, geometry_type, field_schema, render_format, artifact_url, feature_count, created_at")
+    .eq("layer_id", layerId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to load datasets: ${error.message}`);
+  }
+
+  return Array.isArray(data) ? data : [];
+}
+
 // Merges a partial style patch into the layer's default_style in Supabase.
 // key/value pairs map directly to default_style fields (color, opacity, radius, weight).
 export async function updateLayerDefaultStyle(layerId, patch) {
   const supabase = requireSupabase();
-  // Read current default_style first, then merge.
   const { data: layer, error: readError } = await supabase
     .from("layers")
     .select("default_style")
@@ -30,7 +68,6 @@ export async function updateLayerDefaultStyle(layerId, patch) {
   if (error) throw new Error(error.message);
 }
 
-// Returns all public/unlisted layers from Supabase as catalog entries.
 export async function getSupabaseCatalog() {
   const supabase = requireSupabase();
   const { data, error } = await supabase
@@ -41,29 +78,42 @@ export async function getSupabaseCatalog() {
 
   if (error || !data?.length) return [];
 
-  return data.map((l) => ({
-    id: l.id,
-    label: l.name,
+  return data.map((layer) => ({
+    id: layer.id,
+    label: layer.name,
     group: "Uploaded layers",
-    geometryType: l.geometry_type ?? "mixed",
+    geometryType: layer.geometry_type ?? "mixed",
   }));
+}
+
+export async function getLayerDatasets(layerId) {
+  return loadLayerDatasets(layerId);
 }
 
 // Returns sorted distinct values for a specific property field, sampled from up to 200 features.
 export async function getLayerFieldValues(layerId, field) {
   const supabase = requireSupabase();
+  const datasets = await loadLayerDatasets(layerId);
+  const datasetIds = datasets.map((dataset) => dataset.id);
+
+  if (!datasetIds.length) {
+    return null;
+  }
+
   const { data, error } = await supabase
     .from("features")
     .select("properties")
-    .eq("layer_id", layerId)
+    .in("dataset_id", datasetIds)
     .limit(200);
 
   if (error || !data?.length) return null;
 
   const seen = new Set();
   for (const row of data) {
-    const val = row.properties?.[field];
-    if (val !== undefined && val !== null && val !== "") seen.add(val);
+    const value = row.properties?.[field];
+    if (value !== undefined && value !== null && value !== "") {
+      seen.add(value);
+    }
   }
 
   if (!seen.size) return null;
@@ -74,13 +124,25 @@ export async function getLayerFieldValues(layerId, field) {
   });
 }
 
-// Returns sorted unique property field names for a layer, sampled from up to 20 features.
+// Returns sorted unique property field names for a layer.
 export async function getLayerFields(layerId) {
   const supabase = requireSupabase();
+  const datasets = await loadLayerDatasets(layerId);
+  const { fields } = mergeSchemaFields(datasets);
+
+  if (fields.length) {
+    return fields.map((field) => field.key);
+  }
+
+  const datasetIds = datasets.map((dataset) => dataset.id);
+  if (!datasetIds.length) {
+    return null;
+  }
+
   const { data, error } = await supabase
     .from("features")
     .select("properties")
-    .eq("layer_id", layerId)
+    .in("dataset_id", datasetIds)
     .limit(20);
 
   if (error || !data?.length) return null;
@@ -88,71 +150,55 @@ export async function getLayerFields(layerId) {
   const keys = new Set();
   for (const row of data) {
     if (row.properties && typeof row.properties === "object") {
-      Object.keys(row.properties).forEach((k) => keys.add(k));
+      Object.keys(row.properties).forEach((key) => keys.add(key));
     }
   }
 
-  return [...keys].filter((k) => !k.startsWith("_")).sort();
+  return [...keys].filter((key) => !key.startsWith("_")).sort();
 }
 
 export async function getLayerTablePreview(layerId, { limit = 50, offset = 0 } = {}) {
   const supabase = requireSupabase();
   const safeLimit = Math.max(1, Math.min(200, Number(limit) || 50));
   const safeOffset = Math.max(0, Number(offset) || 0);
-  let layer = null;
-  let layerError = null;
-  const layerResult = await supabase
-    .from("layers")
-    .select("field_schema")
-    .eq("id", layerId)
-    .single();
-  layer = layerResult.data;
-  layerError = layerResult.error;
+  const datasets = await loadLayerDatasets(layerId);
+  const datasetIds = datasets.map((dataset) => dataset.id);
 
-  if (layerError && !/field_schema/i.test(layerError.message ?? "")) {
-    throw new Error(layerError.message);
+  if (!datasetIds.length) {
+    return {
+      offset: safeOffset,
+      limit: safeLimit,
+      rows: [],
+      fields: [],
+      hasMore: false,
+    };
   }
 
   const { data, error } = await supabase
     .from("features")
-    .select("id, properties, valid_from, valid_to")
-    .eq("layer_id", layerId)
+    .select("id, dataset_id, properties, valid_from, valid_to")
+    .in("dataset_id", datasetIds)
+    .order("created_at", { ascending: true })
     .range(safeOffset, safeOffset + safeLimit - 1);
 
   if (error) throw new Error(error.message);
 
   const rows = Array.isArray(data) ? data : [];
-  const schemaFields = Array.isArray(layer?.field_schema) ? layer.field_schema.filter((field) => field?.key) : [];
-  const fields = [];
-  const seenKeys = new Set();
-
-  fields.push({ key: "id", label: "ID", type: "uuid", source: "column" });
-  seenKeys.add("id");
-
-  for (const field of schemaFields) {
-    const key = String(field.key);
-    if (seenKeys.has(key) || field.visible === false) {
-      continue;
-    }
-    fields.push({
-      key,
-      label: field.label ?? key,
-      type: field.type ?? "text",
-      source: "property",
-    });
-    seenKeys.add(key);
-  }
-
+  const { fields, seenKeys } = mergeSchemaFields(datasets);
+  const finalFields = [{ key: "id", label: "ID", type: "uuid", source: "column" }];
   let hasTemporalData = false;
 
-  for (const row of rows) {
+  fields.forEach((field) => finalFields.push(field));
+  seenKeys.add("id");
+
+  rows.forEach((row) => {
     if (row?.valid_from || row?.valid_to) {
       hasTemporalData = true;
     }
     if (row?.properties && typeof row.properties === "object") {
       Object.keys(row.properties).forEach((key) => {
         if (!String(key).startsWith("_") && !seenKeys.has(key)) {
-          fields.push({
+          finalFields.push({
             key,
             label: key,
             type: "text",
@@ -162,29 +208,37 @@ export async function getLayerTablePreview(layerId, { limit = 50, offset = 0 } =
         }
       });
     }
-  }
+  });
 
   if (hasTemporalData) {
-    fields.push({ key: "valid_from", label: "Valid From", type: "date", source: "column" });
-    fields.push({ key: "valid_to", label: "Valid To", type: "date", source: "column" });
+    finalFields.push({ key: "valid_from", label: "Valid From", type: "date", source: "column" });
+    finalFields.push({ key: "valid_to", label: "Valid To", type: "date", source: "column" });
   }
 
   return {
     offset: safeOffset,
     limit: safeLimit,
     rows,
-    fields,
+    fields: finalFields,
     hasMore: rows.length === safeLimit,
   };
 }
 
 const MAX_GEOJSON_FEATURES = 10_000;
 
+async function loadGeojsonArtifact(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch GeoJSON artifact: ${response.status}`);
+  }
+  return response.json();
+}
+
 export async function loadLayerFromSupabase(layerId) {
   const supabase = requireSupabase();
   const { data: layer, error: layerError } = await supabase
     .from("layers")
-    .select("name, geometry_type, default_style, tiles_url, feature_count")
+    .select("id, name, geometry_type, default_style, feature_count")
     .eq("id", layerId)
     .single();
 
@@ -196,19 +250,30 @@ export async function loadLayerFromSupabase(layerId) {
     throw error;
   }
 
-  // PMTiles available — use directly, no GeoJSON needed.
-  if (layer.tiles_url) {
-    return { layer, geojson: null };
+  const datasets = await loadLayerDatasets(layerId);
+  if (datasets.length === 1) {
+    const [dataset] = datasets;
+    if (dataset?.render_format === "pmtiles" && dataset?.artifact_url) {
+      return { layer, datasets, geojson: null, tilesUrl: dataset.artifact_url };
+    }
+
+    if (dataset?.render_format === "geojson" && dataset?.artifact_url) {
+      const geojson = await loadGeojsonArtifact(dataset.artifact_url);
+      return { layer, datasets, geojson, tilesUrl: null };
+    }
   }
 
-  // Too many features to fetch as flat GeoJSON — skip map load.
+  if (datasets.some((dataset) => dataset.render_format === "pmtiles" && dataset.artifact_url)) {
+    console.warn("Layer has multiple datasets, so loader is falling back to merged GeoJSON instead of per-dataset PMTiles.");
+  }
+
   if ((layer.feature_count ?? 0) > MAX_GEOJSON_FEATURES) {
-    console.warn(`Layer has ${layer.feature_count} features — too large to load as GeoJSON. Re-upload with tile generation enabled.`);
-    return { layer, geojson: null };
+    console.warn(`Layer has ${layer.feature_count} features - too large to load as GeoJSON. Re-upload with tile generation enabled.`);
+    return { layer, datasets, geojson: null, tilesUrl: null };
   }
 
   const { data: geojson, error: geojsonError } = await supabase.rpc("get_layer_geojson", { p_layer_id: layerId });
   if (geojsonError) throw new Error(`Failed to load features: ${geojsonError.message}`);
 
-  return { layer, geojson };
+  return { layer, datasets, geojson, tilesUrl: null };
 }

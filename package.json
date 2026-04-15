@@ -30,6 +30,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",
     "@tmcw/togeojson": "^7.1.2",
+    "geojson-vt": "^4.0.2",
     "maplibre-gl": "^5.21.1",
     "papaparse": "^5.5.3",
     "pmtiles": "^4.4.0",

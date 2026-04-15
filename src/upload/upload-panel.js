@@ -2,43 +2,123 @@ import { parseFile, SUPPORTED_EXTENSIONS } from "./parse-file.js";
 import { rowsToFeatures } from "./csv-mapper.js";
 import { summarizeFeatureComplexity } from "./feature-complexity.js";
 import { inferFieldSchemaFromFeatures } from "./field-schema.js";
-import { insertLayer } from "./insert-layer.js";
+import { inferGeometryFamily } from "./geometry-family.js";
+import {
+  addDatasetToLayer,
+  appendFeaturesToDataset,
+  createLayerWithDataset,
+} from "./insert-layer.js";
+import { getLayerDatasets, getSupabaseCatalog } from "../sources/supabase/layer-loader.js";
 
 function inferGeometryType(features = []) {
-  const types = new Set(features.map((feature) => feature?.geometry?.type).filter(Boolean));
-  if (types.size > 1) return "mixed";
-  if (types.has("Point") || types.has("MultiPoint")) return "point";
-  if (types.has("LineString") || types.has("MultiLineString")) return "line";
-  if (types.has("Polygon") || types.has("MultiPolygon")) return "polygon";
-  return "mixed";
+  return inferGeometryFamily(features);
 }
 
-export function mountUploadPanel({ onLayerCreated }) {
+function normalizeDatasetName(value, fallback = "Dataset") {
+  const trimmed = String(value ?? "").replace(/\.[^.]+$/, "").trim();
+  return trimmed || fallback;
+}
+
+export function mountUploadPanel({ onLayerCreated, onLayerUpdated }) {
   const panel = createPanel();
   document.body.appendChild(panel);
 
-  let state = {
-    step: "drop", // drop | map-columns | confirm | uploading | done
-    file: null,
-    parsed: null,
-    mapping: null,
-    features: null,
-    fieldSchema: [],
-    complexity: null,
-    usePmtiles: false,
-    name: "",
-    viewAccess: "unlisted",
-  };
+  let state = createInitialState();
+
+  function createInitialState(overrides = {}) {
+    return {
+      step: "mode", // mode | drop | map-columns | confirm | uploading | done
+      mode: "",
+      file: null,
+      parsed: null,
+      mapping: null,
+      features: null,
+      fieldSchema: [],
+      complexity: null,
+      usePmtiles: false,
+      name: "",
+      datasetName: "",
+      viewAccess: "unlisted",
+      parentId: null,
+      targetLayerId: "",
+      targetLayerName: "",
+      targetDatasetId: "",
+      targetDatasetName: "",
+      catalog: [],
+      catalogLoaded: false,
+      datasets: [],
+      loadingTargets: false,
+      targetsLoadedFor: "",
+      error: "",
+      layerId: null,
+      datasetId: null,
+      ...overrides,
+    };
+  }
+
+  function setError(message = "") {
+    state.error = message;
+    const errorEl = panel.querySelector("#uploadError");
+    if (errorEl) {
+      errorEl.textContent = message;
+      errorEl.hidden = !message;
+    }
+  }
 
   function render() {
     const content = panel.querySelector(".upload-panel-content");
     content.innerHTML = "";
 
+    if (state.step === "mode") content.append(renderModeSelect());
     if (state.step === "drop") content.append(renderDrop());
     if (state.step === "map-columns") content.append(renderColumnMap());
     if (state.step === "confirm") content.append(renderConfirm());
     if (state.step === "uploading") content.append(renderUploading());
     if (state.step === "done") content.append(renderDone());
+  }
+
+  function ensureModeSelected() {
+    if (!state.mode) {
+      state.step = "mode";
+      render();
+      return false;
+    }
+    return true;
+  }
+
+  async function loadCatalogIfNeeded() {
+    if (state.catalogLoaded || state.loadingTargets) {
+      return;
+    }
+    state.loadingTargets = true;
+    render();
+    try {
+      state.catalog = await getSupabaseCatalog();
+    } catch (_error) {
+      state.catalog = [];
+    } finally {
+      state.catalogLoaded = true;
+      state.loadingTargets = false;
+      render();
+    }
+  }
+
+  async function loadDatasetsForLayer(layerId) {
+    if (!layerId || state.targetsLoadedFor === layerId) {
+      return;
+    }
+    state.loadingTargets = true;
+    render();
+    try {
+      state.datasets = await getLayerDatasets(layerId);
+      state.targetsLoadedFor = layerId;
+    } catch (_error) {
+      state.datasets = [];
+      state.targetsLoadedFor = "";
+    } finally {
+      state.loadingTargets = false;
+      render();
+    }
   }
 
   function applyFeatures(features) {
@@ -58,8 +138,11 @@ export function mountUploadPanel({ onLayerCreated }) {
 
     state.file = file;
     state.parsed = parsed;
-    if (!state.name) {
-      state.name = file.name.replace(/\.[^.]+$/, "");
+    if (!state.name && state.mode === "new-layer") {
+      state.name = normalizeDatasetName(file.name, "Layer");
+    }
+    if (!state.datasetName) {
+      state.datasetName = normalizeDatasetName(file.name);
     }
 
     if (parsed.type === "csv") {
@@ -73,6 +156,109 @@ export function mountUploadPanel({ onLayerCreated }) {
     return { ok: true };
   }
 
+  function renderModeSelect() {
+    void loadCatalogIfNeeded();
+    const layerOptions = state.catalog.map((entry) => `
+      <option value="${entry.id}" ${state.targetLayerId === entry.id ? "selected" : ""}>${entry.label}</option>
+    `).join("");
+    const datasetOptions = state.datasets.map((dataset) => `
+      <option value="${dataset.id}" ${state.targetDatasetId === dataset.id ? "selected" : ""}>${dataset.name}</option>
+    `).join("");
+
+    const el = html(`
+      <div class="upload-step">
+        <h3 class="upload-step-title">Add data</h3>
+        <div class="upload-col-map">
+          <label class="upload-col-row">
+            <span class="upload-col-label">Mode</span>
+            <select class="upload-col-select" id="uploadMode">
+              <option value="">Choose...</option>
+              <option value="new-layer" ${state.mode === "new-layer" ? "selected" : ""}>New layer</option>
+              <option value="existing-layer" ${state.mode === "existing-layer" ? "selected" : ""}>Add to existing layer</option>
+              <option value="existing-dataset" ${state.mode === "existing-dataset" ? "selected" : ""}>Add to existing dataset</option>
+            </select>
+          </label>
+          ${(state.mode === "existing-layer" || state.mode === "existing-dataset") ? `
+            <label class="upload-col-row">
+              <span class="upload-col-label">Layer</span>
+              <select class="upload-col-select" id="uploadTargetLayer">
+                <option value="">Choose layer...</option>
+                ${layerOptions}
+              </select>
+            </label>
+          ` : ""}
+          ${state.mode === "existing-dataset" ? `
+            <label class="upload-col-row">
+              <span class="upload-col-label">Dataset</span>
+              <select class="upload-col-select" id="uploadTargetDataset">
+                <option value="">Choose dataset...</option>
+                ${datasetOptions}
+              </select>
+            </label>
+          ` : ""}
+        </div>
+        <div class="upload-actions">
+          <button class="upload-btn upload-btn-primary" id="uploadModeNext" ${state.loadingTargets ? "disabled" : ""}>Continue</button>
+        </div>
+        <p class="upload-error" id="uploadError" ${state.error ? "" : "hidden"}>${state.error || ""}</p>
+      </div>
+    `);
+
+    el.querySelector("#uploadMode")?.addEventListener("change", async (event) => {
+      state.mode = event.target.value;
+      state.targetLayerId = "";
+      state.targetLayerName = "";
+      state.targetDatasetId = "";
+      state.targetDatasetName = "";
+      state.datasets = [];
+      state.targetsLoadedFor = "";
+      setError("");
+      render();
+    });
+
+    el.querySelector("#uploadTargetLayer")?.addEventListener("change", async (event) => {
+      state.targetLayerId = event.target.value;
+      const match = state.catalog.find((entry) => entry.id === state.targetLayerId);
+      state.targetLayerName = match?.label ?? "";
+      state.targetDatasetId = "";
+      state.targetDatasetName = "";
+      state.datasets = [];
+      state.targetsLoadedFor = "";
+      if (state.mode === "existing-dataset" && state.targetLayerId) {
+        await loadDatasetsForLayer(state.targetLayerId);
+      } else {
+        render();
+      }
+    });
+
+    el.querySelector("#uploadTargetDataset")?.addEventListener("change", (event) => {
+      state.targetDatasetId = event.target.value;
+      const match = state.datasets.find((dataset) => dataset.id === state.targetDatasetId);
+      state.targetDatasetName = match?.name ?? "";
+    });
+
+    el.querySelector("#uploadModeNext")?.addEventListener("click", async () => {
+      if (!state.mode) {
+        setError("Choose how you want to add data.");
+        return;
+      }
+      if ((state.mode === "existing-layer" || state.mode === "existing-dataset") && !state.targetLayerId) {
+        setError("Choose a target layer.");
+        return;
+      }
+      if (state.mode === "existing-dataset" && !state.targetDatasetId) {
+        setError("Choose a target dataset.");
+        return;
+      }
+
+      setError("");
+      state.step = "drop";
+      render();
+    });
+
+    return el;
+  }
+
   function renderDrop() {
     const el = html(`
       <div class="upload-step">
@@ -80,6 +266,9 @@ export function mountUploadPanel({ onLayerCreated }) {
           <p class="upload-dropzone-hint">Drop a file or click to browse</p>
           <p class="upload-dropzone-formats">${SUPPORTED_EXTENSIONS.join("  |  ")}</p>
           <input type="file" class="upload-file-input" accept="${SUPPORTED_EXTENSIONS.join(",")}" />
+        </div>
+        <div class="upload-actions">
+          <button class="upload-btn upload-btn-secondary" id="uploadBackMode">Back</button>
         </div>
         <p class="upload-error" id="uploadError" hidden></p>
       </div>
@@ -103,6 +292,10 @@ export function mountUploadPanel({ onLayerCreated }) {
     });
     input.addEventListener("change", () => {
       void handleFile(input.files[0]);
+    });
+    el.querySelector("#uploadBackMode")?.addEventListener("click", () => {
+      state.step = "mode";
+      render();
     });
 
     async function handleFile(file) {
@@ -201,6 +394,9 @@ export function mountUploadPanel({ onLayerCreated }) {
     const recommendation = complexity.recommendPmtiles
       ? `PMTiles recommended. ${complexity.recommendationReason}`
       : complexity.recommendationReason;
+    const showLayerName = state.mode === "new-layer";
+    const showDatasetName = state.mode === "new-layer" || state.mode === "existing-layer";
+    const showPmtilesOption = state.mode !== "existing-dataset";
 
     const el = html(`
       <div class="upload-step">
@@ -210,22 +406,35 @@ export function mountUploadPanel({ onLayerCreated }) {
           <div class="upload-summary-row"><span>Features</span><strong>${count.toLocaleString()}</strong></div>
           <div class="upload-summary-row"><span>Type</span><strong>${types}</strong></div>
           <div class="upload-summary-row"><span>Vertices</span><strong>${complexity.vertexCount.toLocaleString()}</strong></div>
-          <div class="upload-summary-row"><span>Rendering</span><strong>${state.usePmtiles ? "Optimised tiles" : "Flat GeoJSON"}</strong></div>
+          ${showPmtilesOption ? `<div class="upload-summary-row"><span>Rendering</span><strong>${state.usePmtiles ? "Optimised tiles" : "Flat GeoJSON"}</strong></div>` : ""}
+          ${state.mode !== "new-layer" ? `<div class="upload-summary-row"><span>Layer</span><strong>${state.targetLayerName}</strong></div>` : ""}
+          ${state.mode === "existing-dataset" ? `<div class="upload-summary-row"><span>Dataset</span><strong>${state.targetDatasetName}</strong></div>` : ""}
         </div>
-        <label class="upload-field-label">Layer name
-          <input class="upload-field-input" type="text" value="${state.name}" id="uploadName" />
-        </label>
-        <label class="upload-field-label">
-          <input type="checkbox" id="uploadUsePmtiles" ${state.usePmtiles ? "checked" : ""} />
-          Generate PMTiles for faster rendering
-        </label>
-        <label class="upload-field-label">Visibility
-          <select class="upload-field-input" id="uploadAccess">
-            <option value="unlisted" ${state.viewAccess === "unlisted" ? "selected" : ""}>Unlisted (anyone with the link)</option>
-            <option value="public" ${state.viewAccess === "public" ? "selected" : ""}>Public</option>
-            <option value="private" ${state.viewAccess === "private" ? "selected" : ""}>Private</option>
-          </select>
-        </label>
+        ${showLayerName ? `
+          <label class="upload-field-label">Layer name
+            <input class="upload-field-input" type="text" value="${state.name}" id="uploadName" />
+          </label>
+        ` : ""}
+        ${showDatasetName ? `
+          <label class="upload-field-label">Dataset name
+            <input class="upload-field-input" type="text" value="${state.datasetName}" id="uploadDatasetName" />
+          </label>
+        ` : ""}
+        ${showPmtilesOption ? `
+          <label class="upload-field-label">
+            <input type="checkbox" id="uploadUsePmtiles" ${state.usePmtiles ? "checked" : ""} />
+            Generate PMTiles for faster rendering
+          </label>
+        ` : ""}
+        ${state.mode === "new-layer" ? `
+          <label class="upload-field-label">Visibility
+            <select class="upload-field-input" id="uploadAccess">
+              <option value="unlisted" ${state.viewAccess === "unlisted" ? "selected" : ""}>Unlisted (anyone with the link)</option>
+              <option value="public" ${state.viewAccess === "public" ? "selected" : ""}>Public</option>
+              <option value="private" ${state.viewAccess === "private" ? "selected" : ""}>Private</option>
+            </select>
+          </label>
+        ` : ""}
         <div class="upload-actions">
           <button class="upload-btn upload-btn-secondary" id="uploadBack">Back</button>
           <button class="upload-btn upload-btn-primary" id="uploadConfirm">Upload</button>
@@ -234,13 +443,16 @@ export function mountUploadPanel({ onLayerCreated }) {
       </div>
     `);
 
-    el.querySelector("#uploadName").addEventListener("input", (event) => {
+    el.querySelector("#uploadName")?.addEventListener("input", (event) => {
       state.name = event.target.value;
     });
-    el.querySelector("#uploadUsePmtiles").addEventListener("change", (event) => {
+    el.querySelector("#uploadDatasetName")?.addEventListener("input", (event) => {
+      state.datasetName = event.target.value;
+    });
+    el.querySelector("#uploadUsePmtiles")?.addEventListener("change", (event) => {
       state.usePmtiles = event.target.checked;
     });
-    el.querySelector("#uploadAccess").addEventListener("change", (event) => {
+    el.querySelector("#uploadAccess")?.addEventListener("change", (event) => {
       state.viewAccess = event.target.value;
     });
     el.querySelector("#uploadBack").addEventListener("click", () => {
@@ -249,8 +461,16 @@ export function mountUploadPanel({ onLayerCreated }) {
     });
     el.querySelector("#uploadConfirm").addEventListener("click", async () => {
       const error = el.querySelector("#uploadError");
-      if (!state.name.trim()) {
+      if (!ensureModeSelected()) {
+        return;
+      }
+      if (state.mode === "new-layer" && !state.name.trim()) {
         error.textContent = "Layer name is required.";
+        error.hidden = false;
+        return;
+      }
+      if (showDatasetName && !state.datasetName.trim()) {
+        error.textContent = "Dataset name is required.";
         error.hidden = false;
         return;
       }
@@ -259,28 +479,66 @@ export function mountUploadPanel({ onLayerCreated }) {
       render();
 
       try {
-        const layerId = await insertLayer({
-          name: state.name.trim(),
-          viewAccess: state.viewAccess,
+        if (state.mode === "new-layer") {
+          const { layerId, datasetId } = await createLayerWithDataset({
+            name: state.name.trim(),
+            datasetName: state.datasetName.trim(),
+            viewAccess: state.viewAccess,
+            features: state.features,
+            fieldSchema: state.fieldSchema,
+            rawFile: state.file,
+            usePmtiles: state.usePmtiles,
+            onProgress: setUploadProgress,
+          });
+          state.layerId = layerId;
+          state.datasetId = datasetId;
+          state.step = "done";
+          render();
+          onLayerCreated?.({
+            layerId,
+            datasetId,
+            name: state.name.trim(),
+            parentId: state.parentId ?? null,
+            geometryType: inferGeometryType(state.features),
+          });
+          return;
+        }
+
+        if (state.mode === "existing-layer") {
+          const { datasetId } = await addDatasetToLayer({
+            layerId: state.targetLayerId,
+            name: state.datasetName.trim(),
+            features: state.features,
+            fieldSchema: state.fieldSchema,
+            rawFile: state.file,
+            usePmtiles: state.usePmtiles,
+            onProgress: setUploadProgress,
+          });
+          state.layerId = state.targetLayerId;
+          state.datasetId = datasetId;
+          state.step = "done";
+          render();
+          onLayerUpdated?.({
+            layerId: state.targetLayerId,
+            datasetId,
+            mode: state.mode,
+          });
+          return;
+        }
+
+        const result = await appendFeaturesToDataset({
+          datasetId: state.targetDatasetId,
           features: state.features,
-          fieldSchema: state.fieldSchema,
-          rawFile: state.file,
-          usePmtiles: state.usePmtiles,
-          onProgress: (pct, label) => {
-            const bar = panel.querySelector(".upload-progress-bar");
-            if (bar) bar.style.width = `${pct}%`;
-            const labelEl = panel.querySelector(".upload-progress-label");
-            if (labelEl) labelEl.textContent = label ?? `${pct}%`;
-          },
+          onProgress: setUploadProgress,
         });
+        state.layerId = state.targetLayerId;
+        state.datasetId = result.datasetId;
         state.step = "done";
-        state.layerId = layerId;
         render();
-        onLayerCreated?.({
-          layerId,
-          name: state.name.trim(),
-          parentId: state.parentId ?? null,
-          geometryType: inferGeometryType(state.features),
+        onLayerUpdated?.({
+          layerId: state.targetLayerId,
+          datasetId: result.datasetId,
+          mode: state.mode,
         });
       } catch (err) {
         state.step = "confirm";
@@ -296,6 +554,13 @@ export function mountUploadPanel({ onLayerCreated }) {
     return el;
   }
 
+  function setUploadProgress(pct, label) {
+    const bar = panel.querySelector(".upload-progress-bar");
+    if (bar) bar.style.width = `${pct}%`;
+    const labelEl = panel.querySelector(".upload-progress-label");
+    if (labelEl) labelEl.textContent = label ?? `${pct}%`;
+  }
+
   function renderUploading() {
     return html(`
       <div class="upload-step upload-step-uploading">
@@ -309,9 +574,10 @@ export function mountUploadPanel({ onLayerCreated }) {
   }
 
   function renderDone() {
+    const label = state.mode === "new-layer" ? "Layer added to map" : "Data added";
     const el = html(`
       <div class="upload-step upload-step-done">
-        <p class="upload-done-label">Layer added to map</p>
+        <p class="upload-done-label">${label}</p>
         <div class="upload-actions">
           <button class="upload-btn upload-btn-secondary" id="uploadAnother">Upload another</button>
           <button class="upload-btn upload-btn-primary" id="uploadClose">Done</button>
@@ -319,7 +585,19 @@ export function mountUploadPanel({ onLayerCreated }) {
       </div>
     `);
     el.querySelector("#uploadAnother").addEventListener("click", () => {
-      state = { step: "drop", file: null, parsed: null, mapping: null, features: null, fieldSchema: [], complexity: null, usePmtiles: false, name: "", viewAccess: "unlisted" };
+      state = createInitialState({
+        mode: state.mode,
+        step: state.mode ? "drop" : "mode",
+        parentId: state.parentId,
+        targetLayerId: state.targetLayerId,
+        targetLayerName: state.targetLayerName,
+        targetDatasetId: state.mode === "existing-dataset" ? state.targetDatasetId : "",
+        targetDatasetName: state.mode === "existing-dataset" ? state.targetDatasetName : "",
+        catalog: state.catalog,
+        catalogLoaded: state.catalogLoaded,
+        datasets: state.datasets,
+        targetsLoadedFor: state.targetsLoadedFor,
+      });
       render();
     });
     el.querySelector("#uploadClose").addEventListener("click", () => closePanel());
@@ -335,10 +613,32 @@ export function mountUploadPanel({ onLayerCreated }) {
   render();
 
   return {
-    open({ parentId, name = "", file = null } = {}) {
+    open({ mode = "", layerId = "", datasetId = "", parentId, name = "", file = null } = {}) {
+      state = createInitialState({
+        mode,
+        step: mode ? "drop" : "mode",
+        name,
+        parentId: parentId ?? null,
+        targetLayerId: layerId,
+        targetDatasetId: datasetId,
+      });
       panel.classList.add("is-open");
-      state = { step: "drop", file: null, parsed: null, mapping: null, features: null, fieldSchema: [], complexity: null, usePmtiles: false, name, viewAccess: "unlisted", parentId: parentId ?? null };
-      render();
+
+      if (layerId) {
+        void loadCatalogIfNeeded().then(async () => {
+          const match = state.catalog.find((entry) => entry.id === layerId);
+          state.targetLayerName = match?.label ?? "";
+          if (mode === "existing-dataset" && layerId) {
+            await loadDatasetsForLayer(layerId);
+            const dataset = state.datasets.find((entry) => entry.id === datasetId);
+            state.targetDatasetName = dataset?.name ?? "";
+          }
+          render();
+        });
+      } else {
+        render();
+      }
+
       if (file) {
         void processSelectedFile(file).then((result) => {
           if (!result?.ok) {

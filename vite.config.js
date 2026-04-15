@@ -22,7 +22,7 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    include: ["maplibre-gl"],
+    include: ["maplibre-gl", "shpjs"],
     force: true,
   },
 });

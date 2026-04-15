@@ -4,7 +4,7 @@ import { zxyToTileId } from "pmtiles";
 // Spec: https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md
 
 const HEADER_SIZE = 127;
-const MAGIC = 0x4d19;
+const MAGIC = 0x4d50;
 const MAX_DIR_BYTES = 16384;
 
 // ── Varint ────────────────────────────────────────────────────────────────────
@@ -135,40 +135,41 @@ export function buildPMTiles({ tiles, minZoom = 0, maxZoom = 14, bounds = [-180,
   const out  = new Uint8Array(totalSize);
   const view = new DataView(out.buffer);
 
-  // Magic + version
+  // Magic + version. PMTiles v3 stores the version byte at offset 7,
+  // with the u64 header fields beginning at offset 8.
   view.setUint16(0, MAGIC, true);
-  view.setUint8(2, 3);
+  view.setUint8(7, 3);
 
   // Offsets & lengths (all uint64 LE)
-  setUint64LE(view, 3,  rootDirOffset);
-  setUint64LE(view, 11, rootDir.length);
-  setUint64LE(view, 19, metadataOffset);
-  setUint64LE(view, 27, metadataBytes.length);
-  setUint64LE(view, 35, leafDirsOffset);
-  setUint64LE(view, 43, leafDirs.length);
-  setUint64LE(view, 51, tileDataOffset);
-  setUint64LE(view, 59, tileData.length);
-  setUint64LE(view, 67, entries.length); // addressed tiles
-  setUint64LE(view, 75, entries.length + (leafDirs.length > 0 ? 1 : 0)); // tile entries
-  setUint64LE(view, 83, entries.length); // tile contents (unique)
+  setUint64LE(view, 8,  rootDirOffset);
+  setUint64LE(view, 16, rootDir.length);
+  setUint64LE(view, 24, metadataOffset);
+  setUint64LE(view, 32, metadataBytes.length);
+  setUint64LE(view, 40, leafDirsOffset);
+  setUint64LE(view, 48, leafDirs.length);
+  setUint64LE(view, 56, tileDataOffset);
+  setUint64LE(view, 64, tileData.length);
+  setUint64LE(view, 72, entries.length); // addressed tiles
+  setUint64LE(view, 80, entries.length + (leafDirs.length > 0 ? 1 : 0)); // tile entries
+  setUint64LE(view, 88, entries.length); // tile contents (unique)
 
-  out[91] = 1; // clustered
-  out[92] = 1; // internal compression: none
-  out[93] = 1; // tile compression: none
-  out[94] = 1; // tile type: MVT
+  out[96] = 1; // clustered
+  out[97] = 1; // internal compression: none
+  out[98] = 1; // tile compression: none
+  out[99] = 1; // tile type: MVT
 
-  out[95] = minZoom;
-  out[96] = maxZoom;
+  out[100] = minZoom;
+  out[101] = maxZoom;
 
-  view.setInt32(97,  Math.round(bounds[0] * 1e7), true); // min lon
-  view.setInt32(101, Math.round(bounds[1] * 1e7), true); // min lat
-  view.setInt32(105, Math.round(bounds[2] * 1e7), true); // max lon
-  view.setInt32(109, Math.round(bounds[3] * 1e7), true); // max lat
+  view.setInt32(102, Math.round(bounds[0] * 1e7), true); // min lon
+  view.setInt32(106, Math.round(bounds[1] * 1e7), true); // min lat
+  view.setInt32(110, Math.round(bounds[2] * 1e7), true); // max lon
+  view.setInt32(114, Math.round(bounds[3] * 1e7), true); // max lat
 
   const centerZoom = Math.round((minZoom + maxZoom) / 2);
-  out[113] = centerZoom;
-  view.setInt32(114, Math.round(((bounds[0] + bounds[2]) / 2) * 1e7), true);
-  view.setInt32(118, Math.round(((bounds[1] + bounds[3]) / 2) * 1e7), true);
+  out[118] = centerZoom;
+  view.setInt32(119, Math.round(((bounds[0] + bounds[2]) / 2) * 1e7), true);
+  view.setInt32(123, Math.round(((bounds[1] + bounds[3]) / 2) * 1e7), true);
 
   // Data sections
   out.set(rootDir,      rootDirOffset);

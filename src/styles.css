@@ -900,6 +900,217 @@ body.is-reordering-rows {
   padding: 20px;
 }
 
+.clp-panel {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.55);
+  align-items: center;
+  justify-content: center;
+}
+
+.clp-panel.is-open {
+  display: flex;
+}
+
+.clp-inner {
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 18px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.82),
+    0 20px 48px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+
+.clp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.72);
+}
+
+.clp-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.clp-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: color 120ms;
+}
+
+.clp-close:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.clp-content {
+  padding: 16px 20px 20px;
+}
+
+.clp-form {
+  display: grid;
+  gap: 16px;
+}
+
+.clp-field {
+  display: grid;
+  gap: 6px;
+}
+
+.clp-field-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(154, 210, 255, 0.6);
+}
+
+.clp-field-input {
+  width: 100%;
+  background: rgba(154, 210, 255, 0.05);
+  border: 1px solid rgba(154, 210, 255, 0.12);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: rgba(255, 255, 255, 0.9);
+  font: inherit;
+}
+
+.clp-field-input::placeholder {
+  color: rgba(154, 210, 255, 0.3);
+}
+
+.clp-field-input:focus {
+  border-color: rgba(154, 210, 255, 0.35);
+  outline: none;
+}
+
+.clp-preview,
+.clp-uploading {
+  display: grid;
+  gap: 16px;
+}
+
+.clp-preview {
+  position: relative;
+}
+
+.clp-table-wrap {
+  overflow: auto;
+  border-radius: 10px;
+  border: 1px solid rgba(154, 210, 255, 0.08);
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.clp-preview-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.clp-preview-summary-row .upload-step-sub {
+  flex: 1;
+  min-width: 0;
+}
+
+.clp-undo-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.clp-undo-icon:hover {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.clp-undo-icon span {
+  display: block;
+  line-height: 1;
+}
+
+.clp-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.clp-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.clp-btn-primary {
+  background: rgba(154, 210, 255, 0.85);
+  color: #06131c;
+}
+
+.clp-btn-secondary {
+  background: rgba(154, 210, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.clp-error {
+  color: #ff8f8f;
+  font-size: 13px;
+  margin: 0;
+}
+
+.clp-uploading-label {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.clp-progress-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.clp-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #8fe3ff 0%, #5cb8ff 100%);
+}
+
+.clp-progress-label {
+  margin: 0;
+  font-size: 13px;
+  color: rgba(154, 210, 255, 0.7);
+}
+
 .upload-step-title {
   font-size: 14px;
   font-weight: 600;
@@ -910,7 +1121,7 @@ body.is-reordering-rows {
 .upload-step-sub {
   font-size: 12px;
   color: rgba(154, 210, 255, 0.5);
-  margin: 0 0 16px;
+  margin: 0 0 4px;
 }
 
 .upload-dropzone {
@@ -988,13 +1199,12 @@ body.is-reordering-rows {
 }
 
 .upload-preview {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 11px;
   color: rgba(255, 255, 255, 0.6);
   margin-bottom: 16px;
-  overflow-x: auto;
-  display: block;
 }
 
 .upload-preview th,
@@ -1008,6 +1218,83 @@ body.is-reordering-rows {
 }
 
 .upload-preview th { color: rgba(154, 210, 255, 0.5); font-weight: 500; }
+
+.upload-preview th.is-col-resize-target {
+  cursor: col-resize;
+}
+
+.upload-preview th.is-col-reorder-target {
+  cursor: ew-resize;
+}
+
+.clp-col-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.clp-col-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.clp-col-name-button {
+  min-width: 0;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: text;
+  text-align: left;
+}
+
+.clp-col-name-input {
+  min-width: 0;
+  flex: 1;
+  width: 100%;
+  padding: 1px 4px;
+  border: 1px solid rgba(154, 210, 255, 0.22);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.18);
+  color: rgba(255, 255, 255, 0.9);
+  font: inherit;
+  line-height: 1.2;
+}
+
+.clp-col-name-input:focus {
+  outline: none;
+  border-color: rgba(154, 210, 255, 0.42);
+}
+
+.clp-col-remove {
+  border: none;
+  background: none;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.clp-col-remove:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.clp-preview.is-resizing-columns,
+.clp-preview.is-resizing-columns * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+.clp-preview.is-reordering-columns,
+.clp-preview.is-reordering-columns * {
+  cursor: ew-resize !important;
+  user-select: none;
+}
 
 .upload-summary {
   background: rgba(0, 0, 0, 0.2);
@@ -1035,6 +1322,12 @@ body.is-reordering-rows {
   font-size: 12px;
   color: rgba(154, 210, 255, 0.6);
   margin-bottom: 12px;
+}
+
+.upload-field-label-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
 }
 
 .upload-actions {

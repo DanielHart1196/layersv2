@@ -24,10 +24,18 @@
 
 ## Dataset Model
 - Preserve raw import/provenance, but normalize imports into a canonical internal dataset model.
+- Prefer an explicit three-part model:
+  - `layers` are visual/style/composition parents
+  - `datasets` are canonical imported data resources linked to exactly one parent layer
+  - `features` belong to datasets, not layers
+- One layer may link to many datasets.
+- By default, all datasets linked to a layer render together as one visual layer.
+- Parent layer style applies across all linked datasets by default.
 - Accept many upload formats at the boundary, but prefer a small number of internal geometry families:
   - `point`
   - `line`
   - `area`
+- Mixed-geometry datasets are allowed; do not assume one dataset maps to exactly one geometry family.
 - PMTiles is a derived render artifact, not the canonical data model.
 - Canonical feature data should remain available for:
   - filtering
@@ -35,14 +43,44 @@
   - field discovery
   - value discovery
   - future moderation/query workflows
+  - rebuilding derived render artifacts
 - Dataset field definitions and feature field values are different layers of the model:
   - dataset-level field definitions such as labels, types, required/optional status, and display order should live once on the dataset
   - per-feature field values should remain on each feature record
   - UI tables, sorting, filtering, upload cleanup, and future contribution forms should use dataset field definitions, not infer schema ad hoc from the currently loaded feature sample
+- Uploaded files are provenance artifacts, not the primary runtime model.
+- The canonical editable/queryable source of truth should be dataset + feature records, not the original uploaded file blob.
 - Destructive dataset deletion should stay deferred until user accounts/ownership are in place; the UI can prepare the confirmation flow earlier, but actual delete should wait until ownership and permissions are explicit.
 
+## Upload Pipeline
+- Upload flow should support three distinct operations:
+  - create a new top-level layer with an initial dataset
+  - add a new dataset to an existing layer
+  - append features to an existing dataset
+- Creating a new top-level layer should:
+  - create a layer
+  - create a dataset linked to that layer
+  - insert features linked to that dataset
+- Adding a dataset to an existing layer should:
+  - not create a new layer
+  - create a dataset linked to the existing layer
+  - insert features linked to that dataset
+- Adding data to an existing dataset should:
+  - not create a new layer
+  - not create a new dataset
+  - insert additional features linked to the existing dataset
+- Import pipeline should parse uploaded files into canonical datasets and features, then derive runtime delivery artifacts from that canonical data.
+- Clean/normalized feature data should be stored canonically.
+- Keep the original uploaded file for provenance and reprocessing, but do not treat it as the long-term display source.
+- Prefer cleaning at import time when it is semantics-preserving, such as:
+  - dropping exact duplicate features
+  - removing redundant properties
+  - normalizing field names/types
+  - reducing unnecessary coordinate precision where appropriate
+- Treat destructive geometry changes such as dissolve/simplify as explicit derived-processing choices, not silent canonical mutations.
+
 ## View Model
-- A view is a shareable composition over one or more datasets.
+- A view is a shareable composition over one or more layers, where each layer may itself aggregate many linked datasets.
 - Dataset contribution and view sharing are different concerns:
   - users contribute datasets/data
   - users share views/compositions
@@ -58,7 +96,9 @@
 
 ## Shared Row Model
 - Atlas layer panel behavior should come from one shared row system.
-- A layer should be modeled as a data row plus its child rows, not as a separate controller concept.
+- A layer should be modeled as a shared parent row plus its child rows, not as a separate controller concept.
+- Dataset linkage should not require every linked dataset to appear as a standalone visible layer row in the main tree.
+- Data management can live in a dedicated data flow/panel while still resolving through the same underlying shared row/state model where needed.
 - Parent rows and child rows should use the same default behavior for:
   - expand/collapse
   - visibility
@@ -96,22 +136,27 @@
   - what runtime target it affects
   - how it persists
 - The contract for visibility/enablement must be identical across row families.
-- Style rows, filter rows, sort rows, and data rows must all participate through the same persistence, target-resolution, and runtime-application pipeline.
+- Style rows, filter rows, sort rows, and any data-management-backed rows must participate through the same persistence, target-resolution, and runtime-application pipeline.
 - Do not accept "bridge" refactors that make rows share shape while preserving special runtime behavior for `layer` rows.
 - If a row kind cannot yet support the shared runtime contract, call that out explicitly instead of treating it as already unified.
 - Filter rows should be generic query rows with presentation hints, not bespoke business widgets.
+- Filters should be able to target either:
+  - dataset source
+  - feature field/value conditions
 - Examples:
   - Olympics `Year` is a filter row with slider UI.
   - Olympics `Gold` / `Silver` / `Bronze` are filter rows with toggle UI.
   - Numeric threshold filters such as `Height >= X` should also be filter rows, with slider UI where appropriate.
 
 ## Default Child Rows
-- New data rows should materialize the relevant styling rows by default.
+- New top-level layers should materialize the relevant styling rows by default based on geometry present across linked datasets.
 - Preferred defaults:
-  - point dataset -> point-style row
-  - line dataset -> line-style row
-  - area dataset -> fill-style row + line-style row
-- Additional filters/sorts can be predefined per dataset, but should still use the same shared row system.
+  - any linked point dataset -> point-style row
+  - any linked line dataset -> line-style row
+  - any linked area dataset -> fill-style row + line-style row
+- Mixed-geometry linked data is valid; style availability should derive from aggregate linked geometry, not from any one dataset being privileged.
+- Additional filters/sorts can be predefined per layer or dataset family, but should still use the same shared row system.
+- Prefer style rows as default structural children rather than user-added ad hoc rows for common geometry styling.
 
 ## Ordering
 - Ordering should be definition-driven.
@@ -135,6 +180,12 @@
 - Shared row/menu structure and MapLibre runtime order should stay aligned.
 - Avoid root-only or parent-only reorder algorithms.
 - If a runtime ordering exception is required, encode it as a narrow data-driven exception inside the shared ordering system.
+- Runtime rendering should resolve primarily by visual layer, not by treating each dataset as an independent top-level runtime layer.
+- Default runtime behavior for a layer with many linked datasets should be:
+  - load all datasets linked to the layer
+  - combine or co-resolve them under one visual layer contract
+  - expose styling by geometry family at the layer level
+- Preserve dataset identity in canonical/queryable data so filters can later isolate dataset-specific subsets and override parent styling.
 - Current point-runtime exception: dynamic point datasets collapse `Point` fill and `Line` stroke rows into one MapLibre `circle` layer, so fill/stroke styling and per-row visibility still work, but point fill-vs-stroke z-order is not independently reorderable at runtime.
 - Current runtime-debug finding:
   - for uploaded Supabase-backed rows, both point and polygon layers currently appear to go through the same startup visibility replay path
@@ -150,9 +201,11 @@
 
 ## Runtime Data Defaults
 - Prefer this default model:
-  - canonical source asset in lon/lat GeoJSON
-  - runtime delivery chosen per layer
+  - canonical source data in dataset + feature records
+  - raw uploaded file retained as provenance
+  - runtime delivery chosen per layer from derived artifacts built from canonical data
   - shared layer/row schema above that delivery choice
+- Direct GeoJSON, PMTiles, or other runtime delivery formats are render artifacts, not the canonical data model.
 - Country polygons are not the long-term semantic source of coastline-derived land.
 - Use distinct concepts where needed:
   - `Countries` for country polygons and borders

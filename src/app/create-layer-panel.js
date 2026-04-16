@@ -4,6 +4,7 @@ import { inferFieldSchemaFromFeatures } from "../upload/field-schema.js";
 import { summarizeFeatureComplexity } from "../upload/feature-complexity.js";
 import { inferGeometryFamily } from "../upload/geometry-family.js";
 import { createLayerWithDataset } from "../upload/insert-layer.js";
+import { getSupabaseCatalog } from "../sources/supabase/layer-loader.js";
 
 const MIN_PREVIEW_COLUMN_WIDTH = 96;
 const PREVIEW_RESIZE_HIT_WIDTH = 8;
@@ -11,6 +12,9 @@ const PREVIEW_REORDER_HIT_HEIGHT = 10;
 const PREVIEW_AUTO_SCROLL_EDGE = 28;
 const PREVIEW_AUTO_SCROLL_MAX_SPEED = 18;
 const PREVIEW_PAGE_SIZE = 50;
+
+const CREATE_LAYER_MODE_NEW = "new";
+const CREATE_LAYER_MODE_EXISTING = "existing";
 
 function normalizeHexColor(value, fallback = "#122330") {
   const normalized = String(value ?? "").trim().replace(/^#*/, "");
@@ -43,7 +47,10 @@ function applySettingsBackground(panel, state) {
   if (!inner) {
     return;
   }
-  inner.style.backgroundColor = getSettingsBackground(state);
+  const backgroundColor = getSettingsBackground(state);
+  inner.style.backgroundColor = backgroundColor;
+  inner.style.setProperty("--clp-settings-background", backgroundColor);
+  inner.style.setProperty("--clp-preview-header-background", getPreviewHeaderBackground(state));
 }
 
 function getSettingsBackground(state) {
@@ -51,6 +58,13 @@ function getSettingsBackground(state) {
   const rgb = hexToRgb(color);
   const alpha = Math.max(0, Math.min(100, Number(state?.opacity) || 0)) / 100;
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+}
+
+function getPreviewHeaderBackground(state) {
+  const color = normalizeHexColor(state?.color, "#122330");
+  const rgb = hexToRgb(color);
+  const darkenFactor = 0.45;
+  return `rgba(${Math.round(rgb.r * darkenFactor)}, ${Math.round(rgb.g * darkenFactor)}, ${Math.round(rgb.b * darkenFactor)}, 0.96)`;
 }
 
 function inferGeometryType(features = []) {
@@ -303,7 +317,13 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
   function createInitialState(overrides = {}) {
     return {
       parentId: null,
+      mode: CREATE_LAYER_MODE_NEW,
       name: "",
+      existingLayers: [],
+      existingLayersLoaded: false,
+      existingLayersLoading: false,
+      existingLayersError: "",
+      selectedExistingLayerId: "",
       step: "form",
       file: null,
       parsed: null,
@@ -341,6 +361,147 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       if (tableWrap && Number.isFinite(state.previewScrollLeft)) {
         tableWrap.scrollLeft = state.previewScrollLeft;
       }
+    }
+  }
+
+  async function ensureExistingLayersLoaded() {
+    if (state.existingLayersLoaded || state.existingLayersLoading) {
+      return;
+    }
+
+    state.existingLayersLoading = true;
+    state.existingLayersError = "";
+    render();
+
+    try {
+      const layers = await getSupabaseCatalog();
+      state.existingLayers = Array.isArray(layers) ? layers : [];
+      state.existingLayersLoaded = true;
+    } catch (error) {
+      state.existingLayersError = error?.message ?? "Failed to load layers.";
+    } finally {
+      state.existingLayersLoading = false;
+      render();
+    }
+  }
+
+  function renderModeSelector() {
+    const isCreateNew = state.mode !== CREATE_LAYER_MODE_EXISTING;
+    return `
+      <div class="clp-mode-selector" role="radiogroup" aria-label="Layer destination">
+        <button
+          class="clp-mode-option${isCreateNew ? " is-selected" : ""}"
+          type="button"
+          data-mode="${CREATE_LAYER_MODE_NEW}"
+          role="radio"
+          aria-checked="${isCreateNew ? "true" : "false"}"
+        >
+          Create new
+        </button>
+        <button
+          class="clp-mode-option${!isCreateNew ? " is-selected" : ""}"
+          type="button"
+          data-mode="${CREATE_LAYER_MODE_EXISTING}"
+          role="radio"
+          aria-checked="${!isCreateNew ? "true" : "false"}"
+        >
+          Add existing
+        </button>
+      </div>
+    `;
+  }
+
+  function bindModeSelector(root) {
+    root.querySelectorAll(".clp-mode-option").forEach((button) => {
+      button.addEventListener("click", () => {
+        const nextMode = button.getAttribute("data-mode");
+        if (!nextMode || nextMode === state.mode) {
+          return;
+        }
+        state.mode = nextMode;
+        if (nextMode === CREATE_LAYER_MODE_EXISTING) {
+          void ensureExistingLayersLoaded();
+        }
+        render();
+      });
+    });
+  }
+
+  function renderExistingLayerList() {
+    if (state.existingLayersLoading && !state.existingLayersLoaded) {
+      return `<div class="clp-existing-list-state">Loading layers…</div>`;
+    }
+
+    if (state.existingLayersError) {
+      return `<div class="clp-existing-list-state clp-existing-list-error">${escapeHtml(state.existingLayersError)}</div>`;
+    }
+
+    if (!state.existingLayers.length) {
+      return `<div class="clp-existing-list-state">No layers found.</div>`;
+    }
+
+    return `
+      <div class="clp-existing-list" role="listbox" aria-label="Existing layers">
+        ${state.existingLayers.map((layer) => {
+          const selected = state.selectedExistingLayerId === layer.id;
+          return `
+            <button
+              class="clp-existing-item${selected ? " is-selected" : ""}"
+              type="button"
+              data-layer-id="${escapeHtml(layer.id)}"
+              role="option"
+              aria-selected="${selected ? "true" : "false"}"
+            >
+              <span class="clp-existing-item-name">${escapeHtml(layer.label ?? layer.name ?? "Untitled layer")}</span>
+              <span class="clp-existing-item-meta">${escapeHtml(layer.geometryType ?? "mixed")}</span>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  function bindExistingLayerList(root) {
+    root.querySelectorAll(".clp-existing-item").forEach((button) => {
+      button.addEventListener("click", () => {
+        const layerId = button.getAttribute("data-layer-id") ?? "";
+        if (!layerId) {
+          return;
+        }
+        state.selectedExistingLayerId = layerId;
+        void submitExistingLayer();
+      });
+    });
+  }
+
+  async function submitExistingLayer() {
+    const selectedLayer = state.existingLayers.find((layer) => layer.id === state.selectedExistingLayerId);
+    if (!selectedLayer) {
+      state.error = "Select a layer.";
+      render();
+      return;
+    }
+
+    state.error = "";
+    state.uploadingPct = 100;
+    state.uploadingLabel = "Adding layer…";
+    state.step = "uploading";
+    render();
+
+    try {
+      await onLayerCreated?.({
+        layerId: selectedLayer.id,
+        name: selectedLayer.label ?? "Layer",
+        parentId: state.parentId ?? null,
+        geometryType: selectedLayer.geometryType ?? "mixed",
+      });
+      state.layerId = selectedLayer.id;
+      state.step = "done";
+      render();
+    } catch (error) {
+      state.error = error?.message ?? "Failed to add layer.";
+      state.step = "form";
+      render();
     }
   }
 
@@ -1299,15 +1460,23 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
   function renderForm() {
     const el = html(`
       <div class="clp-form">
-        <label class="clp-field">
-          <span class="clp-field-label">Layer name</span>
-          <input class="clp-field-input clp-name-input" type="text" value="${escapeHtml(state.name)}" placeholder="Layer name" />
-        </label>
-        <div class="upload-dropzone" id="clpUploadDropzone">
-          <p class="upload-dropzone-hint">Drop a file or click to browse</p>
-          <p class="upload-dropzone-formats">${SUPPORTED_EXTENSIONS.join("  |  ")}</p>
-          <input type="file" class="upload-file-input" id="clpUploadInput" accept="${SUPPORTED_EXTENSIONS.join(",")}" />
-        </div>
+        ${renderModeSelector()}
+        ${state.mode === CREATE_LAYER_MODE_EXISTING ? `
+          <div class="clp-field">
+            <span class="clp-field-label">Layers</span>
+            ${renderExistingLayerList()}
+          </div>
+        ` : `
+          <label class="clp-field">
+            <span class="clp-field-label">Layer name</span>
+            <input class="clp-field-input clp-name-input" type="text" value="${escapeHtml(state.name)}" placeholder="Layer name" />
+          </label>
+          <div class="upload-dropzone" id="clpUploadDropzone">
+            <p class="upload-dropzone-hint">Drop a file or click to browse</p>
+            <p class="upload-dropzone-formats">${SUPPORTED_EXTENSIONS.join("  |  ")}</p>
+            <input type="file" class="upload-file-input" id="clpUploadInput" accept="${SUPPORTED_EXTENSIONS.join(",")}" />
+          </div>
+        `}
         <p class="clp-error" ${state.error ? "" : "hidden"}>${escapeHtml(state.error)}</p>
       </div>
     `);
@@ -1316,6 +1485,8 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     const uploadZone = el.querySelector("#clpUploadDropzone");
     const uploadInput = el.querySelector("#clpUploadInput");
 
+    bindModeSelector(el);
+    bindExistingLayerList(el);
     nameInput?.addEventListener("input", (event) => {
       state.name = event.target.value;
     });
@@ -1506,7 +1677,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
   function renderUploading() {
     return html(`
       <div class="clp-uploading">
-        <p class="clp-uploading-label">Creating layer...</p>
+        <p class="clp-uploading-label">Adding layer...</p>
         <div class="clp-progress-track">
           <div class="clp-progress-bar" style="width:${state.uploadingPct}%"></div>
         </div>
@@ -1520,7 +1691,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       <div class="clp-uploading">
         <p class="clp-uploading-label">Layer added to map</p>
         <div class="clp-actions">
-          <button class="clp-btn clp-btn-secondary" id="clpAnother">Create another</button>
+          <button class="clp-btn clp-btn-secondary" id="clpAnother">Add another</button>
           <button class="clp-btn clp-btn-primary" id="clpClose">Done</button>
         </div>
       </div>
@@ -1558,7 +1729,7 @@ function createPanelShell() {
     <div class="clp-panel">
       <div class="clp-inner">
         <div class="clp-header">
-          <span class="clp-title">Create layer</span>
+          <span class="clp-title">Add layer</span>
           <button class="clp-close" type="button" aria-label="Close">✕</button>
         </div>
         <div class="clp-content"></div>

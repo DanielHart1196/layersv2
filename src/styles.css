@@ -971,6 +971,15 @@ body.is-reordering-rows {
   font-size: 15px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.9);
+  text-shadow:
+    -1px -1px rgba(0, 0, 0, 0.9),
+    -1px 0 rgba(0, 0, 0, 0.9),
+    -1px 1px rgba(0, 0, 0, 0.9),
+    0 -1px rgba(0, 0, 0, 0.9),
+    0 1px rgba(0, 0, 0, 0.9),
+    1px -1px rgba(0, 0, 0, 0.9),
+    1px 0 rgba(0, 0, 0, 0.9),
+    1px 1px rgba(0, 0, 0, 0.9);
 }
 
 .clp-close {
@@ -1004,9 +1013,127 @@ body.is-reordering-rows {
   gap: 16px;
 }
 
+.clp-mode-selector {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.clp-mode-option {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 10px 14px;
+  text-align: center;
+  text-transform: uppercase;
+  text-shadow:
+    -1px -1px rgba(0, 0, 0, 0.9),
+    -1px 0 rgba(0, 0, 0, 0.9),
+    -1px 1px rgba(0, 0, 0, 0.9),
+    0 -1px rgba(0, 0, 0, 0.9),
+    0 1px rgba(0, 0, 0, 0.9),
+    1px -1px rgba(0, 0, 0, 0.9),
+    1px 0 rgba(0, 0, 0, 0.9),
+    1px 1px rgba(0, 0, 0, 0.9);
+  transition: border-color 120ms, background 120ms, color 120ms;
+}
+
+.clp-mode-option:hover {
+  border-color: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.clp-mode-option.is-selected {
+  border-color: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.16);
+}
+
 .clp-field {
   display: grid;
   gap: 6px;
+}
+
+.clp-existing-list {
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.clp-existing-item {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.clp-existing-item:hover {
+  border-color: rgba(255, 255, 255, 0.52);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.clp-existing-item.is-selected {
+  border-color: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.clp-existing-item-name,
+.clp-existing-item-meta,
+.clp-existing-list-state {
+  text-shadow:
+    -1px -1px rgba(0, 0, 0, 0.9),
+    -1px 0 rgba(0, 0, 0, 0.9),
+    -1px 1px rgba(0, 0, 0, 0.9),
+    0 -1px rgba(0, 0, 0, 0.9),
+    0 1px rgba(0, 0, 0, 0.9),
+    1px -1px rgba(0, 0, 0, 0.9),
+    1px 0 rgba(0, 0, 0, 0.9),
+    1px 1px rgba(0, 0, 0, 0.9);
+}
+
+.clp-existing-item-name {
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.clp-existing-item-meta,
+.clp-existing-list-state {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.clp-existing-list-state {
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.clp-existing-list-error {
+  color: rgba(255, 210, 210, 0.92);
 }
 
 .clp-field-label {
@@ -1197,7 +1324,16 @@ body.is-reordering-rows {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.88);
+  color: #ffffff;
+  text-shadow:
+    -1px -1px rgba(0, 0, 0, 0.9),
+    -1px 0 rgba(0, 0, 0, 0.9),
+    -1px 1px rgba(0, 0, 0, 0.9),
+    0 -1px rgba(0, 0, 0, 0.9),
+    0 1px rgba(0, 0, 0, 0.9),
+    1px -1px rgba(0, 0, 0, 0.9),
+    1px 0 rgba(0, 0, 0, 0.9),
+    1px 1px rgba(0, 0, 0, 0.9);
 }
 
 .clp-progress-track {
@@ -1231,8 +1367,17 @@ body.is-reordering-rows {
 .upload-step-title {
   font-size: 14px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.85);
+  color: #ffffff;
   margin: 0 0 4px;
+  text-shadow:
+    -1px -1px rgba(0, 0, 0, 0.9),
+    -1px 0 rgba(0, 0, 0, 0.9),
+    -1px 1px rgba(0, 0, 0, 0.9),
+    0 -1px rgba(0, 0, 0, 0.9),
+    0 1px rgba(0, 0, 0, 0.9),
+    1px -1px rgba(0, 0, 0, 0.9),
+    1px 0 rgba(0, 0, 0, 0.9),
+    1px 1px rgba(0, 0, 0, 0.9);
 }
 
 .upload-step-sub {
@@ -1371,7 +1516,7 @@ body.is-reordering-rows {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: rgba(18, 18, 18, 0.96);
+  background: var(--clp-preview-header-background, rgba(18, 18, 18, 0.96));
   box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.3);
 }
 
@@ -1640,11 +1785,21 @@ body.is-reordering-rows {
 
 .layer-menu-panel-footer .layer-menu-add-row {
   padding: 0;
-  color: rgba(239, 247, 251, 0.9);
+  color: #ffffff;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.08em;
+  text-align: center;
   text-transform: uppercase;
+  text-shadow:
+    -1px -1px rgba(0, 0, 0, 0.9),
+    -1px 0 rgba(0, 0, 0, 0.9),
+    -1px 1px rgba(0, 0, 0, 0.9),
+    0 -1px rgba(0, 0, 0, 0.9),
+    0 1px rgba(0, 0, 0, 0.9),
+    1px -1px rgba(0, 0, 0, 0.9),
+    1px 0 rgba(0, 0, 0, 0.9),
+    1px 1px rgba(0, 0, 0, 0.9);
 }
 
 .layer-menu-add-row:hover {

@@ -48,6 +48,20 @@ function hexToRgb(hex) {
   };
 }
 
+function hexToRgbaString(hex, opacity = 100, fallback = "rgba(255, 255, 255, 1)") {
+  const rgb = hexToRgb(hex);
+  if (!rgb) {
+    return fallback;
+  }
+
+  const alpha = Math.max(0, Math.min(1, (Number(opacity) || 0) / 100));
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+}
+
+function createSvgElement(tagName) {
+  return document.createElementNS("http://www.w3.org/2000/svg", tagName);
+}
+
 function rgbToHsv({ r, g, b }) {
   const rn = r / 255;
   const gn = g / 255;
@@ -415,9 +429,10 @@ function createRowHeader(labelText, valueText = null, className, options = {}) {
   if (options.chevron) {
     const chevron = options.chevronButton ? document.createElement("button") : document.createElement("span");
     chevron.className = options.chevronButton ? "layer-menu-row-chevron-button" : "layer-menu-row-chevron";
-    chevron.setAttribute("aria-hidden", "true");
     if (options.chevronButton) {
       chevron.type = "button";
+    } else {
+      chevron.setAttribute("aria-hidden", "true");
     }
     chevron.textContent = "›";
     if (options.chevronExpanded) {
@@ -441,25 +456,224 @@ function createRowHeader(labelText, valueText = null, className, options = {}) {
   };
 }
 
-function createLayerRow(definition, state, parentId, inheritedHidden, onToggleExpanded, onToggleVisibility, reorderApi, dragState) {
+function normalizeLegendGeometryType(geometryType) {
+  if (geometryType === "point") return "point";
+  if (geometryType === "line") return "line";
+  if (geometryType === "polygon" || geometryType === "area") return "polygon";
+  return "mixed";
+}
+
+function getLayerLegendRuntimeId(definition, state) {
+  return state?.runtimeTargetId
+    ?? definition.runtimeLayerId
+    ?? definition.layerRef
+    ?? definition.layerId
+    ?? definition.id;
+}
+
+function getLayerLegendChildState(childRows, runtimeTargetId, layerModel, appearanceState) {
+  const row = childRows.find((candidate) => candidate.runtimeTargetId === runtimeTargetId);
+  if (!row) {
+    return null;
+  }
+
+  return {
+    row,
+    value: getDisplayRowValue(row, layerModel, appearanceState),
+    visible: layerModel.isRowVisible(row.id),
+  };
+}
+
+function getLayerLegendSpec(definition, state, layerModel, appearanceState) {
+  const geometryType = normalizeLegendGeometryType(definition?.geometryType);
+  if (geometryType === "mixed" || !definition?.id) {
+    return null;
+  }
+
+  const runtimeLayerId = getLayerLegendRuntimeId(definition, state);
+  const childRows = layerModel.getChildRows(definition.id);
+  if (!runtimeLayerId || !childRows.length) {
+    return null;
+  }
+
+  if (geometryType === "line") {
+    const lineState = getLayerLegendChildState(childRows, `${runtimeLayerId}::line`, layerModel, appearanceState);
+    if (!lineState?.value) {
+      return null;
+    }
+    return {
+      kind: "line",
+      color: lineState.value.color,
+      opacity: lineState.visible ? lineState.value.opacity : 0,
+      weight: lineState.visible ? lineState.value.weight : 0,
+    };
+  }
+
+  if (geometryType === "polygon") {
+    const fillState = getLayerLegendChildState(childRows, `${runtimeLayerId}::fill`, layerModel, appearanceState);
+    const lineState = getLayerLegendChildState(childRows, `${runtimeLayerId}::line`, layerModel, appearanceState);
+    if (!fillState && !lineState) {
+      return null;
+    }
+    return {
+      kind: "polygon",
+      fillColor: fillState?.value?.color ?? "#FFFFFF",
+      fillOpacity: fillState?.visible ? fillState.value.opacity : 0,
+      lineColor: lineState?.value?.color ?? "#FFFFFF",
+      lineOpacity: lineState?.visible ? lineState.value.opacity : 0,
+      lineWeight: lineState?.visible ? lineState.value.weight : 0,
+    };
+  }
+
+  if (geometryType === "point") {
+    const fillState = getLayerLegendChildState(childRows, `${runtimeLayerId}::point-fill`, layerModel, appearanceState);
+    const strokeState = getLayerLegendChildState(childRows, `${runtimeLayerId}::point-stroke`, layerModel, appearanceState);
+    if (!fillState && !strokeState) {
+      return null;
+    }
+    return {
+      kind: "point",
+      fillColor: fillState?.value?.color ?? "#FFFFFF",
+      fillOpacity: fillState?.visible ? fillState.value.opacity : 0,
+      radius: fillState?.visible ? fillState.value.radius : 0,
+      strokeColor: strokeState?.value?.color ?? "#FFFFFF",
+      strokeOpacity: strokeState?.visible ? strokeState.value.opacity : 0,
+      strokeWeight: strokeState?.visible ? strokeState.value.weight : 0,
+    };
+  }
+
+  return null;
+}
+
+function createLayerLegendSwatch(spec) {
+  if (!spec) {
+    return null;
+  }
+
+  const swatch = document.createElement("span");
+  swatch.className = `layer-menu-row-legend layer-menu-row-legend-${spec.kind}`;
+  swatch.setAttribute("aria-hidden", "true");
+  const svg = createSvgElement("svg");
+  svg.classList.add("layer-menu-row-legend-svg");
+  svg.setAttribute("viewBox", "0 0 42 18");
+  svg.setAttribute("width", "42");
+  svg.setAttribute("height", "18");
+  svg.setAttribute("focusable", "false");
+  svg.setAttribute("aria-hidden", "true");
+
+  if (spec.kind === "line") {
+    const line = createSvgElement("line");
+    line.setAttribute("x1", "2");
+    line.setAttribute("y1", "9");
+    line.setAttribute("x2", "40");
+    line.setAttribute("y2", "9");
+    line.setAttribute("stroke", normalizeHexColor(spec.color) ?? "#FFFFFF");
+    line.setAttribute("stroke-opacity", String(Math.max(0, Math.min(1, (Number(spec.opacity) || 0) / 100))));
+    line.setAttribute("stroke-width", String(Math.max(0, Number(spec.weight) || 0)));
+    line.setAttribute("stroke-linecap", "round");
+    svg.append(line);
+    swatch.append(svg);
+    return swatch;
+  }
+
+  if (spec.kind === "polygon") {
+    const strokeWidth = Math.max(0, Number(spec.lineWeight) || 0);
+    const inset = Math.max(2, strokeWidth / 2 + 2);
+    const rect = createSvgElement("rect");
+    rect.setAttribute("x", String(inset));
+    rect.setAttribute("y", String(inset));
+    rect.setAttribute("width", String(Math.max(0, 42 - inset * 2)));
+    rect.setAttribute("height", String(Math.max(0, 18 - inset * 2)));
+    rect.setAttribute("rx", "2.5");
+    rect.setAttribute("ry", "2.5");
+    rect.setAttribute("fill", normalizeHexColor(spec.fillColor) ?? "#FFFFFF");
+    rect.setAttribute("fill-opacity", String(Math.max(0, Math.min(1, (Number(spec.fillOpacity) || 0) / 100))));
+    rect.setAttribute("stroke", normalizeHexColor(spec.lineColor) ?? "#FFFFFF");
+    rect.setAttribute("stroke-opacity", String(Math.max(0, Math.min(1, (Number(spec.lineOpacity) || 0) / 100))));
+    rect.setAttribute("stroke-width", String(strokeWidth));
+    svg.append(rect);
+    swatch.append(svg);
+    return swatch;
+  }
+
+  if (spec.kind === "point") {
+    const dot = createSvgElement("circle");
+    dot.setAttribute("cx", "21");
+    dot.setAttribute("cy", "9");
+    dot.setAttribute("r", String(Math.max(0, Number(spec.radius) || 0)));
+    dot.setAttribute("fill", normalizeHexColor(spec.fillColor) ?? "#FFFFFF");
+    dot.setAttribute("fill-opacity", String(Math.max(0, Math.min(1, (Number(spec.fillOpacity) || 0) / 100))));
+    dot.setAttribute("stroke", normalizeHexColor(spec.strokeColor) ?? "#FFFFFF");
+    dot.setAttribute("stroke-opacity", String(Math.max(0, Math.min(1, (Number(spec.strokeOpacity) || 0) / 100))));
+    dot.setAttribute("stroke-width", String(Math.max(0, Number(spec.strokeWeight) || 0)));
+    svg.append(dot);
+    swatch.append(svg);
+    return swatch;
+  }
+
+  return null;
+}
+
+function updateLayerLegendSwatch(rowElement, legendSpec) {
+  if (!rowElement) {
+    return;
+  }
+
+  const header = rowElement.querySelector(".layer-menu-row-layer-header");
+  if (!header) {
+    return;
+  }
+
+  const existingLegend = header.querySelector(".layer-menu-row-legend");
+  const nextLegend = createLayerLegendSwatch(legendSpec);
+
+  if (!nextLegend) {
+    existingLegend?.remove();
+    return;
+  }
+
+  if (existingLegend) {
+    existingLegend.replaceWith(nextLegend);
+    return;
+  }
+
+  const chevron = header.querySelector(".layer-menu-row-chevron, .layer-menu-row-chevron-button");
+  if (chevron) {
+    header.insertBefore(nextLegend, chevron);
+    return;
+  }
+
+  header.append(nextLegend);
+}
+
+function createLayerRow(definition, state, parentId, inheritedHidden, onToggleExpanded, onToggleVisibility, reorderApi, dragState, legendSpec = null) {
   const row = document.createElement("div");
   row.className = "layer-menu-row layer-menu-row-layer";
+  row.dataset.rowId = definition.id;
   const expandStateKey = definition.layerId ?? definition.id;
   const hasChildren = Array.isArray(definition.rows) && definition.rows.length > 0;
   const hasVisibility = Boolean(definition.layerId);
   // Always expandable if it has a layerId — even with no children, so "+ Add row" is reachable.
   const isExpandable = hasChildren || Boolean(definition.layerId);
   const isReorderable = Boolean(parentId && definition.layerId && definition.id !== "ocean" && definition.id !== "earth");
-  const { header, label, chevron, grabber } = createRowHeader(definition.label, null, "layer-menu-row-header", {
+  const { header, label, chevron, grabber } = createRowHeader(definition.label, null, "layer-menu-row-header layer-menu-row-layer-header", {
     grabber: isReorderable,
     labelButton: hasVisibility || !isExpandable,
     chevron: isExpandable,
     chevronButton: isExpandable,
     chevronExpanded: Boolean(state?.expanded),
   });
+  const showLegend = !inheritedHidden && state?.visible !== false;
+  const legend = showLegend ? createLayerLegendSwatch(legendSpec) : null;
+  if (legend) {
+    if (chevron) {
+      header.insertBefore(legend, chevron);
+    } else {
+      header.append(legend);
+    }
+  }
   row.append(header);
   if (isReorderable) {
-    row.dataset.rowId = definition.id;
     row.dataset.parentId = parentId;
     if (dragState?.parentId === parentId && dragState?.rowId === definition.id) {
       row.classList.add("is-dragging");
@@ -1235,6 +1449,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       onToggleVisibility,
       reorderApi,
       reorderApi.dragState,
+      getLayerLegendSpec(row, state[rowStateKey], layerModel, appearanceState),
     );
     layerRow.style.setProperty("--row-depth", String(depth));
     fragment.append(layerRow);
@@ -1367,6 +1582,23 @@ function renderLayerMenuRows({
       }
 
       onRowInput(row, nextValue);
+
+      const parentRowId = row?.id ? layerModel.getState()?.[row.id]?.parentRowId : null;
+      if (!parentRowId) {
+        return;
+      }
+
+      const parentRow = layerModel.getRowById(parentRowId);
+      if (!parentRow || parentRow.type !== "layer") {
+        return;
+      }
+
+      const parentState = layerModel.getState()?.[getRowStateKey(parentRow)] ?? null;
+      const parentRowElement = scrollRegion.querySelector(`.layer-menu-row-layer[data-row-id="${parentRowId}"]`);
+      updateLayerLegendSwatch(
+        parentRowElement,
+        getLayerLegendSpec(parentRow, parentState, layerModel, layerModel.getAppearanceState()),
+      );
     };
 
     if (panel.dataset.screenRowOpen === "true") {

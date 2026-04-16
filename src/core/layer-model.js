@@ -262,6 +262,7 @@ function createLayerModel() {
 
       // Restore root-level dynamic rows.
       (defs.rootRows ?? []).forEach((row) => {
+        row.geometryType = inferStoredRowGeometryType(row);
         rootDynamicRows.push(row);
         dynamicIds.add(row.id);
         indexRowDefinitions([row]);
@@ -290,6 +291,7 @@ function createLayerModel() {
         if (!Array.isArray(parent.rows)) parent.rows = [];
         const correctLayerId = parent.layerRef ?? null;
         rows.forEach((row) => {
+          row.geometryType = inferStoredRowGeometryType(row);
           // Migrate: fix style target layerIds that were stored before the mapLayerId fix.
           if (correctLayerId) migrateRowTargets(row, correctLayerId);
           parent.rows.push(row);
@@ -555,6 +557,29 @@ function createLayerModel() {
     return "mixed";
   }
 
+  function inferStoredRowGeometryType(row) {
+    const explicitType = normalizeDatasetGeometryType(row?.geometryType);
+    if (explicitType !== "mixed") {
+      return explicitType;
+    }
+
+    const runtimeTargets = Array.isArray(row?.rows)
+      ? row.rows.map((childRow) => childRow?.runtimeTargetId).filter((targetId) => typeof targetId === "string")
+      : [];
+
+    if (runtimeTargets.some((targetId) => targetId.endsWith("::point-fill") || targetId.endsWith("::point-stroke"))) {
+      return "point";
+    }
+    if (runtimeTargets.some((targetId) => targetId.endsWith("::fill"))) {
+      return "polygon";
+    }
+    if (runtimeTargets.some((targetId) => targetId.endsWith("::line"))) {
+      return "line";
+    }
+
+    return "mixed";
+  }
+
   function createDefaultDatasetRows(rowId, mapLayerId, geometryType) {
     const normalizedType = normalizeDatasetGeometryType(geometryType);
     if (normalizedType === "point") {
@@ -813,6 +838,7 @@ function createLayerModel() {
       label: name || layerRef,
       layerId: uid,
       layerRef,
+      geometryType: normalizeDatasetGeometryType(geometryType),
       rows,
       runtimeLayerId: mapLayerId,
     });

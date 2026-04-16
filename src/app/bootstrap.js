@@ -49,7 +49,9 @@ async function bootstrapApplication() {
   // Re-attach any Supabase layers that were persisted from a previous session.
   // Fire-and-forget — failures are logged but don't block the rest of bootstrap.
   if (!mapStartupError) {
-    reattachPersistedSupabaseLayers(layerModel, screenRuntime);
+    screenRuntime.whenStyleReady(() => {
+      void reattachPersistedSupabaseLayers(layerModel, screenRuntime);
+    });
   }
 
   const dataTablePanel = mountDataTablePanel({

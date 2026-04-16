@@ -123,6 +123,9 @@ function createMaplibreScreenRuntime({
     getStatus,
     mount,
     renderStage,
+    whenStyleReady(callback) {
+      mapInstance?.whenStyleReady?.(callback);
+    },
     reorderLayerGroup(parentId, orderedLayerIds) {
       mapInstance?.reorderLayerGroup?.(parentId, orderedLayerIds);
     },

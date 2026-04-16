@@ -10,6 +10,7 @@ const PREVIEW_RESIZE_HIT_WIDTH = 8;
 const PREVIEW_REORDER_HIT_HEIGHT = 10;
 const PREVIEW_AUTO_SCROLL_EDGE = 28;
 const PREVIEW_AUTO_SCROLL_MAX_SPEED = 18;
+const PREVIEW_PAGE_SIZE = 50;
 
 function normalizeHexColor(value, fallback = "#122330") {
   const normalized = String(value ?? "").trim().replace(/^#*/, "");
@@ -194,7 +195,8 @@ function buildPreviewFromParsed(parsed) {
     return {
       kind: "tabular",
       headers,
-      rows: rows.slice(0, 5),
+      allRows: rows,
+      rows: [],
       rowCount: rows.length,
       columnCount: headers.length,
       features,
@@ -220,7 +222,7 @@ function buildPreviewFromParsed(parsed) {
   });
 
   const headers = propertyKeys.length ? propertyKeys : ["geometry_type"];
-  const rows = features.slice(0, 5).map((feature) => {
+  const rows = features.map((feature) => {
     const properties = flattenPreviewProperties(feature?.properties ?? {});
     if (!propertyKeys.length) {
       return { geometry_type: feature?.geometry?.type ?? "" };
@@ -231,12 +233,65 @@ function buildPreviewFromParsed(parsed) {
   return {
     kind: "feature-table",
     headers,
-    rows,
+    allRows: rows,
+    rows: [],
     rowCount: features.length,
     columnCount: headers.length,
     features,
     fieldSchema: inferFieldSchemaFromFeatures(features),
   };
+}
+
+function getComparablePreviewValue(value) {
+  if (value === null || value === undefined) {
+    return { kind: "empty", value: "" };
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return { kind: "number", value };
+  }
+
+  const text = String(value).trim();
+  if (!text) {
+    return { kind: "empty", value: "" };
+  }
+
+  const numericValue = Number(text);
+  if (Number.isFinite(numericValue) && /^[-+]?\d*\.?\d+$/.test(text)) {
+    return { kind: "number", value: numericValue };
+  }
+
+  const dateValue = Date.parse(text);
+  if (Number.isFinite(dateValue) && /[-/:T]/.test(text)) {
+    return { kind: "date", value: dateValue };
+  }
+
+  return { kind: "text", value: text.toLocaleLowerCase() };
+}
+
+function comparePreviewRows(leftRow, rightRow, columnName, direction) {
+  const leftComparable = getComparablePreviewValue(leftRow?.[columnName]);
+  const rightComparable = getComparablePreviewValue(rightRow?.[columnName]);
+
+  if (leftComparable.kind === "empty" && rightComparable.kind !== "empty") {
+    return 1;
+  }
+  if (rightComparable.kind === "empty" && leftComparable.kind !== "empty") {
+    return -1;
+  }
+
+  let result = 0;
+  if (leftComparable.kind === rightComparable.kind) {
+    if (leftComparable.value < rightComparable.value) {
+      result = -1;
+    } else if (leftComparable.value > rightComparable.value) {
+      result = 1;
+    }
+  } else {
+    result = String(leftComparable.value).localeCompare(String(rightComparable.value), undefined, { numeric: true });
+  }
+
+  return direction === "desc" ? -result : result;
 }
 
 export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
@@ -256,7 +311,10 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       undoStack: [],
       renamingColumn: "",
       renameDraft: "",
+      previewSortColumn: "",
+      previewSortDirection: "",
       previewScrollLeft: 0,
+      previewPageOffset: 0,
       usePmtiles: false,
       uploadingLabel: "0%",
       uploadingPct: 0,
@@ -268,6 +326,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
 
   function render() {
     const content = panel.querySelector(".clp-content");
+    const inner = panel.querySelector(".clp-inner");
     content.innerHTML = "";
 
     if (state.step === "form") content.append(renderForm());
@@ -275,6 +334,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     if (state.step === "uploading") content.append(renderUploading());
     if (state.step === "done") content.append(renderDone());
 
+    inner?.classList.toggle("is-preview-step", state.step === "preview");
     applySettingsBackground(panel, getAppearanceState?.()?.settings);
     if (state.step === "preview") {
       const tableWrap = panel.querySelector(".clp-table-wrap");
@@ -290,7 +350,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     const orderedHeaders = orderHeaders(nextPreview.headers ?? [], desiredOrder ?? []);
     nextPreview.headers = orderedHeaders;
     nextPreview.headerOrder = orderedHeaders.slice();
-    nextPreview.rows = (nextPreview.rows ?? []).map((row) => {
+    nextPreview.allRows = (nextPreview.allRows ?? []).map((row) => {
       if (!row || typeof row !== "object") {
         return row;
       }
@@ -302,6 +362,58 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
         .map((header) => [header, columnWidths[header]])
     );
     state.preview = nextPreview;
+    syncPreviewPageRows();
+  }
+
+  function syncPreviewPageRows() {
+    if (!state.preview) {
+      return;
+    }
+
+    const sortColumn = state.previewSortColumn;
+    const sortDirection = state.previewSortDirection;
+    const sourceRows = Array.isArray(state.preview.allRows) ? state.preview.allRows : [];
+    const sortedRows = sortColumn && sortDirection
+      ? [...sourceRows]
+        .map((row, index) => ({ row, index }))
+        .sort((left, right) => {
+          const result = comparePreviewRows(left.row, right.row, sortColumn, sortDirection);
+          return result || left.index - right.index;
+        })
+        .map(({ row }) => row)
+      : sourceRows;
+
+    const rowCount = Math.max(0, Number(state.preview.rowCount) || 0);
+    const maxOffset = rowCount > PREVIEW_PAGE_SIZE
+      ? Math.floor((rowCount - 1) / PREVIEW_PAGE_SIZE) * PREVIEW_PAGE_SIZE
+      : 0;
+    state.previewPageOffset = Math.max(0, Math.min(maxOffset, state.previewPageOffset || 0));
+    state.preview.rows = sortedRows.slice(
+      state.previewPageOffset,
+      state.previewPageOffset + PREVIEW_PAGE_SIZE
+    );
+  }
+
+  function togglePreviewSort(columnName) {
+    if (!columnName) {
+      return;
+    }
+
+    if (state.previewSortColumn !== columnName) {
+      state.previewSortColumn = columnName;
+      state.previewSortDirection = "asc";
+    } else if (state.previewSortDirection === "asc") {
+      state.previewSortDirection = "desc";
+    } else if (state.previewSortDirection === "desc") {
+      state.previewSortColumn = "";
+      state.previewSortDirection = "";
+    } else {
+      state.previewSortDirection = "asc";
+    }
+
+    state.previewPageOffset = 0;
+    syncPreviewPageRows();
+    render();
   }
 
   function reorderPreviewColumn(columnName, targetIndex) {
@@ -321,12 +433,13 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     state.preview.headers = headers;
     state.preview.headerOrder = headers.slice();
 
-    state.preview.rows = (state.preview.rows ?? []).map((row) => {
+    state.preview.allRows = (state.preview.allRows ?? []).map((row) => {
       if (!row || typeof row !== "object") {
         return row;
       }
       return Object.fromEntries(headers.map((header) => [header, row[header] ?? ""]));
     });
+    syncPreviewPageRows();
   }
 
   function reorderPreviewToOrder(nextOrder) {
@@ -336,12 +449,13 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     const headers = orderHeaders(state.preview.headers ?? [], nextOrder ?? []);
     state.preview.headers = headers;
     state.preview.headerOrder = headers.slice();
-    state.preview.rows = (state.preview.rows ?? []).map((row) => {
+    state.preview.allRows = (state.preview.allRows ?? []).map((row) => {
       if (!row || typeof row !== "object") {
         return row;
       }
       return Object.fromEntries(headers.map((header) => [header, row[header] ?? ""]));
     });
+    syncPreviewPageRows();
   }
 
   function close() {
@@ -493,6 +607,11 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     }
 
     state.undoStack.push(operation);
+    if (state.previewSortColumn === columnName) {
+      state.previewSortColumn = "";
+      state.previewSortDirection = "";
+      state.previewPageOffset = 0;
+    }
     rebuildPreview(
       Object.fromEntries(Object.entries(previousWidths).filter(([header]) => header !== columnName))
     );
@@ -603,6 +722,9 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       nextWidths[nextColumnName] = nextWidths[fromColumnName];
       delete nextWidths[fromColumnName];
     }
+    if (state.previewSortColumn === fromColumnName) {
+      state.previewSortColumn = nextColumnName;
+    }
     rebuildPreview(nextWidths);
     reorderPreviewToOrder(headers.map((header) => (header === fromColumnName ? nextColumnName : header)));
     state.renamingColumn = "";
@@ -630,6 +752,101 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       cell.style.minWidth = `${nextWidth}px`;
       cell.style.maxWidth = `${nextWidth}px`;
     });
+  }
+
+  function autosizePreviewColumn(previewEl, columnIndex, columnName) {
+    const cells = [...previewEl.querySelectorAll(`[data-column-index="${columnIndex}"]`)];
+    if (!cells.length) {
+      return;
+    }
+
+    const measurementEl = document.createElement("span");
+    measurementEl.style.position = "absolute";
+    measurementEl.style.visibility = "hidden";
+    measurementEl.style.pointerEvents = "none";
+    measurementEl.style.whiteSpace = "nowrap";
+    measurementEl.style.left = "-99999px";
+    measurementEl.style.top = "0";
+    document.body.appendChild(measurementEl);
+
+    let maxWidth = MIN_PREVIEW_COLUMN_WIDTH;
+    cells.forEach((cell) => {
+      const computed = window.getComputedStyle(cell);
+      const headerContent = cell.querySelector(".clp-col-head");
+      if (headerContent) {
+        const headStyles = window.getComputedStyle(headerContent);
+        const sortButton = headerContent.querySelector(".clp-col-sort");
+        const removeButton = headerContent.querySelector(".clp-col-remove");
+        const nameInput = headerContent.querySelector(".clp-col-name-input");
+        const nameLabel = headerContent.querySelector(".clp-col-name");
+        const nameSource = nameInput ?? nameLabel;
+
+        let nameWidth = 0;
+        if (nameSource) {
+          const nameStyles = window.getComputedStyle(nameSource);
+          measurementEl.style.font = nameStyles.font;
+          measurementEl.style.fontSize = nameStyles.fontSize;
+          measurementEl.style.fontWeight = nameStyles.fontWeight;
+          measurementEl.style.fontFamily = nameStyles.fontFamily;
+          measurementEl.style.letterSpacing = nameStyles.letterSpacing;
+          measurementEl.textContent = nameInput ? (nameInput.value ?? "") : (nameSource.textContent ?? "");
+          nameWidth = Math.ceil(measurementEl.getBoundingClientRect().width);
+          if (nameInput) {
+            nameWidth += (
+              parseFloat(nameStyles.paddingLeft || "0")
+              + parseFloat(nameStyles.paddingRight || "0")
+              + parseFloat(nameStyles.borderLeftWidth || "0")
+              + parseFloat(nameStyles.borderRightWidth || "0")
+            );
+          }
+        }
+
+        const sortWidth = sortButton ? Math.ceil(sortButton.getBoundingClientRect().width) : 0;
+        const removeWidth = removeButton ? Math.ceil(removeButton.getBoundingClientRect().width) : 0;
+        const horizontalPadding = (
+          parseFloat(computed.paddingLeft || "0")
+          + parseFloat(computed.paddingRight || "0")
+          + parseFloat(computed.borderLeftWidth || "0")
+          + parseFloat(computed.borderRightWidth || "0")
+        );
+        const gap = parseFloat(headStyles.columnGap || headStyles.gap || "0");
+        const headerWidth = nameWidth + sortWidth + removeWidth + horizontalPadding + (sortWidth ? gap : 0) + (removeWidth ? gap : 0);
+        maxWidth = Math.max(maxWidth, Math.ceil(headerWidth));
+        return;
+      }
+
+      measurementEl.style.font = computed.font;
+      measurementEl.style.fontSize = computed.fontSize;
+      measurementEl.style.fontWeight = computed.fontWeight;
+      measurementEl.style.fontFamily = computed.fontFamily;
+      measurementEl.style.letterSpacing = computed.letterSpacing;
+      measurementEl.textContent = cell.textContent ?? "";
+      const horizontalPadding = (
+        parseFloat(computed.paddingLeft || "0")
+        + parseFloat(computed.paddingRight || "0")
+        + parseFloat(computed.borderLeftWidth || "0")
+        + parseFloat(computed.borderRightWidth || "0")
+      );
+      maxWidth = Math.max(maxWidth, Math.ceil(measurementEl.getBoundingClientRect().width + horizontalPadding));
+    });
+
+    measurementEl.remove();
+
+    const previousWidth = getPreviewColumnWidths()[columnName];
+    const startWidth = Number.isFinite(previousWidth)
+      ? previousWidth
+      : cells[0].getBoundingClientRect().width;
+    setPreviewColumnWidth(previewEl, columnIndex, columnName, maxWidth);
+    const finalWidth = getPreviewColumnWidths()[columnName];
+    if (Number.isFinite(finalWidth) && Math.round(finalWidth) !== Math.round(startWidth)) {
+      state.undoStack.push({
+        type: "resize_column",
+        columnName,
+        previousWidth,
+        nextWidth: finalWidth,
+      });
+      render();
+    }
   }
 
   function bindPreviewColumnResize(previewEl, headers) {
@@ -884,6 +1101,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
         return (
           event.clientY - rect.top <= PREVIEW_REORDER_HIT_HEIGHT
           && !isNearDivider(event)
+          && !event.target.closest(".clp-col-sort")
           && !event.target.closest(".clp-col-remove")
           && !event.target.closest(".clp-col-name-button")
           && !event.target.closest(".clp-col-name-input")
@@ -905,6 +1123,16 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
           headerCell.classList.remove("is-col-resize-target");
           headerCell.classList.remove("is-col-reorder-target");
         }
+      });
+
+      headerCell.addEventListener("dblclick", (event) => {
+        if (!isNearDivider(event)) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        clearResizeTargets();
+        autosizePreviewColumn(previewEl, columnIndex, headers[columnIndex]);
       });
 
       headerCell.addEventListener("pointerdown", (event) => {
@@ -1116,6 +1344,12 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     const rows = state.preview?.rows ?? [];
     const rowCount = state.preview?.rowCount ?? 0;
     const columnCount = state.preview?.columnCount ?? 0;
+    const pageOffset = state.previewPageOffset ?? 0;
+    const pageStart = rowCount ? pageOffset + 1 : 0;
+    const pageEnd = Math.min(pageOffset + rows.length, rowCount);
+    const hasMultiplePages = rowCount > PREVIEW_PAGE_SIZE;
+    const canGoPrev = hasMultiplePages && pageOffset > 0;
+    const canGoNext = hasMultiplePages && pageOffset + PREVIEW_PAGE_SIZE < rowCount;
     const columnWidths = getPreviewColumnWidths();
     const renamingColumn = state.renamingColumn ?? "";
     const complexity = summarizeFeatureComplexity(state.preview?.features ?? []);
@@ -1128,9 +1362,18 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
         ? ` style="width:${width}px;min-width:${width}px;max-width:${width}px;"`
         : "";
     };
+    const sortGlyph = (header) => {
+      if (state.previewSortColumn !== header || !state.previewSortDirection) {
+        return "↕";
+      }
+      return state.previewSortDirection === "desc" ? "↓" : "↑";
+    };
     const head = headers.map((header, index) => `
       <th data-column-index="${index}" data-column-key="${escapeHtml(header)}"${widthStyle(header)}>
         <span class="clp-col-head">
+          <button class="clp-col-sort" type="button" data-column="${escapeHtml(header)}" aria-label="Sort ${escapeHtml(header)}" title="Sort ${escapeHtml(header)}">
+            <span class="clp-col-sort-icon" aria-hidden="true">${sortGlyph(header)}</span>
+          </button>
           ${renamingColumn === header ? `
             <input
               class="clp-col-name-input"
@@ -1169,10 +1412,17 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
             <tbody>${body}</tbody>
           </table>
         </div>
-        <label class="upload-field-label upload-field-label-inline">
-          <input type="checkbox" id="clpUsePmtiles" ${state.usePmtiles ? "checked" : ""} />
-          Generate PMTiles
-        </label>
+        <div class="clp-preview-controls">
+          <label class="upload-field-label upload-field-label-inline clp-preview-pmtiles">
+            <input type="checkbox" id="clpUsePmtiles" ${state.usePmtiles ? "checked" : ""} />
+            Generate PMTiles
+          </label>
+          <div class="clp-preview-pagination">
+            <span class="clp-preview-page-range">${escapeHtml(`${pageStart}-${pageEnd}`)}</span>
+            <button class="clp-undo-icon clp-preview-page-btn" id="clpPreviewPrev" type="button" aria-label="Previous preview rows" ${canGoPrev ? "" : "disabled"}><span aria-hidden="true">‹</span></button>
+            <button class="clp-undo-icon clp-preview-page-btn" id="clpPreviewNext" type="button" aria-label="Next preview rows" ${canGoNext ? "" : "disabled"}><span aria-hidden="true">›</span></button>
+          </div>
+        </div>
         <div class="clp-actions">
           <button class="clp-btn clp-btn-secondary" id="clpBack">Back</button>
           <button class="clp-btn clp-btn-primary" id="clpCreate">Create layer</button>
@@ -1192,6 +1442,16 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     el.querySelector("#clpUsePmtiles")?.addEventListener("change", (event) => {
       state.usePmtiles = event.target.checked;
     });
+    el.querySelector("#clpPreviewPrev")?.addEventListener("click", () => {
+      state.previewPageOffset = Math.max(0, (state.previewPageOffset || 0) - PREVIEW_PAGE_SIZE);
+      syncPreviewPageRows();
+      render();
+    });
+    el.querySelector("#clpPreviewNext")?.addEventListener("click", () => {
+      state.previewPageOffset = (state.previewPageOffset || 0) + PREVIEW_PAGE_SIZE;
+      syncPreviewPageRows();
+      render();
+    });
     el.querySelector(".clp-table-wrap")?.addEventListener("scroll", (event) => {
       state.previewScrollLeft = event.currentTarget.scrollLeft;
     });
@@ -1199,6 +1459,12 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     el.querySelectorAll(".clp-col-name-button").forEach((button) => {
       button.addEventListener("click", () => {
         startRenameColumn(button.dataset.column);
+      });
+    });
+    el.querySelectorAll(".clp-col-sort").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        togglePreviewSort(button.dataset.column);
       });
     });
     el.querySelectorAll(".clp-col-name-input").forEach((input) => {

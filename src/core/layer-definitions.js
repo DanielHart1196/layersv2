@@ -15,6 +15,7 @@ function createDataRow({
   pinnedOrder = null,
   layerRef = null,
   runtimeLayerId = null,
+  geometryType = "mixed",
 }) {
   return {
     id,
@@ -24,6 +25,7 @@ function createDataRow({
     layerId,
     runtimeLayerId: runtimeLayerId ?? layerId,
     layerRef,
+    geometryType,
     hidden,
     defaultExpanded,
     ...(pinnedOrder ? { pinnedOrder } : {}),
@@ -165,6 +167,7 @@ function localLayerToRow(entry) {
     id: entry.id,
     label: entry.label,
     layerId: entry.id,
+    geometryType: entry.fill ? "polygon" : "line",
     hidden: entry.defaultVisible === false,
     rows: [
       ...(entry.fill ? [createStyleRow({

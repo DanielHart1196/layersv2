@@ -1628,6 +1628,16 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       scaleOverlay.remove();
       map.remove();
     },
+    whenStyleReady(callback) {
+      if (typeof callback !== "function") {
+        return;
+      }
+      if (map.isStyleLoaded()) {
+        callback();
+        return;
+      }
+      map.once("style.load", callback);
+    },
     getMap() {
       return map;
     },

@@ -126,7 +126,7 @@ function createStyleRow({
     return {
       ...base,
       valueFormat: "percent",
-      radiusMin: 1, radiusMax: 30, radiusStep: 0.5,
+      radiusMin: 1, radiusMax: 20, radiusStep: 0.1,
       colorTarget: { kind: "layer-style", layerId, key: "pointColor" },
       opacityTarget: { kind: "layer-style", layerId, key: "pointOpacity" },
       radiusTarget: { kind: "layer-style", layerId, key: "pointRadius" },

@@ -685,6 +685,7 @@ function buildStyle(layerState) {
   return {
     version: 8,
     projection: { type: "globe" },
+    transition: { duration: 0, delay: 0 },
     // Sources here load in parallel with MapLibre's own initialisation,
     // before the load event fires — so these layers render immediately.
     sources: Object.fromEntries(initialLayers.map((entry) => [

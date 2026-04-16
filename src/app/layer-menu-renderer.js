@@ -17,6 +17,8 @@ function formatRowValue(row, value) {
 }
 
 const SETTINGS_BACKGROUND_PRESETS = ["#000000", "#FFFFFF", "#d94b4b", "#e58a2b", "#e5c84a", "#5b8c5a", "#4b6ed9", "#8c5bd6"];
+const SETTINGS_BACKGROUND_STORAGE_KEY = "layerv2.colors.settingsBackground";
+const SCREEN_BACKGROUND_STORAGE_KEY = "layerv2.colors.screenBackground";
 const DEFAULT_SETTINGS_BACKGROUND = {
   color: "#FFFFFF",
   opacity: 0,
@@ -522,6 +524,10 @@ function getLayerLegendSpec(definition, state, layerModel, appearanceState) {
       lineColor: lineState?.value?.color ?? "#FFFFFF",
       lineOpacity: lineState?.visible ? lineState.value.opacity : 0,
       lineWeight: lineState?.visible ? lineState.value.weight : 0,
+      drawOrder: childRows
+        .filter((childRow) => childRow?.runtimeTargetId === `${runtimeLayerId}::fill` || childRow?.runtimeTargetId === `${runtimeLayerId}::line`)
+        .map((childRow) => (childRow.runtimeTargetId.endsWith("::fill") ? "fill" : "line"))
+        .reverse(),
     };
   }
 
@@ -535,7 +541,7 @@ function getLayerLegendSpec(definition, state, layerModel, appearanceState) {
       kind: "point",
       fillColor: fillState?.value?.color ?? "#FFFFFF",
       fillOpacity: fillState?.visible ? fillState.value.opacity : 0,
-      radius: fillState?.visible ? fillState.value.radius : 0,
+      radius: Number(fillState?.value?.radius ?? 0),
       strokeColor: strokeState?.value?.color ?? "#FFFFFF",
       strokeOpacity: strokeState?.visible ? strokeState.value.opacity : 0,
       strokeWeight: strokeState?.visible ? strokeState.value.weight : 0,
@@ -578,35 +584,66 @@ function createLayerLegendSwatch(spec) {
 
   if (spec.kind === "polygon") {
     const strokeWidth = Math.max(0, Number(spec.lineWeight) || 0);
-    const inset = Math.max(2, strokeWidth / 2 + 2);
-    const rect = createSvgElement("rect");
-    rect.setAttribute("x", String(inset));
-    rect.setAttribute("y", String(inset));
-    rect.setAttribute("width", String(Math.max(0, 42 - inset * 2)));
-    rect.setAttribute("height", String(Math.max(0, 18 - inset * 2)));
-    rect.setAttribute("rx", "2.5");
-    rect.setAttribute("ry", "2.5");
-    rect.setAttribute("fill", normalizeHexColor(spec.fillColor) ?? "#FFFFFF");
-    rect.setAttribute("fill-opacity", String(Math.max(0, Math.min(1, (Number(spec.fillOpacity) || 0) / 100))));
-    rect.setAttribute("stroke", normalizeHexColor(spec.lineColor) ?? "#FFFFFF");
-    rect.setAttribute("stroke-opacity", String(Math.max(0, Math.min(1, (Number(spec.lineOpacity) || 0) / 100))));
-    rect.setAttribute("stroke-width", String(strokeWidth));
-    svg.append(rect);
+    const x = "8";
+    const y = "2";
+    const width = "26";
+    const height = "14";
+    const fillOpacity = String(Math.max(0, Math.min(1, (Number(spec.fillOpacity) || 0) / 100)));
+    const lineOpacity = String(Math.max(0, Math.min(1, (Number(spec.lineOpacity) || 0) / 100)));
+    const fillColor = normalizeHexColor(spec.fillColor) ?? "#FFFFFF";
+    const lineColor = normalizeHexColor(spec.lineColor) ?? "#FFFFFF";
+    const drawOrder = Array.isArray(spec.drawOrder) && spec.drawOrder.length ? spec.drawOrder : ["fill", "line"];
+
+    drawOrder.forEach((part) => {
+      const rect = createSvgElement("rect");
+      rect.setAttribute("x", x);
+      rect.setAttribute("y", y);
+      rect.setAttribute("width", width);
+      rect.setAttribute("height", height);
+      rect.setAttribute("rx", "2.5");
+      rect.setAttribute("ry", "2.5");
+
+      if (part === "line") {
+        rect.setAttribute("fill", "none");
+        rect.setAttribute("stroke", lineColor);
+        rect.setAttribute("stroke-opacity", lineOpacity);
+        rect.setAttribute("stroke-width", String(strokeWidth));
+      } else {
+        rect.setAttribute("fill", fillColor);
+        rect.setAttribute("fill-opacity", fillOpacity);
+        rect.setAttribute("stroke", "none");
+      }
+
+      svg.append(rect);
+    });
+
     swatch.append(svg);
     return swatch;
   }
 
   if (spec.kind === "point") {
-    const dot = createSvgElement("circle");
-    dot.setAttribute("cx", "21");
-    dot.setAttribute("cy", "9");
-    dot.setAttribute("r", String(Math.max(0, Number(spec.radius) || 0)));
-    dot.setAttribute("fill", normalizeHexColor(spec.fillColor) ?? "#FFFFFF");
-    dot.setAttribute("fill-opacity", String(Math.max(0, Math.min(1, (Number(spec.fillOpacity) || 0) / 100))));
-    dot.setAttribute("stroke", normalizeHexColor(spec.strokeColor) ?? "#FFFFFF");
-    dot.setAttribute("stroke-opacity", String(Math.max(0, Math.min(1, (Number(spec.strokeOpacity) || 0) / 100))));
-    dot.setAttribute("stroke-width", String(Math.max(0, Number(spec.strokeWeight) || 0)));
-    svg.append(dot);
+    const fillRadius = Math.max(0, Number(spec.radius) || 0);
+    const strokeWidth = Math.max(0, Number(spec.strokeWeight) || 0);
+
+    if (strokeWidth > 0) {
+      const strokeRing = createSvgElement("circle");
+      strokeRing.setAttribute("cx", "21");
+      strokeRing.setAttribute("cy", "9");
+      strokeRing.setAttribute("r", String(fillRadius + strokeWidth / 2));
+      strokeRing.setAttribute("fill", "none");
+      strokeRing.setAttribute("stroke", normalizeHexColor(spec.strokeColor) ?? "#FFFFFF");
+      strokeRing.setAttribute("stroke-opacity", String(Math.max(0, Math.min(1, (Number(spec.strokeOpacity) || 0) / 100))));
+      strokeRing.setAttribute("stroke-width", String(strokeWidth));
+      svg.append(strokeRing);
+    }
+
+    const fillDot = createSvgElement("circle");
+    fillDot.setAttribute("cx", "21");
+    fillDot.setAttribute("cy", "9");
+    fillDot.setAttribute("r", String(fillRadius));
+    fillDot.setAttribute("fill", normalizeHexColor(spec.fillColor) ?? "#FFFFFF");
+    fillDot.setAttribute("fill-opacity", String(Math.max(0, Math.min(1, (Number(spec.fillOpacity) || 0) / 100))));
+    svg.append(fillDot);
     swatch.append(svg);
     return swatch;
   }
@@ -1238,7 +1275,9 @@ function createAppearanceFillRow({ id, label, kind }) {
     id,
     type: "fill",
     label,
-    storageKey: null,
+    storageKey: kind === "screen-background"
+      ? SCREEN_BACKGROUND_STORAGE_KEY
+      : SETTINGS_BACKGROUND_STORAGE_KEY,
     presets: SETTINGS_BACKGROUND_PRESETS,
     min: 0,
     max: 100,

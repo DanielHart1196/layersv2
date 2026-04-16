@@ -81,6 +81,14 @@ async function bootstrapApplication() {
         return;
       }
 
+      if (row?.target?.kind === "layer-style" && row.target.key === "visible") {
+        const targetRow = findRowByRuntimeTargetId(layerModel, row.target.layerId);
+        if (targetRow) {
+          applyRowVisibilityTree(layerModel, screenRuntime, targetRow);
+          return;
+        }
+      }
+
       if (row?.target?.kind === "runtime-style") {
         screenRuntime.setLayerStyleValue(row.target.runtimeTargetId, row.target.key, nextValue);
         return;
@@ -309,19 +317,61 @@ async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
 }
 
 function applyPersistedRowVisibility(layerModel, screenRuntime, row) {
+  applyRowVisibilityTree(layerModel, screenRuntime, row);
+}
+
+function getStoredRowVisibility(layerModel, row) {
+  if (!row) {
+    return true;
+  }
+
+  if (row.type === "layer") {
+    return layerModel.getState()?.[getRowStateKey(row)]?.visible !== false;
+  }
+
+  return layerModel.isRowVisible(row.id);
+}
+
+function applyRowVisibilityTree(layerModel, screenRuntime, row, inheritedHidden = false) {
+  if (!row) {
+    return;
+  }
+
+  const storedVisible = getStoredRowVisibility(layerModel, row);
+  const effectiveVisible = !inheritedHidden && storedVisible;
   const runtimeTargetId = getRowRuntimeTargetId(row);
   if (runtimeTargetId) {
-    const visible = row.type === "layer"
-      ? layerModel.getState()?.[getRowStateKey(row)]?.visible
-      : layerModel.isRowVisible(row.id);
-    if (typeof visible === "boolean") {
-      screenRuntime.setLayerStyleValue(runtimeTargetId, "visible", visible);
+    screenRuntime.setLayerStyleValue(runtimeTargetId, "visible", effectiveVisible);
+  }
+
+  if (!row.id) {
+    return;
+  }
+
+  const nextInheritedHidden = inheritedHidden || !storedVisible;
+  layerModel.getChildRows(row.id).forEach((childRow) => {
+    applyRowVisibilityTree(layerModel, screenRuntime, childRow, nextInheritedHidden);
+  });
+}
+
+function findRowByRuntimeTargetId(layerModel, runtimeTargetId) {
+  if (!runtimeTargetId) {
+    return null;
+  }
+
+  const directRow = layerModel.getRowById(runtimeTargetId);
+  if (directRow && getRowRuntimeTargetId(directRow) === runtimeTargetId) {
+    return directRow;
+  }
+
+  const state = layerModel.getState();
+  for (const [rowId, rowState] of Object.entries(state ?? {})) {
+    if (rowState?.runtimeTargetId === runtimeTargetId) {
+      return layerModel.getRowById(rowId);
     }
   }
 
-  layerModel.getChildRows(row.id).forEach((childRow) => {
-    applyPersistedRowVisibility(layerModel, screenRuntime, childRow);
-  });
+  return null;
 }
 
 async function addDataRowAndAttach({ parentId, name, layerRef, geometryType, layerModel, screenRuntime }) {

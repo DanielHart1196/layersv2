@@ -257,6 +257,44 @@ function normalizeDatasetMetadataValue(value) {
   return trimmed || null;
 }
 
+function normalizeFieldSchema(fieldSchema) {
+  return Array.isArray(fieldSchema) ? fieldSchema.filter((field) => field?.key) : [];
+}
+
+async function loadDatasetFeatures(supabase, datasetId) {
+  const features = [];
+  const pageSize = 1000;
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("features")
+      .select("geometry, properties, valid_from, valid_to")
+      .eq("dataset_id", datasetId)
+      .order("created_at", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+
+    if (error) {
+      throw new Error(`Failed to load dataset features: ${error.message}`);
+    }
+
+    const rows = Array.isArray(data) ? data : [];
+    features.push(...rows.map((row) => ({
+      geometry: row.geometry,
+      properties: row.properties ?? {},
+      valid_from: row.valid_from ?? null,
+      valid_to: row.valid_to ?? null,
+    })));
+
+    if (rows.length < pageSize) {
+      break;
+    }
+    offset += rows.length;
+  }
+
+  return features;
+}
+
 async function createDatasetRecord(supabase, {
   layerId,
   name,
@@ -275,7 +313,7 @@ async function createDatasetRecord(supabase, {
       license_url: normalizeDatasetMetadataValue(licenseUrl),
       attribution: normalizeDatasetMetadataValue(attribution),
       geometry_type: geometryType,
-      field_schema: Array.isArray(fieldSchema) ? fieldSchema : [],
+      field_schema: normalizeFieldSchema(fieldSchema),
     })
     .select("id")
     .single();
@@ -484,11 +522,22 @@ export async function addDatasetToLayer({
   }
 }
 
-export async function appendFeaturesToDataset({ datasetId, features, onProgress }) {
+export async function appendFeaturesToDataset({
+  datasetId,
+  name = "",
+  license = "",
+  licenseUrl = "",
+  attribution = "",
+  features,
+  fieldSchema = [],
+  rawFile,
+  usePmtiles,
+  onProgress,
+}) {
   const supabase = requireSupabase();
   const { data: dataset, error: datasetError } = await supabase
     .from("datasets")
-    .select("id, layer_id, geometry_type")
+    .select("id, layer_id, name, license, license_url, attribution, geometry_type, field_schema")
     .eq("id", datasetId)
     .single();
 
@@ -496,28 +545,75 @@ export async function appendFeaturesToDataset({ datasetId, features, onProgress 
     throw new Error(`Failed to load dataset: ${datasetError.message}`);
   }
 
+  const { data: layer, error: layerError } = await supabase
+    .from("layers")
+    .select("id, name")
+    .eq("id", dataset.layer_id)
+    .single();
+
+  if (layerError) {
+    throw new Error(`Failed to load layer: ${layerError.message}`);
+  }
+
+  const existingFeatures = await loadDatasetFeatures(supabase, datasetId);
   const incomingGeometryType = inferGeometryType(features);
   const nextGeometryType = mergeLayerGeometryType(dataset.geometry_type, incomingGeometryType);
+  const normalizedFieldSchema = normalizeFieldSchema(fieldSchema);
+  const artifactFormat = usePmtiles ? "pmtiles" : "geojson";
+  const combinedFeatures = existingFeatures.concat(Array.isArray(features) ? features : []);
+  const geojson = buildFeatureCollection(combinedFeatures);
+  const geojsonText = artifactFormat === "geojson" ? JSON.stringify(geojson) : null;
+  let pmtilesBuffer = null;
+  let pmtilesDiagnostics = null;
 
-  onProgress?.(5, "Appending features...");
+  onProgress?.(2, "Loading existing dataset...");
+
+  if (usePmtiles) {
+    onProgress?.(6, "Generating PMTiles...");
+    const generated = await generatePmtilesInWorker(geojson, (pct) => {
+      onProgress?.(6 + Math.round(pct * 0.34), "Generating PMTiles...");
+    });
+    pmtilesBuffer = generated.buffer;
+    pmtilesDiagnostics = generated.diagnostics;
+  }
+
+  onProgress?.(42, "Appending features...");
   const inserted = await insertFeatureBatches(supabase, datasetId, features, {
     onProgress,
-    progressStart: 10,
-    progressEnd: 100,
+    progressStart: 45,
+    progressEnd: 72,
   });
 
-  if (nextGeometryType !== dataset.geometry_type) {
-    const { error: updateDatasetError } = await supabase
-      .from("datasets")
-      .update({ geometry_type: nextGeometryType })
-      .eq("id", datasetId);
+  const { error: updateDatasetError } = await supabase
+    .from("datasets")
+    .update({
+      name: normalizeDatasetMetadataValue(name) ?? dataset.name,
+      license: normalizeDatasetMetadataValue(license),
+      license_url: normalizeDatasetMetadataValue(licenseUrl),
+      attribution: normalizeDatasetMetadataValue(attribution),
+      geometry_type: nextGeometryType,
+      field_schema: normalizedFieldSchema,
+    })
+    .eq("id", datasetId);
 
-    if (updateDatasetError) {
-      throw new Error(`Failed to update dataset geometry: ${updateDatasetError.message}`);
-    }
-
-    await updateLayerSummary(supabase, dataset.layer_id, nextGeometryType);
+  if (updateDatasetError) {
+    throw new Error(`Failed to update dataset: ${updateDatasetError.message}`);
   }
+
+  await uploadDatasetArtifact(supabase, {
+    layerId: dataset.layer_id,
+    datasetId,
+    layerName: layer?.name ?? "layer",
+    rawFile,
+    artifactFormat,
+    geojsonText,
+    pmtilesBuffer,
+    pmtilesDiagnostics,
+    onProgress,
+    progressOffset: usePmtiles ? 82 : 76,
+  });
+
+  await updateLayerSummary(supabase, dataset.layer_id, nextGeometryType);
 
   return { datasetId, inserted };
 }

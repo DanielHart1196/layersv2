@@ -113,7 +113,7 @@ function renameObjectKey(target, fromKey, toKey) {
   return Object.fromEntries(Object.entries(target).map(([key, value]) => [key === fromKey ? toKey : key, value]));
 }
 
-export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getLayerDatasets }) {
+export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getLayerDatasets, onAddDataRequested }) {
   const panel = createPanelShell();
   document.body.appendChild(panel);
 
@@ -681,12 +681,15 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
           <input class="clp-field-input dtv-name-input" type="text" value="${escapeHtml(state.editableLayerName)}" placeholder="Layer name" />
         </label>
         <div class="dtv-dataset-row">
-          <label class="clp-field dtv-dataset-field">
-            <span class="clp-field-label">Dataset</span>
-            <select class="clp-field-input dtv-dataset-select" ${state.datasetsLoading || !(state.datasets ?? []).length ? "disabled" : ""}>
-              ${datasetOptions || `<option value="">No datasets</option>`}
-            </select>
-          </label>
+          <div class="dtv-dataset-picker">
+            <label class="clp-field dtv-dataset-field">
+              <span class="clp-field-label">Dataset</span>
+              <select class="clp-field-input dtv-dataset-select" ${state.datasetsLoading || !(state.datasets ?? []).length ? "disabled" : ""}>
+                ${datasetOptions || `<option value="">No datasets</option>`}
+              </select>
+            </label>
+            <button class="dtv-add-data-btn" type="button" aria-label="Add data" title="Add data">+</button>
+          </div>
           <div class="dtv-license-panel" aria-label="Dataset licensing">
             <div class="dtv-license-item">
               <span class="dtv-license-label">License</span>
@@ -747,6 +750,14 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       state.removedSourceHeaders = {};
       render();
       void loadLayer(state.layerId, nextDatasetId);
+    });
+    content.querySelector(".dtv-add-data-btn")?.addEventListener("click", () => {
+      onAddDataRequested?.({
+        layerId: state.layerId,
+        layerName: state.layerName,
+        datasets: state.datasets,
+        selectedDatasetId: state.selectedDatasetId,
+      });
     });
     content.querySelector("#dtvPrev")?.addEventListener("click", () => {
       state.previewPageOffset = Math.max(0, state.previewPageOffset - PREVIEW_PAGE_SIZE);
@@ -947,5 +958,18 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       })();
     },
     close,
+    async reloadLayerData({ layerId = state.layerId, datasetId = state.selectedDatasetId } = {}) {
+      if (!layerId) return;
+      state.layerId = layerId;
+      await loadDatasets(layerId);
+      if (datasetId && state.datasets.some((dataset) => dataset.id === datasetId)) {
+        state.selectedDatasetId = datasetId;
+      }
+      if (state.selectedDatasetId) {
+        await loadLayer(layerId, state.selectedDatasetId);
+      } else {
+        render();
+      }
+    },
   };
 }

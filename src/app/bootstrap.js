@@ -1,4 +1,5 @@
 import { createLayerModel } from "../core/layer-model.js";
+import { mountAddDataPanel } from "./add-data-panel.js";
 import { mountCreateLayerPanel } from "./create-layer-panel.js";
 import { mountDataTablePanel } from "./data-table-panel.js";
 import { getProjectionRegistry } from "../core/projection/projection-registry.js";
@@ -52,7 +53,18 @@ async function bootstrapApplication() {
     });
   }
 
-  const dataTablePanel = mountDataTablePanel({
+  let dataTablePanel = null;
+  const addDataPanel = mountAddDataPanel({
+    getAppearanceState: () => layerModel.getAppearanceState(),
+    async getLayerDatasets(layerId) {
+      const { getLayerDatasets } = await import("../sources/supabase/layer-loader.js");
+      return getLayerDatasets(layerId);
+    },
+    async onDataAdded({ layerId, datasetId }) {
+      await dataTablePanel?.reloadLayerData?.({ layerId, datasetId });
+    },
+  });
+  dataTablePanel = mountDataTablePanel({
     getAppearanceState: () => layerModel.getAppearanceState(),
     async getLayerDatasets(layerId) {
       const { getLayerDatasets } = await import("../sources/supabase/layer-loader.js");
@@ -61,6 +73,9 @@ async function bootstrapApplication() {
     async loadTablePreview(layerId, { limit, offset, datasetId }) {
       const { getLayerTablePreview } = await import("../sources/supabase/layer-loader.js");
       return getLayerTablePreview(layerId, { limit, offset, datasetId });
+    },
+    onAddDataRequested(args) {
+      addDataPanel.open(args);
     },
   });
   const rerenderLayerMenu = renderLayerMenuRows({

@@ -159,6 +159,8 @@ function enableLayerMenuControls({
     return;
   }
 
+  const draggableMenuMediaQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
+
   const stopPropagation = (event) => {
     event.stopPropagation();
   };
@@ -269,6 +271,9 @@ function enableLayerMenuControls({
 
   button.addEventListener("pointerdown", (event) => {
     stopPropagation(event);
+    if (!draggableMenuMediaQuery.matches) {
+      return;
+    }
     if (event.button !== 0) {
       return;
     }
@@ -297,6 +302,28 @@ function enableLayerMenuControls({
       closeAppearanceRows(panel, appearanceControls, rerenderLayerMenu);
     }
     setLayerMenuOpen(wrapper, panel, button, nextOpen);
+    if (!draggableMenuMediaQuery.matches) {
+      wrapper.style.left = "";
+      wrapper.style.right = "";
+      wrapper.style.top = "";
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    if (draggableMenuMediaQuery.matches || !panel.classList.contains("is-open")) {
+      return;
+    }
+
+    const target = event.target;
+    if (!(target instanceof Node)) {
+      return;
+    }
+
+    if (wrapper.contains(target)) {
+      return;
+    }
+
+    closeLayerMenu();
   });
 
   document.addEventListener("keydown", (event) => {
@@ -306,7 +333,13 @@ function enableLayerMenuControls({
   });
 
   window.addEventListener("resize", () => {
-    applyLayerMenuPosition(wrapper, panel, readLayerMenuPosition() ?? resolveDefaultLayerMenuPosition(wrapper, panel));
+    if (draggableMenuMediaQuery.matches) {
+      applyLayerMenuPosition(wrapper, panel, readLayerMenuPosition() ?? resolveDefaultLayerMenuPosition(wrapper, panel));
+    } else {
+      wrapper.style.left = "";
+      wrapper.style.right = "";
+      wrapper.style.top = "";
+    }
     syncLayerMenuMaxHeight(wrapper, panel, button);
   });
 

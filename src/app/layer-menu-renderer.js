@@ -27,6 +27,7 @@ const DEFAULT_SCREEN_BACKGROUND = {
   color: "#000000",
   opacity: 100,
 };
+const LAYER_MENU_VIEWPORT_MARGIN = 12;
 
 function normalizeHexColor(value) {
   const normalized = String(value ?? "").trim().replace(/^#*/, "");
@@ -1555,6 +1556,26 @@ function collapseExpandedLayersOnHoverLeave(layerModel) {
   return changed;
 }
 
+function syncOpenLayerMenuLayout(panel) {
+  if (!panel?.classList?.contains("is-open")) {
+    return;
+  }
+
+  const wrapper = panel.closest(".layer-menu");
+  const button = wrapper?.querySelector?.("#layerMenuButton");
+  if (!wrapper || !button) {
+    return;
+  }
+
+  const buttonRect = button.getBoundingClientRect();
+  const wrapperRect = wrapper.getBoundingClientRect();
+  const naturalTop = wrapperRect.top + buttonRect.height + 10;
+  const viewportCap = Math.max(120, window.innerHeight - (LAYER_MENU_VIEWPORT_MARGIN * 2));
+  const availableFromCurrentPosition = Math.max(120, window.innerHeight - naturalTop - LAYER_MENU_VIEWPORT_MARGIN);
+  const availableHeight = Math.min(viewportCap, availableFromCurrentPosition);
+  panel.style.maxHeight = `${availableHeight}px`;
+}
+
 function renderLayerMenuRows({
   panel,
   layerModel,
@@ -1755,9 +1776,17 @@ function renderLayerMenuRows({
     if (onAddRow) {
       (footerRegion ?? scrollRegion).append(createAddButton(0, layerModel.getRootParentId(), onAddRow));
     }
+
+    requestAnimationFrame(() => {
+      syncOpenLayerMenuLayout(panel);
+    });
   }
 
+  const hoverCapableMediaQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
   panel.addEventListener("pointerleave", () => {
+    if (!hoverCapableMediaQuery.matches) {
+      return;
+    }
     if (collapseExpandedLayersOnHoverLeave(layerModel)) {
       render();
     }

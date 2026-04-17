@@ -2085,7 +2085,7 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
 
 function createPanelShell() {
   return html(`
-    <div class="clp-panel">
+    <div class="clp-panel adp-panel">
       <div class="clp-inner">
         <div class="clp-header">
           <span class="clp-title">Add data</span>

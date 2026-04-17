@@ -358,6 +358,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       uploadingLabel: "0%",
       uploadingPct: 0,
       layerId: null,
+      doneMessage: "Layer added to map",
       error: "",
       ...overrides,
     };
@@ -511,13 +512,16 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     render();
 
     try {
-      await onLayerCreated?.({
+      const result = await onLayerCreated?.({
         layerId: selectedLayer.id,
         name: selectedLayer.label ?? "Layer",
         parentId: state.parentId ?? null,
         geometryType: selectedLayer.geometryType ?? "mixed",
       });
       state.layerId = selectedLayer.id;
+      state.doneMessage = result?.duplicate
+        ? `${selectedLayer.label ?? "This"} layer has already been added`
+        : "Layer added to map";
       state.step = "done";
       render();
     } catch (error) {
@@ -722,12 +726,16 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       state.layerId = layerId;
       state.step = "done";
       render();
-      onLayerCreated?.({
+      const result = await onLayerCreated?.({
         layerId,
         name: state.name.trim() || state.file?.name?.replace(/\.[^.]+$/, "") || "Layer",
         parentId: state.parentId ?? null,
         geometryType: inferGeometryType(state.preview.features),
       });
+      const layerLabel = state.name.trim() || state.file?.name?.replace(/\.[^.]+$/, "") || "This";
+      state.doneMessage = result?.duplicate
+        ? `${layerLabel} layer has already been added`
+        : "Layer added to map";
     } catch (error) {
       state.error = error?.message ?? "Failed to create layer.";
       state.step = "preview";
@@ -1922,7 +1930,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
   function renderDone() {
     const el = html(`
       <div class="clp-uploading">
-        <p class="clp-uploading-label">Layer added to map</p>
+        <p class="clp-uploading-label">${escapeHtml(state.doneMessage || "Layer added to map")}</p>
         <div class="clp-actions">
           <button class="clp-btn clp-btn-secondary" id="clpAnother">Add another</button>
           <button class="clp-btn clp-btn-primary" id="clpClose">Done</button>

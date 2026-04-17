@@ -262,13 +262,20 @@ ul {
 
 .layer-menu-appearance {
   position: relative;
-  display: none;
+  display: flex;
   align-items: center;
   gap: 10px;
+  min-height: 48px;
+  padding-right: 0;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .layer-menu.is-open .layer-menu-appearance {
-  display: flex;
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .mobile-refresh-button,
@@ -287,9 +294,32 @@ ul {
   backdrop-filter: none;
   cursor: pointer;
   transition:
+    opacity 120ms ease,
     transform 180ms ease,
     border-color 180ms ease;
   touch-action: manipulation;
+}
+
+.layer-menu-button {
+  opacity: 0;
+}
+
+.layer-menu:not(.is-open) .layer-menu-button {
+  opacity: 1;
+}
+
+.layer-menu-panel:hover ~ .layer-menu-button,
+.layer-menu-panel:hover ~ .layer-menu-appearance .layer-menu-appearance-button,
+.layer-menu:hover .layer-menu-button {
+  opacity: 1;
+}
+
+.layer-menu-button[aria-label="Close layer menu"] {
+  cursor: grab;
+}
+
+.layer-menu-button.is-dragging {
+  cursor: grabbing;
 }
 
 .layer-menu-appearance-button {
@@ -310,6 +340,14 @@ ul {
   font-weight: 700;
   cursor: pointer;
   touch-action: manipulation;
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    border-color 180ms ease;
+}
+
+.layer-menu:hover .layer-menu-appearance-button {
+  opacity: 1;
 }
 
 #layerMenuScreenButton {
@@ -457,7 +495,7 @@ ul {
   display: flex;
   flex-direction: column;
   border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 18px;
+  border-radius: 0;
   background: transparent;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.82);
   backdrop-filter: none;
@@ -484,17 +522,37 @@ ul {
 
 .layer-menu-panel-footer {
   flex: 0 0 auto;
+  max-height: 0;
+  padding: 0 12px;
+  border-top: 0 solid rgba(255, 255, 255, 0.16);
+  box-shadow: none;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+  transition:
+    max-height 120ms ease,
+    padding 120ms ease,
+    border-top-width 120ms ease,
+    opacity 120ms ease;
+}
+
+.layer-menu-panel:hover .layer-menu-panel-footer,
+.layer-menu:hover .layer-menu-panel-footer,
+.layer-menu-panel:focus-within .layer-menu-panel-footer {
+  max-height: 48px;
   padding: 10px 12px 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  border-top-width: 1px;
   box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.72);
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .layer-menu-row {
   width: 100%;
   padding: 12px 14px;
   border: 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.28);
-  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.82);
+  border-top: 1px solid transparent;
+  box-shadow: none;
   background: transparent;
   color: rgba(239, 247, 251, 0.92);
   font: inherit;
@@ -502,6 +560,10 @@ ul {
   font-weight: 700;
   text-align: left;
   cursor: pointer;
+  transition:
+    border-top-color 120ms ease,
+    box-shadow 120ms ease,
+    color 120ms ease;
 }
 
 .layer-menu-row:first-child {
@@ -509,8 +571,49 @@ ul {
   box-shadow: none;
 }
 
+.layer-menu:hover .layer-menu-row:not(:first-child),
+.layer-menu-panel:focus-within .layer-menu-row:not(:first-child) {
+  border-top-color: rgba(255, 255, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.82);
+}
+
 .layer-menu-row-layer {
   padding-left: calc(14px + (var(--row-depth, 0) * 14px));
+}
+
+.layer-menu-panel-scroll .layer-menu-row-layer[data-row-id="earth"] {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-top-width: 0;
+  border-top-color: transparent;
+  box-shadow: none;
+  background: transparent;
+  overflow: hidden;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    max-height 120ms ease,
+    padding 120ms ease,
+    opacity 120ms ease,
+    visibility 0s linear 120ms;
+}
+
+.layer-menu-panel:hover .layer-menu-panel-scroll .layer-menu-row-layer[data-row-id="earth"],
+.layer-menu:hover .layer-menu-panel-scroll .layer-menu-row-layer[data-row-id="earth"],
+.layer-menu-panel:focus-within .layer-menu-panel-scroll .layer-menu-row-layer[data-row-id="earth"] {
+  max-height: 60px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  border-top-width: 1px;
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transition:
+    max-height 120ms ease,
+    padding 120ms ease,
+    opacity 120ms ease;
 }
 
 .layer-menu-row:hover,
@@ -535,6 +638,34 @@ ul {
   display: grid;
   cursor: default;
 }
+
+.layer-menu-panel-scroll .layer-menu-row-style {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-top-width: 0;
+  box-shadow: none;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition:
+    max-height 120ms ease,
+    padding 120ms ease,
+    border-top-width 120ms ease,
+    opacity 120ms ease;
+}
+
+.layer-menu-panel:hover .layer-menu-panel-scroll .layer-menu-row-style,
+.layer-menu:hover .layer-menu-panel-scroll .layer-menu-row-style,
+.layer-menu-panel:focus-within .layer-menu-panel-scroll .layer-menu-row-style {
+  max-height: 220px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  border-top-width: 1px;
+  opacity: 1;
+  pointer-events: auto;
+}
+
 
 .layer-menu-style-header {
   display: flex;
@@ -605,7 +736,16 @@ ul {
   background: transparent;
   color: rgba(239, 247, 251, 0.46);
   cursor: pointer;
-  transition: color 120ms ease;
+  transition:
+    color 120ms ease,
+    opacity 120ms ease;
+  opacity: 0;
+}
+
+.layer-menu-panel:hover .layer-menu-row-gear,
+.layer-menu:hover .layer-menu-row-gear,
+.layer-menu-panel:focus-within .layer-menu-row-gear {
+  opacity: 1;
 }
 
 .layer-menu-row-gear:hover,
@@ -624,6 +764,15 @@ ul {
   min-width: 0;
 }
 
+.layer-menu:not(:hover) .layer-menu-row-leading {
+  gap: 0;
+}
+
+.layer-menu:not(:hover) .layer-menu-row-leading > .layer-menu-row-toggle,
+.layer-menu:not(:hover) .layer-menu-row-leading > .layer-menu-row-label {
+  margin-left: -14px;
+}
+
 .layer-menu-row-grabber {
   display: inline-grid;
   gap: 3px;
@@ -634,6 +783,27 @@ ul {
   background: transparent;
   cursor: grab;
   touch-action: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.layer-menu:hover .layer-menu-row-grabber,
+.layer-menu-panel:focus-within .layer-menu-row-grabber {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.layer-menu:hover .layer-menu-row-leading,
+.layer-menu-panel:focus-within .layer-menu-row-leading {
+  gap: 10px;
+}
+
+.layer-menu:hover .layer-menu-row-leading > .layer-menu-row-toggle,
+.layer-menu:hover .layer-menu-row-leading > .layer-menu-row-label,
+.layer-menu-panel:focus-within .layer-menu-row-leading > .layer-menu-row-toggle,
+.layer-menu-panel:focus-within .layer-menu-row-leading > .layer-menu-row-label {
+  margin-left: 0;
 }
 
 .layer-menu-row-grabber span {
@@ -766,6 +936,10 @@ body.is-reordering-rows {
   min-width: 42px;
   height: 18px;
   margin-left: auto;
+}
+
+.layer-menu-row-legend.is-hidden {
+  visibility: hidden;
 }
 
 .layer-menu-row-legend-svg {
@@ -1072,6 +1246,10 @@ body.is-reordering-rows {
 
 .clp-panel.is-open {
   display: flex;
+}
+
+.adp-panel {
+  z-index: 1002;
 }
 
 .clp-inner {
@@ -1972,6 +2150,7 @@ body.is-reordering-rows {
     1px -1px rgba(0, 0, 0, 0.9),
     1px 0 rgba(0, 0, 0, 0.9),
     1px 1px rgba(0, 0, 0, 0.9);
+  transition: color 120ms ease;
 }
 
 .layer-menu-add-row:hover {

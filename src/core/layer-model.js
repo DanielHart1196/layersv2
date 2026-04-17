@@ -858,7 +858,7 @@ function createLayerModel() {
     initializeDynamicRowState(rows, mapLayerId, newRow.id);
     dynamicIds.add(newRow.id);
     layerState[uid] = {
-      expanded: rows.length > 0,
+      expanded: false,
       visible: true,
       runtimeTargetId: newRow.runtimeLayerId,
       parentRowId: parentId === ROOT_PARENT_ID ? null : parentId,

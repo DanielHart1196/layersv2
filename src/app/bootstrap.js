@@ -162,7 +162,7 @@ async function bootstrapApplication() {
     getAppearanceState: () => layerModel.getAppearanceState(),
     onLayerCreated: async ({ layerId, name, parentId, geometryType }) => {
       try {
-        const added = await addDataRowAndAttach({
+        const result = await addDataRowAndAttach({
           parentId: parentId ?? layerModel.getRootParentId(),
           name,
           layerRef: layerId,
@@ -170,9 +170,11 @@ async function bootstrapApplication() {
           layerModel,
           screenRuntime,
         });
-        if (added) rerenderLayerMenu();
+        if (result) rerenderLayerMenu();
+        return result;
       } catch (err) {
         console.error("Failed to load uploaded layer onto map.", err);
+        throw err;
       }
     },
   });
@@ -327,12 +329,39 @@ function findRowByRuntimeTargetId(layerModel, runtimeTargetId) {
 
 async function addDataRowAndAttach({ parentId, name, layerRef, geometryType, layerModel, screenRuntime }) {
   const resolvedParentId = parentId ?? layerModel.getRootParentId();
+  const existingSupabaseLayer = SUPABASE_UUID.test(layerRef)
+    ? layerModel.getSupabaseLayers().find((entry) => entry.layerId === layerRef)
+    : null;
+
+  if (existingSupabaseLayer) {
+    const existingRow = layerModel.getRowById(existingSupabaseLayer.rowId);
+    if (!existingRow) {
+      return null;
+    }
+
+    const update = layerModel.setRowValue({
+      target: {
+        kind: "layer-style",
+        layerId: existingRow.id,
+        key: "visible",
+      },
+      runtimeTargetId: getRowRuntimeTargetId(existingRow),
+    }, true);
+
+    applyPersistedRowVisibility(layerModel, screenRuntime, existingRow);
+    if (update?.runtimeTargetId) {
+      screenRuntime.setLayerStyleValue(update.runtimeTargetId, update.key, update.value);
+    }
+
+    return { row: existingRow, duplicate: true };
+  }
+
   if (!SUPABASE_UUID.test(layerRef)) {
     const added = layerModel.addDataRow(resolvedParentId, { name, layerRef, geometryType });
     if (!added) {
       return null;
     }
-    return added;
+    return { row: added, duplicate: false };
   }
 
   let layerResult;
@@ -364,7 +393,7 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryType, lay
     screenRuntime.setLayerStyleValue(runtimeTargetId, "visible", visible);
   }
 
-  return added;
+  return { row: added, duplicate: false };
 }
 
 async function reloadSupabaseLayer(layerId, layerModel, screenRuntime) {

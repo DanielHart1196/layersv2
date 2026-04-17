@@ -683,7 +683,7 @@ function updateLayerLegendSwatch(rowElement, legendSpec) {
   header.append(nextLegend);
 }
 
-function createLayerRow(definition, state, parentId, inheritedHidden, onToggleExpanded, onToggleVisibility, reorderApi, dragState, legendSpec = null) {
+function createLayerRow(definition, state, parentId, inheritedHidden, onToggleExpanded, onToggleVisibility, reorderApi, dragState, legendSpec = null, onDataAction = null) {
   const row = document.createElement("div");
   row.className = "layer-menu-row layer-menu-row-layer";
   row.dataset.rowId = definition.id;
@@ -700,10 +700,25 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
     chevronButton: isExpandable,
     chevronExpanded: Boolean(state?.expanded),
   });
+  if (definition?.layerRef) {
+    const gearButton = document.createElement("button");
+    gearButton.type = "button";
+    gearButton.className = "layer-menu-row-gear";
+    gearButton.setAttribute("aria-label", "Open layer data view");
+    gearButton.innerHTML = '<span aria-hidden="true">⚙</span>';
+    gearButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onDataAction?.(definition);
+    });
+    header.append(gearButton);
+  }
   const showLegend = !inheritedHidden && state?.visible !== false;
   const legend = showLegend ? createLayerLegendSwatch(legendSpec) : null;
   if (legend) {
-    if (chevron) {
+    const gearButton = header.querySelector(".layer-menu-row-gear");
+    if (gearButton) {
+      header.insertBefore(legend, chevron ?? null);
+    } else if (chevron) {
       header.insertBefore(legend, chevron);
     } else {
       header.append(legend);
@@ -1157,6 +1172,7 @@ function createStyleRow(row, value, onInput, requestRender, { parentId, reorderA
         if (
           event.target?.closest?.(".layer-menu-row-grabber")
           || event.target?.closest?.(".layer-menu-row-toggle")
+          || event.target?.closest?.(".layer-menu-row-gear")
           || event.target?.closest?.(".layer-menu-row-chevron-button")
         ) {
           return;
@@ -1306,36 +1322,6 @@ function createAddButton(depth, parentId, onAddRow) {
     onAddRow({ kind: "open-add-panel", depth, parentId });
   });
   return btn;
-}
-
-function createDataButton(depth, row, onDataAction) {
-  const btn = document.createElement("button");
-  btn.className = "layer-menu-add-row layer-menu-data-row";
-  btn.style.setProperty("--row-depth", String(depth + 1));
-  btn.type = "button";
-  btn.setAttribute("aria-label", "Open data table");
-  btn.textContent = "Data";
-  btn.addEventListener("click", (event) => {
-    event.stopPropagation();
-    onDataAction?.(row);
-  });
-  return btn;
-}
-
-function createLayerActionRow(depth, row, onAddRow, onDataAction) {
-  const wrapper = document.createElement("div");
-  wrapper.className = "layer-menu-row-actions";
-  wrapper.style.setProperty("--row-depth", String(depth));
-  wrapper.append(createAddButton(depth, row.id, onAddRow));
-
-  if (row?.layerRef) {
-    const divider = document.createElement("span");
-    divider.className = "layer-menu-row-actions-divider";
-    divider.setAttribute("aria-hidden", "true");
-    wrapper.append(divider, createDataButton(depth, row, onDataAction));
-  }
-
-  return wrapper;
 }
 
 function makeRemoveButton(row, parentId, onRemoveRow) {
@@ -1489,6 +1475,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       reorderApi,
       reorderApi.dragState,
       getLayerLegendSpec(row, state[rowStateKey], layerModel, appearanceState),
+      onDataAction,
     );
     layerRow.style.setProperty("--row-depth", String(depth));
     fragment.append(layerRow);
@@ -1497,9 +1484,6 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       const nextInheritedHidden = inheritedHidden || (state[rowStateKey]?.visible === false);
       if (childRows.length) {
         fragment.append(buildRows(childRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden, onAddRow, onRemoveRow, onDataAction));
-      }
-      if (onAddRow) {
-        fragment.append(createLayerActionRow(depth + 1, row, onAddRow, onDataAction));
       }
     }
   });

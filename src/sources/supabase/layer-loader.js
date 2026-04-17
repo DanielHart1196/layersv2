@@ -35,7 +35,7 @@ async function loadLayerDatasets(layerId) {
   const supabase = requireSupabase();
   const { data, error } = await supabase
     .from("datasets")
-    .select("id, layer_id, name, geometry_type, field_schema, render_format, artifact_url, feature_count, created_at")
+    .select("id, layer_id, name, license, license_url, attribution, geometry_type, field_schema, render_format, artifact_url, feature_count, created_at")
     .eq("layer_id", layerId)
     .order("created_at", { ascending: true });
 
@@ -157,12 +157,16 @@ export async function getLayerFields(layerId) {
   return [...keys].filter((key) => !key.startsWith("_")).sort();
 }
 
-export async function getLayerTablePreview(layerId, { limit = 50, offset = 0 } = {}) {
+export async function getLayerTablePreview(layerId, { limit = 50, offset = 0, datasetId = "" } = {}) {
   const supabase = requireSupabase();
   const safeLimit = Math.max(1, Math.min(200, Number(limit) || 50));
   const safeOffset = Math.max(0, Number(offset) || 0);
   const datasets = await loadLayerDatasets(layerId);
-  const datasetIds = datasets.map((dataset) => dataset.id);
+  const scopedDatasets = datasetId
+    ? datasets.filter((dataset) => dataset.id === datasetId)
+    : datasets;
+  const datasetIds = scopedDatasets.map((dataset) => dataset.id);
+  const totalRowCount = scopedDatasets.reduce((sum, dataset) => sum + Math.max(0, Number(dataset?.feature_count) || 0), 0);
 
   if (!datasetIds.length) {
     return {
@@ -170,6 +174,7 @@ export async function getLayerTablePreview(layerId, { limit = 50, offset = 0 } =
       limit: safeLimit,
       rows: [],
       fields: [],
+      totalRowCount: 0,
       hasMore: false,
     };
   }
@@ -184,17 +189,12 @@ export async function getLayerTablePreview(layerId, { limit = 50, offset = 0 } =
   if (error) throw new Error(error.message);
 
   const rows = Array.isArray(data) ? data : [];
-  const { fields, seenKeys } = mergeSchemaFields(datasets);
-  const finalFields = [{ key: "id", label: "ID", type: "uuid", source: "column" }];
-  let hasTemporalData = false;
+  const { fields, seenKeys } = mergeSchemaFields(scopedDatasets);
+  const finalFields = [];
 
   fields.forEach((field) => finalFields.push(field));
-  seenKeys.add("id");
 
   rows.forEach((row) => {
-    if (row?.valid_from || row?.valid_to) {
-      hasTemporalData = true;
-    }
     if (row?.properties && typeof row.properties === "object") {
       Object.keys(row.properties).forEach((key) => {
         if (!String(key).startsWith("_") && !seenKeys.has(key)) {
@@ -210,17 +210,13 @@ export async function getLayerTablePreview(layerId, { limit = 50, offset = 0 } =
     }
   });
 
-  if (hasTemporalData) {
-    finalFields.push({ key: "valid_from", label: "Valid From", type: "date", source: "column" });
-    finalFields.push({ key: "valid_to", label: "Valid To", type: "date", source: "column" });
-  }
-
   return {
     offset: safeOffset,
     limit: safeLimit,
     rows,
     fields: finalFields,
-    hasMore: rows.length === safeLimit,
+    totalRowCount,
+    hasMore: safeOffset + rows.length < totalRowCount,
   };
 }
 

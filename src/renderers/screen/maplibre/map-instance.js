@@ -98,6 +98,7 @@ const SCALE_BAR_MAX_WIDTH_PX = 120;
 const SCALE_BAR_HIDE_DELAY_MS = 1200;
 const SCALE_BAR_SCREEN_OFFSET_X = 18;
 const SCALE_BAR_SCREEN_OFFSET_Y = 28;
+const COMPASS_ACTIVE_BEARING_THRESHOLD = 0.5;
 const METERS_PER_FOOT = 0.3048;
 const METERS_PER_MILE = 1609.344;
 
@@ -131,6 +132,21 @@ function createScaleOverlay(container) {
   `;
   container.append(overlay);
   return overlay;
+}
+
+function createCompassOverlay(container) {
+  const button = document.createElement("button");
+  button.className = "map-compass";
+  button.type = "button";
+  button.setAttribute("aria-label", "Reset map to north");
+  button.innerHTML = `
+    <span class="map-compass-ring" aria-hidden="true">
+      <span class="map-compass-arrow"></span>
+    </span>
+    <span class="map-compass-label" aria-hidden="true">N</span>
+  `;
+  container.append(button);
+  return button;
 }
 
 function haversineDistanceMeters(a, b) {
@@ -230,6 +246,21 @@ function updateScaleOverlay(map, overlay) {
   if (imperialLabel) {
     imperialLabel.textContent = formatImperialDistance(niceDistanceMeters);
   }
+}
+
+function normalizeBearing(bearing) {
+  const normalized = ((bearing % 360) + 360) % 360;
+  return normalized > 180 ? normalized - 360 : normalized;
+}
+
+function updateCompassOverlay(map, overlay) {
+  const bearing = normalizeBearing(map.getBearing());
+  const arrow = overlay.querySelector(".map-compass-arrow");
+  if (arrow) {
+    arrow.style.transform = `rotate(${bearing}deg)`;
+  }
+
+  overlay.classList.toggle("is-active", Math.abs(bearing) > COMPASS_ACTIVE_BEARING_THRESHOLD);
 }
 
 function localLayerMaplibreIds(entry) {
@@ -1490,6 +1521,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
   ensureProtocol(manifest);
   const layerState = structuredClone(initialLayerState);
   const scaleOverlay = createScaleOverlay(container);
+  const compassOverlay = createCompassOverlay(container);
   let scaleHideTimeout = null;
 
   function clearScaleHideTimeout() {
@@ -1557,20 +1589,28 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
   });
   map.on("movestart", () => {
     showScaleOverlay();
+    updateCompassOverlay(map, compassOverlay);
   });
   map.on("move", () => {
     showScaleOverlay();
+    updateCompassOverlay(map, compassOverlay);
   });
   map.on("moveend", () => {
     showScaleOverlay();
+    updateCompassOverlay(map, compassOverlay);
     hideScaleOverlaySoon();
   });
   map.on("resize", () => {
     if (scaleOverlay.classList.contains("is-visible")) {
       updateScaleOverlay(map, scaleOverlay);
     }
+    updateCompassOverlay(map, compassOverlay);
+  });
+  compassOverlay.addEventListener("click", () => {
+    map.easeTo({ bearing: 0 });
   });
   map.on("load", () => {
+    updateCompassOverlay(map, compassOverlay);
     // Upgrade any layers that loaded with a fast initialUrl — swap to full
     // quality in the background. Non-blocking: map stays interactive.
     LOCAL_LAYERS.filter((l) => l.source.initialUrl).forEach((l) => {
@@ -1627,6 +1667,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     destroy() {
       clearScaleHideTimeout();
       scaleOverlay.remove();
+      compassOverlay.remove();
       map.remove();
     },
     whenStyleReady(callback) {

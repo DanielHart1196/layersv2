@@ -5,6 +5,7 @@ import { summarizeFeatureComplexity } from "../upload/feature-complexity.js";
 import { inferGeometryFamily } from "../upload/geometry-family.js";
 import { createLayerWithDataset } from "../upload/insert-layer.js";
 import { getSupabaseCatalog } from "../sources/supabase/layer-loader.js";
+import { buildPreviewTableMarkup, bindPreviewTableInteractions } from "./shared/preview-table.js";
 
 const MIN_PREVIEW_COLUMN_WIDTH = 96;
 const PREVIEW_RESIZE_HIT_WIDTH = 8;
@@ -69,6 +70,11 @@ function getPreviewHeaderBackground(state) {
 
 function inferGeometryType(features = []) {
   return inferGeometryFamily(features);
+}
+
+function looksLikeHttpUrl(value) {
+  const trimmed = String(value ?? "").trim();
+  return trimmed === "" || /^https?:\/\/\S+$/i.test(trimmed);
 }
 
 function flattenPreviewProperties(value, prefix = "", out = {}) {
@@ -199,6 +205,15 @@ function orderHeaders(headers = [], desiredOrder = []) {
   });
 
   return ordered;
+}
+
+function orderFieldSchema(fieldSchema = [], desiredOrder = []) {
+  const schemaByKey = new Map(
+    (Array.isArray(fieldSchema) ? fieldSchema : [])
+      .filter((field) => field?.key)
+      .map((field) => [field.key, field])
+  );
+  return orderHeaders([...schemaByKey.keys()], desiredOrder).map((key) => schemaByKey.get(key));
 }
 
 function buildPreviewFromParsed(parsed) {
@@ -334,8 +349,12 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       previewSortColumn: "",
       previewSortDirection: "",
       previewScrollLeft: 0,
+      previewScrollTop: 0,
       previewPageOffset: 0,
       usePmtiles: false,
+      license: "",
+      licenseUrl: "",
+      attribution: "",
       uploadingLabel: "0%",
       uploadingPct: 0,
       layerId: null,
@@ -350,7 +369,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     content.innerHTML = "";
 
     if (state.step === "form") content.append(renderForm());
-    if (state.step === "preview") content.append(renderPreview());
+    if (state.step === "preview") content.append(renderSharedPreview());
     if (state.step === "uploading") content.append(renderUploading());
     if (state.step === "done") content.append(renderDone());
 
@@ -360,6 +379,9 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       const tableWrap = panel.querySelector(".clp-table-wrap");
       if (tableWrap && Number.isFinite(state.previewScrollLeft)) {
         tableWrap.scrollLeft = state.previewScrollLeft;
+      }
+      if (tableWrap && Number.isFinite(state.previewScrollTop)) {
+        tableWrap.scrollTop = state.previewScrollTop;
       }
     }
   }
@@ -511,6 +533,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     const orderedHeaders = orderHeaders(nextPreview.headers ?? [], desiredOrder ?? []);
     nextPreview.headers = orderedHeaders;
     nextPreview.headerOrder = orderedHeaders.slice();
+    nextPreview.fieldSchema = orderFieldSchema(nextPreview.fieldSchema ?? [], orderedHeaders);
     nextPreview.allRows = (nextPreview.allRows ?? []).map((row) => {
       if (!row || typeof row !== "object") {
         return row;
@@ -593,6 +616,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     headers.splice(boundedTarget, 0, columnName);
     state.preview.headers = headers;
     state.preview.headerOrder = headers.slice();
+    state.preview.fieldSchema = orderFieldSchema(state.preview.fieldSchema ?? [], headers);
 
     state.preview.allRows = (state.preview.allRows ?? []).map((row) => {
       if (!row || typeof row !== "object") {
@@ -610,6 +634,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     const headers = orderHeaders(state.preview.headers ?? [], nextOrder ?? []);
     state.preview.headers = headers;
     state.preview.headerOrder = headers.slice();
+    state.preview.fieldSchema = orderFieldSchema(state.preview.fieldSchema ?? [], headers);
     state.preview.allRows = (state.preview.allRows ?? []).map((row) => {
       if (!row || typeof row !== "object") {
         return row;
@@ -660,6 +685,13 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       return;
     }
 
+    if (!looksLikeHttpUrl(state.licenseUrl)) {
+      state.error = "License link must start with http:// or https://";
+      state.step = "preview";
+      render();
+      return;
+    }
+
     state.step = "uploading";
     state.uploadingPct = 0;
     state.uploadingLabel = "0%";
@@ -669,6 +701,9 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       const { layerId } = await createLayerWithDataset({
         name: state.name.trim() || state.file?.name?.replace(/\.[^.]+$/, "") || "Layer",
         datasetName: state.file?.name?.replace(/\.[^.]+$/, "") || "Dataset",
+        license: state.license.trim(),
+        licenseUrl: state.licenseUrl.trim(),
+        attribution: state.attribution.trim(),
         viewAccess: "unlisted",
         features: state.preview.features,
         fieldSchema: state.preview.fieldSchema,
@@ -1510,6 +1545,181 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     return el;
   }
 
+  function renderSharedPreview() {
+    const headers = state.preview?.headers ?? [];
+    const rows = state.preview?.rows ?? [];
+    const rowCount = state.preview?.rowCount ?? 0;
+    const columnCount = state.preview?.columnCount ?? 0;
+    const pageOffset = state.previewPageOffset ?? 0;
+    const pageStart = rowCount ? pageOffset + 1 : 0;
+    const pageEnd = Math.min(pageOffset + rows.length, rowCount);
+    const hasMultiplePages = rowCount > PREVIEW_PAGE_SIZE;
+    const canGoPrev = hasMultiplePages && pageOffset > 0;
+    const canGoNext = hasMultiplePages && pageOffset + PREVIEW_PAGE_SIZE < rowCount;
+    const complexity = summarizeFeatureComplexity(state.preview?.features ?? []);
+    const summaryText = state.preview?.kind === "tabular"
+      ? `${rowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns`
+      : `${rowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns | ${complexity.featureCount.toLocaleString()} features | ${complexity.vertexCount.toLocaleString()} vertices`;
+    const { head, body } = buildPreviewTableMarkup({
+      headers,
+      rows,
+      columnWidths: getPreviewColumnWidths(),
+      renamingColumn: state.renamingColumn ?? "",
+      renameDraft: state.renameDraft,
+      sortColumn: state.previewSortColumn,
+      sortDirection: state.previewSortDirection,
+    });
+
+    const el = html(`
+      <div class="clp-preview">
+        <label class="clp-field">
+          <span class="clp-field-label">Layer name</span>
+          <input class="clp-field-input clp-name-input" type="text" value="${escapeHtml(state.name)}" placeholder="Layer name" />
+        </label>
+        <div class="upload-field-row clp-metadata-row">
+          <label class="upload-field-label upload-field-label-tight">
+            <span>License</span>
+            <input class="clp-field-input" type="text" value="${escapeHtml(state.license)}" id="clpLicense" placeholder="CC BY" />
+          </label>
+          <label class="upload-field-label upload-field-label-tight">
+            <span>License link</span>
+            <input class="clp-field-input" type="text" value="${escapeHtml(state.licenseUrl)}" id="clpLicenseUrl" placeholder="https://..." />
+          </label>
+          <label class="upload-field-label upload-field-label-tight">
+            <span>Attribution</span>
+            <input class="clp-field-input" type="text" value="${escapeHtml(state.attribution)}" id="clpAttribution" placeholder="Source / credit" />
+          </label>
+        </div>
+        <h3 class="upload-step-title">${escapeHtml(state.file?.name ?? "Uploaded file")}</h3>
+        <div class="clp-preview-summary-row">
+          <p class="upload-step-sub">${escapeHtml(summaryText)}</p>
+          ${state.undoStack.length ? `<button class="clp-undo-icon" id="clpUndo" type="button" aria-label="Undo last preview change" title="Undo"><span aria-hidden="true">&#8630;</span></button>` : ""}
+        </div>
+        <div class="clp-table-wrap">
+          <table class="upload-preview">
+            <thead><tr>${head}</tr></thead>
+            <tbody>${body}</tbody>
+          </table>
+        </div>
+        <div class="clp-preview-controls">
+          <label class="upload-field-label upload-field-label-inline clp-preview-pmtiles">
+            <input type="checkbox" id="clpUsePmtiles" ${state.usePmtiles ? "checked" : ""} />
+            Generate PMTiles
+          </label>
+          <div class="clp-preview-pagination">
+            <span class="clp-preview-page-range">${escapeHtml(`${pageStart}-${pageEnd}`)}</span>
+            <button class="clp-undo-icon clp-preview-page-btn" id="clpPreviewPrev" type="button" aria-label="Previous preview rows" ${canGoPrev ? "" : "disabled"}><span aria-hidden="true">&#8249;</span></button>
+            <button class="clp-undo-icon clp-preview-page-btn" id="clpPreviewNext" type="button" aria-label="Next preview rows" ${canGoNext ? "" : "disabled"}><span aria-hidden="true">&#8250;</span></button>
+          </div>
+        </div>
+        <div class="clp-actions">
+          <button class="clp-btn clp-btn-secondary" id="clpBack">Back</button>
+          <button class="clp-btn clp-btn-primary" id="clpCreate">Create layer</button>
+        </div>
+        <p class="clp-error" ${state.error ? "" : "hidden"}>${escapeHtml(state.error)}</p>
+      </div>
+    `);
+
+    el.querySelector("#clpBack")?.addEventListener("click", () => {
+      state.step = "form";
+      state.error = "";
+      render();
+    });
+    el.querySelector(".clp-name-input")?.addEventListener("input", (event) => {
+      state.name = event.target.value;
+    });
+    el.querySelector("#clpLicense")?.addEventListener("input", (event) => {
+      state.license = event.target.value;
+    });
+    el.querySelector("#clpLicenseUrl")?.addEventListener("input", (event) => {
+      state.licenseUrl = event.target.value;
+    });
+    el.querySelector("#clpAttribution")?.addEventListener("input", (event) => {
+      state.attribution = event.target.value;
+    });
+    el.querySelector("#clpUsePmtiles")?.addEventListener("change", (event) => {
+      state.usePmtiles = event.target.checked;
+    });
+    el.querySelector("#clpPreviewPrev")?.addEventListener("click", () => {
+      state.previewPageOffset = Math.max(0, (state.previewPageOffset || 0) - PREVIEW_PAGE_SIZE);
+      syncPreviewPageRows();
+      render();
+    });
+    el.querySelector("#clpPreviewNext")?.addEventListener("click", () => {
+      state.previewPageOffset = (state.previewPageOffset || 0) + PREVIEW_PAGE_SIZE;
+      syncPreviewPageRows();
+      render();
+    });
+    el.querySelector("#clpUndo")?.addEventListener("click", undoPreviewChange);
+    bindPreviewTableInteractions(el, {
+      headers,
+      getHeaders: () => state.preview?.headers ?? [],
+      getColumnWidths: () => getPreviewColumnWidths(),
+      setColumnWidth: (columnIndex, columnName, width) => {
+        setPreviewColumnWidth(el, columnIndex, columnName, width);
+      },
+      reorderColumn: (columnName, targetIndex) => {
+        reorderPreviewColumn(columnName, targetIndex);
+      },
+      onSort: (columnName) => {
+        togglePreviewSort(columnName);
+      },
+      onStartRename: (columnName) => {
+        startRenameColumn(columnName);
+      },
+      onRenameDraftChange: (value) => {
+        state.renameDraft = value;
+      },
+      onRenameCommit: (fromColumnName, nextColumnName) => {
+        void renamePreviewColumn(fromColumnName, nextColumnName);
+      },
+      onRenameCancel: () => {
+        cancelRenameColumn();
+      },
+      onRemoveColumn: (columnName) => {
+        removePreviewColumn(columnName);
+      },
+      getScrollLeft: () => state.previewScrollLeft,
+      setScrollLeft: (scrollLeft) => {
+        state.previewScrollLeft = scrollLeft;
+      },
+      getScrollTop: () => state.previewScrollTop,
+      setScrollTop: (scrollTop) => {
+        state.previewScrollTop = scrollTop;
+      },
+      onResizeComplete: ({ columnName, previousWidth, nextWidth, startWidth, autoSized }) => {
+        if (Number.isFinite(nextWidth) && Math.round(nextWidth) !== Math.round(startWidth)) {
+          state.undoStack.push({
+            type: "resize_column",
+            columnName,
+            previousWidth,
+            nextWidth,
+          });
+          if (autoSized) {
+            render();
+          }
+        }
+      },
+      onReorderComplete: ({ previousOrder, nextOrder, dragging }) => {
+        if (dragging && previousOrder.some((header, index) => header !== nextOrder[index])) {
+          state.undoStack.push({
+            type: "reorder_columns",
+            previousOrder,
+            nextOrder: [...nextOrder],
+          });
+        }
+      },
+      requestRender: () => {
+        render();
+      },
+    });
+    el.querySelector("#clpCreate")?.addEventListener("click", () => {
+      void submitLayer();
+    });
+
+    return el;
+  }
+
   function renderPreview() {
     const headers = state.preview?.headers ?? [];
     const rows = state.preview?.rows ?? [];
@@ -1572,6 +1782,20 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
           <span class="clp-field-label">Layer name</span>
           <input class="clp-field-input clp-name-input" type="text" value="${escapeHtml(state.name)}" placeholder="Layer name" />
         </label>
+        <div class="upload-field-row clp-metadata-row">
+          <label class="upload-field-label upload-field-label-tight">
+            <span>License</span>
+            <input class="clp-field-input" type="text" value="${escapeHtml(state.license)}" id="clpLicense" placeholder="CC BY" />
+          </label>
+          <label class="upload-field-label upload-field-label-tight">
+            <span>License link</span>
+            <input class="clp-field-input" type="text" value="${escapeHtml(state.licenseUrl)}" id="clpLicenseUrl" placeholder="https://..." />
+          </label>
+          <label class="upload-field-label upload-field-label-tight">
+            <span>Attribution</span>
+            <input class="clp-field-input" type="text" value="${escapeHtml(state.attribution)}" id="clpAttribution" placeholder="Source / credit" />
+          </label>
+        </div>
         <h3 class="upload-step-title">${escapeHtml(state.file?.name ?? "Uploaded file")}</h3>
         <div class="clp-preview-summary-row">
           <p class="upload-step-sub">${escapeHtml(summaryText)}</p>
@@ -1609,6 +1833,15 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     });
     el.querySelector(".clp-name-input")?.addEventListener("input", (event) => {
       state.name = event.target.value;
+    });
+    el.querySelector("#clpLicense")?.addEventListener("input", (event) => {
+      state.license = event.target.value;
+    });
+    el.querySelector("#clpLicenseUrl")?.addEventListener("input", (event) => {
+      state.licenseUrl = event.target.value;
+    });
+    el.querySelector("#clpAttribution")?.addEventListener("input", (event) => {
+      state.attribution = event.target.value;
     });
     el.querySelector("#clpUsePmtiles")?.addEventListener("change", (event) => {
       state.usePmtiles = event.target.checked;

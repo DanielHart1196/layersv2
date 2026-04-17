@@ -252,12 +252,28 @@ async function uploadDatasetArtifact(
   return patch;
 }
 
-async function createDatasetRecord(supabase, { layerId, name, geometryType, fieldSchema }) {
+function normalizeDatasetMetadataValue(value) {
+  const trimmed = String(value ?? "").trim();
+  return trimmed || null;
+}
+
+async function createDatasetRecord(supabase, {
+  layerId,
+  name,
+  geometryType,
+  fieldSchema,
+  license,
+  licenseUrl,
+  attribution,
+}) {
   const { data, error } = await supabase
     .from("datasets")
     .insert({
       layer_id: layerId,
       name,
+      license: normalizeDatasetMetadataValue(license),
+      license_url: normalizeDatasetMetadataValue(licenseUrl),
+      attribution: normalizeDatasetMetadataValue(attribution),
       geometry_type: geometryType,
       field_schema: Array.isArray(fieldSchema) ? fieldSchema : [],
     })
@@ -296,6 +312,9 @@ async function updateLayerSummary(supabase, layerId, nextGeometryType) {
 export async function createLayerWithDataset({
   name,
   datasetName = "",
+  license = "",
+  licenseUrl = "",
+  attribution = "",
   viewAccess,
   features,
   fieldSchema = [],
@@ -344,6 +363,9 @@ export async function createLayerWithDataset({
     datasetId = await createDatasetRecord(supabase, {
       layerId,
       name: resolvedDatasetName,
+      license,
+      licenseUrl,
+      attribution,
       geometryType,
       fieldSchema,
     });
@@ -380,6 +402,9 @@ export async function createLayerWithDataset({
 export async function addDatasetToLayer({
   layerId,
   name = "",
+  license = "",
+  licenseUrl = "",
+  attribution = "",
   features,
   fieldSchema = [],
   rawFile,
@@ -422,6 +447,9 @@ export async function addDatasetToLayer({
     datasetId = await createDatasetRecord(supabase, {
       layerId,
       name: datasetName,
+      license,
+      licenseUrl,
+      attribution,
       geometryType,
       fieldSchema,
     });

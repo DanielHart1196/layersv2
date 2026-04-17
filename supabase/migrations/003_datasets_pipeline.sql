@@ -23,6 +23,9 @@ create table if not exists datasets (
   id                uuid        primary key default gen_random_uuid(),
   layer_id          uuid        not null references layers(id) on delete cascade,
   name              text        not null,
+  license           text,
+  license_url       text,
+  attribution       text,
   geometry_type     text        not null
                                 check (geometry_type in ('point', 'line', 'polygon', 'mixed')),
   field_schema      jsonb       not null default '[]',

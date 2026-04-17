@@ -1,6 +1,4 @@
 import { createLayerModel } from "../core/layer-model.js";
-import { mountUploadPanel } from "../upload/upload-panel.js";
-import { mountAddRowPanel } from "./add-row-panel.js";
 import { mountCreateLayerPanel } from "./create-layer-panel.js";
 import { mountDataTablePanel } from "./data-table-panel.js";
 import { getProjectionRegistry } from "../core/projection/projection-registry.js";
@@ -55,24 +53,22 @@ async function bootstrapApplication() {
   }
 
   const dataTablePanel = mountDataTablePanel({
-    async loadTablePreview(layerId, { limit, offset }) {
+    getAppearanceState: () => layerModel.getAppearanceState(),
+    async getLayerDatasets(layerId) {
+      const { getLayerDatasets } = await import("../sources/supabase/layer-loader.js");
+      return getLayerDatasets(layerId);
+    },
+    async loadTablePreview(layerId, { limit, offset, datasetId }) {
       const { getLayerTablePreview } = await import("../sources/supabase/layer-loader.js");
-      return getLayerTablePreview(layerId, { limit, offset });
+      return getLayerTablePreview(layerId, { limit, offset, datasetId });
     },
   });
   const rerenderLayerMenu = renderLayerMenuRows({
     panel: document.getElementById("layerMenuPanel"),
     layerModel,
-    onAddRow: ({ kind, depth, parentId, rowType }) => {
+    onAddRow: ({ kind, parentId }) => {
       if (kind === "open-add-panel") {
-        if (depth === 0) {
-          createLayerPanel.open({ parentId });
-        } else {
-          addRowPanel.open({ depth, parentId });
-        }
-      } else if (kind === "row") {
-        const added = layerModel.addRowToLayer(parentId, rowType);
-        if (added) rerenderLayerMenu();
+        createLayerPanel.open({ parentId });
       }
     },
     onRowInput: (row, nextValue) => {
@@ -147,30 +143,6 @@ async function bootstrapApplication() {
     clearCacheReloadButton: document.getElementById("clearCacheReloadButton"),
     onBeforeMenuOpen: () => layerMenuControls?.close?.(),
   });
-  const uploadPanel = mountUploadPanel({
-    onLayerCreated: async ({ layerId, name, parentId, geometryType }) => {
-      try {
-        const added = await addDataRowAndAttach({
-          parentId: parentId ?? layerModel.getRootParentId(),
-          name,
-          layerRef: layerId,
-          geometryType,
-          layerModel,
-          screenRuntime,
-        });
-        if (added) rerenderLayerMenu();
-      } catch (err) {
-        console.error("Failed to load uploaded layer onto map.", err);
-      }
-    },
-    onLayerUpdated: async ({ layerId }) => {
-      try {
-        await reloadSupabaseLayer(layerId, layerModel, screenRuntime);
-      } catch (err) {
-        console.error("Failed to refresh updated layer.", err);
-      }
-    },
-  });
   const createLayerPanel = mountCreateLayerPanel({
     getAppearanceState: () => layerModel.getAppearanceState(),
     onLayerCreated: async ({ layerId, name, parentId, geometryType }) => {
@@ -186,42 +158,6 @@ async function bootstrapApplication() {
         if (added) rerenderLayerMenu();
       } catch (err) {
         console.error("Failed to load uploaded layer onto map.", err);
-      }
-    },
-  });
-
-  const addRowPanel = mountAddRowPanel({
-    async onAddLayer({ parentId, name, layerRef, geometryType }) {
-      const added = await addDataRowAndAttach({
-        parentId,
-        name,
-        layerRef,
-        geometryType,
-        layerModel,
-        screenRuntime,
-      });
-      if (added) rerenderLayerMenu();
-    },
-    onAddRow({ parentId, rowType, config }) {
-      const added = layerModel.addRowToLayer(parentId, rowType, config);
-      if (added) rerenderLayerMenu();
-    },
-    onUploadRequested({ parentId, name, file }) {
-      uploadPanel.open({ parentId, name, file });
-    },
-    async getFieldsForParent(parentId) {
-      const row = layerModel.getRowById(parentId);
-      if (!row?.layerRef) return null;
-      return loadLayerFields(row.layerRef);
-    },
-    async getValuesForParentField(parentId, field) {
-      const row = layerModel.getRowById(parentId);
-      if (!row?.layerRef || !SUPABASE_UUID.test(row.layerRef)) return null;
-      try {
-        const { getLayerFieldValues } = await import("../sources/supabase/layer-loader.js");
-        return await getLayerFieldValues(row.layerRef, field);
-      } catch {
-        return null;
       }
     },
   });

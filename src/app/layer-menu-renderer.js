@@ -28,6 +28,7 @@ const DEFAULT_SCREEN_BACKGROUND = {
   opacity: 100,
 };
 const LAYER_MENU_VIEWPORT_MARGIN = 12;
+const OCEAN_LEGEND_RADIUS_PX = 9.2;
 
 function normalizeHexColor(value) {
   const normalized = String(value ?? "").trim().replace(/^#*/, "");
@@ -489,13 +490,33 @@ function getLayerLegendChildState(childRows, runtimeTargetId, layerModel, appear
 
 function getLayerLegendSpec(definition, state, layerModel, appearanceState) {
   const geometryType = normalizeLegendGeometryType(definition?.geometryType);
-  if (geometryType === "mixed" || !definition?.id) {
+  if (!definition?.id) {
     return null;
   }
 
   const runtimeLayerId = getLayerLegendRuntimeId(definition, state);
   const childRows = layerModel.getChildRows(definition.id);
   if (!runtimeLayerId || !childRows.length) {
+    return null;
+  }
+
+  if (definition.id === "ocean") {
+    const fillState = getLayerLegendChildState(childRows, `${runtimeLayerId}::fill`, layerModel, appearanceState);
+    if (!fillState) {
+      return null;
+    }
+    return {
+      kind: "point",
+      fillColor: fillState.value?.color ?? "#FFFFFF",
+      fillOpacity: fillState.visible ? fillState.value.opacity : 0,
+      radius: OCEAN_LEGEND_RADIUS_PX,
+      strokeColor: "#FFFFFF",
+      strokeOpacity: 0,
+      strokeWeight: 0,
+    };
+  }
+
+  if (geometryType === "mixed") {
     return null;
   }
 
@@ -518,6 +539,7 @@ function getLayerLegendSpec(definition, state, layerModel, appearanceState) {
     if (!fillState && !lineState) {
       return null;
     }
+
     return {
       kind: "polygon",
       fillColor: fillState?.value?.color ?? "#FFFFFF",
@@ -1749,15 +1771,9 @@ function renderLayerMenuRows({
       );
     }
 
-    const rootRows = reorderApi.getOrderedRows(layerModel.getRootParentId());
-    const orderedRootRows = [
-      ...rootRows.filter((row) => row?.id !== "earth"),
-      ...rootRows.filter((row) => row?.id === "earth"),
-    ];
-
     scrollRegion.append(
       buildRows(
-        orderedRootRows,
+        reorderApi.getOrderedRows(layerModel.getRootParentId()),
         layerModel,
         onToggleExpanded,
         onToggleVisibility,

@@ -618,29 +618,16 @@ function getDefaultChildOrder(parentId) {
   return getDefinitionChildOrder(STATIC_ROW_DEFINITION_INDEX, parentId);
 }
 
-// Ordering rules:
-// - Earth group: always pinned to the bottom of the render stack, regardless
-//   of its position in the UI. Processed first so everything else is on top.
-// - Ocean (within Earth): always pinned to the bottom within Earth. Processed
-//   first within the earth pass so it ends at the very bottom.
-// - Everything else derives from the shared row tree rather than hard-coded
-//   bundle groups. Higher in the UI = higher z-index = renders on top, so we
-//   iterate bottom-to-top and move leaf runtime targets recursively.
+// Ordering rule:
+// - Normalized shared row order is the source of truth, including pinned rows.
+// - Higher in the menu = higher in the render pile.
+// - MapLibre moveLayer needs bottom-to-top traversal, so we iterate sibling
+//   rows in reverse and recurse generically through the row tree.
 function applyFullLayerOrder(map, layerState) {
   const moveLayer = (id) => { if (map.getLayer(id)) map.moveLayer(id, undefined); };
   const rootOrder = getOrderedChildLayerRowIds(layerState, ROOT_PARENT_ID, ROOT_ROW_IDS);
 
-  // Earth: always bottom — process first. Ocean: always bottom within earth.
-  const earthChildOrder = getOrderedChildLayerRowIds(layerState, "earth", getDefaultChildOrder("earth"));
-  const nonOceanEarth = earthChildOrder.filter((id) => id !== "ocean");
-  moveRowSubtree(map, layerState, "ocean", moveLayer);
-  for (const childId of [...nonOceanEarth].reverse()) {
-    moveRowSubtree(map, layerState, childId, moveLayer);
-  }
-
-  // All other top-level rows follow the shared row tree.
-  const nonEarthGroups = rootOrder.filter((id) => id !== "earth");
-  for (const groupId of [...nonEarthGroups].reverse()) {
+  for (const groupId of [...rootOrder].reverse()) {
     moveRowSubtree(map, layerState, groupId, moveLayer);
   }
 }

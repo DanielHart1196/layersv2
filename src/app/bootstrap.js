@@ -149,6 +149,11 @@ async function bootstrapApplication() {
     appearanceButton: document.getElementById("layerMenuAppearanceButton"),
     screenButton: document.getElementById("layerMenuScreenButton"),
     rerenderLayerMenu,
+    onMobileMenuClosed: () => {
+      if (collapseExpandedLayerRows(layerModel)) {
+        rerenderLayerMenu();
+      }
+    },
   });
   enableRefreshControls({
     wrapper: document.getElementById("mobileRefresh"),
@@ -325,6 +330,27 @@ function findRowByRuntimeTargetId(layerModel, runtimeTargetId) {
   }
 
   return null;
+}
+
+function collapseExpandedLayerRows(layerModel, parentId = layerModel.getRootParentId()) {
+  let changed = false;
+
+  layerModel.getChildRows(parentId).forEach((row) => {
+    if (!row || row.type !== "layer") {
+      return;
+    }
+
+    if (layerModel.isExpanded(row.id)) {
+      layerModel.toggleExpanded(row.id);
+      changed = true;
+    }
+
+    if (collapseExpandedLayerRows(layerModel, row.id)) {
+      changed = true;
+    }
+  });
+
+  return changed;
 }
 
 async function addDataRowAndAttach({ parentId, name, layerRef, geometryType, layerModel, screenRuntime }) {

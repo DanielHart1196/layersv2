@@ -198,13 +198,13 @@ function createLayerDefinitions() {
       label: "Earth",
       layerId: "earth",
       defaultExpanded: true,
-      pinnedOrder: "start",
+      pinnedOrder: "end",
       rows: [
         createDataRow({
           id: "ocean",
           label: "Ocean",
           layerId: "ocean",
-          pinnedOrder: "start",
+          pinnedOrder: "end",
           rows: [
             createStyleRow({
               type: "fill",

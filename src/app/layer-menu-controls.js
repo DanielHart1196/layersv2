@@ -154,6 +154,7 @@ function enableLayerMenuControls({
   appearanceButton,
   screenButton,
   rerenderLayerMenu,
+  onMobileMenuClosed,
 }) {
   if (!wrapper || !button || !panel) {
     return;
@@ -226,6 +227,9 @@ function enableLayerMenuControls({
     }
     closeAppearanceRows(panel, appearanceControls, rerenderLayerMenu);
     setLayerMenuOpen(wrapper, panel, button, false);
+    if (!draggableMenuMediaQuery.matches) {
+      onMobileMenuClosed?.();
+    }
   }
 
   function handleDragMove(event) {
@@ -299,13 +303,14 @@ function enableLayerMenuControls({
     syncLayerMenuMaxHeight(wrapper, panel, button);
     const nextOpen = !panel.classList.contains("is-open");
     if (!nextOpen) {
-      closeAppearanceRows(panel, appearanceControls, rerenderLayerMenu);
-    }
-    setLayerMenuOpen(wrapper, panel, button, nextOpen);
-    if (!draggableMenuMediaQuery.matches) {
-      wrapper.style.left = "";
-      wrapper.style.right = "";
-      wrapper.style.top = "";
+      closeLayerMenu();
+    } else {
+      setLayerMenuOpen(wrapper, panel, button, true);
+      if (!draggableMenuMediaQuery.matches) {
+        wrapper.style.left = "";
+        wrapper.style.right = "";
+        wrapper.style.top = "";
+      }
     }
   });
 

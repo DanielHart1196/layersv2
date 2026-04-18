@@ -1178,6 +1178,10 @@ body.is-reordering-rows {
 }
 
 @media (hover: none), (pointer: coarse) {
+  .layer-menu-panel {
+    min-width: 220px;
+  }
+
   .layer-menu.is-open .layer-menu-button,
   .layer-menu.is-open .layer-menu-appearance-button {
     opacity: 1;

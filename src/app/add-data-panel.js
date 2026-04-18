@@ -16,6 +16,16 @@ const PREVIEW_PAGE_SIZE = 50;
 
 const ADD_DATA_MODE_NEW = "new";
 const ADD_DATA_MODE_EXISTING = "existing";
+const LICENSE_PRESETS = [
+  { id: "", label: "Select license", license: "", licenseUrl: "" },
+  { id: "none", label: "None", license: "", licenseUrl: "" },
+  { id: "cc-by-4", label: "CC BY 4.0", license: "CC BY 4.0", licenseUrl: "https://creativecommons.org/licenses/by/4.0/" },
+  { id: "cc-by-sa-4", label: "CC BY-SA 4.0", license: "CC BY-SA 4.0", licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/" },
+  { id: "cc0-1", label: "CC0 1.0", license: "CC0 1.0", licenseUrl: "https://creativecommons.org/publicdomain/zero/1.0/" },
+  { id: "odbl-1", label: "ODbL 1.0", license: "ODbL 1.0", licenseUrl: "https://opendatacommons.org/licenses/odbl/1-0/" },
+  { id: "pddl-1", label: "PDDL 1.0", license: "PDDL 1.0", licenseUrl: "https://opendatacommons.org/licenses/pddl/1-0/" },
+  { id: "custom", label: "Custom", license: null, licenseUrl: null },
+];
 
 function normalizeHexColor(value, fallback = "#122330") {
   const normalized = String(value ?? "").trim().replace(/^#*/, "");
@@ -75,6 +85,69 @@ function inferGeometryType(features = []) {
 function looksLikeHttpUrl(value) {
   const trimmed = String(value ?? "").trim();
   return trimmed === "" || /^https?:\/\/\S+$/i.test(trimmed);
+}
+
+function getSelectedLicensePresetId(license, licenseUrl) {
+  const normalizedLicense = String(license ?? "").trim();
+  const normalizedLicenseUrl = String(licenseUrl ?? "").trim();
+  const matchingPreset = LICENSE_PRESETS.find((preset) => (
+    preset.id !== "custom"
+    && preset.license === normalizedLicense
+    && preset.licenseUrl === normalizedLicenseUrl
+  ));
+  return matchingPreset?.id ?? "custom";
+}
+
+function renderLicenseMetadataFields(state) {
+  const selectedPresetId = getSelectedLicensePresetId(state.license, state.licenseUrl);
+  return `
+    <div class="upload-field-row clp-metadata-row">
+      <label class="upload-field-label upload-field-label-tight">
+        <span>License preset</span>
+        <select class="clp-field-input" id="clpLicensePreset">
+          ${LICENSE_PRESETS.map((preset) => `
+            <option value="${escapeHtml(preset.id)}" ${preset.id === selectedPresetId ? "selected" : ""}>
+              ${escapeHtml(preset.label)}
+            </option>
+          `).join("")}
+        </select>
+      </label>
+      <label class="upload-field-label upload-field-label-tight">
+        <span>License</span>
+        <input class="clp-field-input" type="text" value="${escapeHtml(state.license)}" id="clpLicense" placeholder="CC BY" />
+      </label>
+      <label class="upload-field-label upload-field-label-tight">
+        <span>License link</span>
+        <input class="clp-field-input" type="text" value="${escapeHtml(state.licenseUrl)}" id="clpLicenseUrl" placeholder="https://..." />
+      </label>
+      <label class="upload-field-label upload-field-label-tight">
+        <span>Attribution</span>
+        <input class="clp-field-input" type="text" value="${escapeHtml(state.attribution)}" id="clpAttribution" placeholder="Source / credit" />
+      </label>
+    </div>
+  `;
+}
+
+function bindLicenseMetadataFields(root, state, requestRender = null) {
+  root.querySelector("#clpLicensePreset")?.addEventListener("change", (event) => {
+    const presetId = event.target.value ?? "";
+    const preset = LICENSE_PRESETS.find((candidate) => candidate.id === presetId);
+    if (!preset || preset.id === "custom") {
+      return;
+    }
+    state.license = preset.license ?? "";
+    state.licenseUrl = preset.licenseUrl ?? "";
+    requestRender?.();
+  });
+  root.querySelector("#clpLicense")?.addEventListener("input", (event) => {
+    state.license = event.target.value;
+  });
+  root.querySelector("#clpLicenseUrl")?.addEventListener("input", (event) => {
+    state.licenseUrl = event.target.value;
+  });
+  root.querySelector("#clpAttribution")?.addEventListener("input", (event) => {
+    state.attribution = event.target.value;
+  });
 }
 
 function flattenPreviewProperties(value, prefix = "", out = {}) {
@@ -1691,20 +1764,7 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
           <span class="clp-field-label">Dataset name</span>
           <input class="clp-field-input clp-name-input" type="text" value="${escapeHtml(state.datasetName)}" placeholder="Dataset name" />
         </label>
-        <div class="upload-field-row clp-metadata-row">
-          <label class="upload-field-label upload-field-label-tight">
-            <span>License</span>
-            <input class="clp-field-input" type="text" value="${escapeHtml(state.license)}" id="clpLicense" placeholder="CC BY" />
-          </label>
-          <label class="upload-field-label upload-field-label-tight">
-            <span>License link</span>
-            <input class="clp-field-input" type="text" value="${escapeHtml(state.licenseUrl)}" id="clpLicenseUrl" placeholder="https://..." />
-          </label>
-          <label class="upload-field-label upload-field-label-tight">
-            <span>Attribution</span>
-            <input class="clp-field-input" type="text" value="${escapeHtml(state.attribution)}" id="clpAttribution" placeholder="Source / credit" />
-          </label>
-        </div>
+        ${renderLicenseMetadataFields(state)}
         <h3 class="upload-step-title">${escapeHtml(state.file?.name ?? "Uploaded file")}</h3>
         <div class="clp-preview-summary-row">
           <p class="upload-step-sub">${escapeHtml(summaryText)}</p>
@@ -1743,15 +1803,7 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
     el.querySelector(".clp-name-input")?.addEventListener("input", (event) => {
       state.datasetName = event.target.value;
     });
-    el.querySelector("#clpLicense")?.addEventListener("input", (event) => {
-      state.license = event.target.value;
-    });
-    el.querySelector("#clpLicenseUrl")?.addEventListener("input", (event) => {
-      state.licenseUrl = event.target.value;
-    });
-    el.querySelector("#clpAttribution")?.addEventListener("input", (event) => {
-      state.attribution = event.target.value;
-    });
+    bindLicenseMetadataFields(el, state, render);
     el.querySelector("#clpUsePmtiles")?.addEventListener("change", (event) => {
       state.usePmtiles = event.target.checked;
     });
@@ -1897,20 +1949,7 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
           <span class="clp-field-label">Layer name</span>
           <input class="clp-field-input clp-name-input" type="text" value="${escapeHtml(state.name)}" placeholder="Layer name" />
         </label>
-        <div class="upload-field-row clp-metadata-row">
-          <label class="upload-field-label upload-field-label-tight">
-            <span>License</span>
-            <input class="clp-field-input" type="text" value="${escapeHtml(state.license)}" id="clpLicense" placeholder="CC BY" />
-          </label>
-          <label class="upload-field-label upload-field-label-tight">
-            <span>License link</span>
-            <input class="clp-field-input" type="text" value="${escapeHtml(state.licenseUrl)}" id="clpLicenseUrl" placeholder="https://..." />
-          </label>
-          <label class="upload-field-label upload-field-label-tight">
-            <span>Attribution</span>
-            <input class="clp-field-input" type="text" value="${escapeHtml(state.attribution)}" id="clpAttribution" placeholder="Source / credit" />
-          </label>
-        </div>
+        ${renderLicenseMetadataFields(state)}
         <h3 class="upload-step-title">${escapeHtml(state.file?.name ?? "Uploaded file")}</h3>
         <div class="clp-preview-summary-row">
           <p class="upload-step-sub">${escapeHtml(summaryText)}</p>
@@ -1949,15 +1988,7 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
     el.querySelector(".clp-name-input")?.addEventListener("input", (event) => {
       state.name = event.target.value;
     });
-    el.querySelector("#clpLicense")?.addEventListener("input", (event) => {
-      state.license = event.target.value;
-    });
-    el.querySelector("#clpLicenseUrl")?.addEventListener("input", (event) => {
-      state.licenseUrl = event.target.value;
-    });
-    el.querySelector("#clpAttribution")?.addEventListener("input", (event) => {
-      state.attribution = event.target.value;
-    });
+    bindLicenseMetadataFields(el, state, render);
     el.querySelector("#clpUsePmtiles")?.addEventListener("change", (event) => {
       state.usePmtiles = event.target.checked;
     });

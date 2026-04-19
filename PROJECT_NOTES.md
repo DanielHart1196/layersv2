@@ -93,6 +93,7 @@
 - If a new repeated pitfall or architecture rule becomes clear, add it here.
 - When browser caching is plausible, verify the browser is running the intended code before trusting a diagnosis.
 - During diagnosis/debugging turns, do not make code changes unless the user explicitly asks to implement a fix; analysis, inspection, and explanation are not implicit permission to patch.
+- Temporary on-screen debug overlays should keep a persistent minimize/restore control in the top-left corner so the overlay can be hidden without removing the instrumentation.
 
 ## Shared Row Model
 - Atlas layer panel behavior should come from one shared row system.

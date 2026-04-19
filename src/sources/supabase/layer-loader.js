@@ -1,5 +1,18 @@
 import { requireSupabase } from "../../lib/supabase.js";
 
+function normalizeGeometryTypes(geometryTypes = [], geometryType = "mixed") {
+  const source = Array.isArray(geometryTypes) && geometryTypes.length
+    ? geometryTypes
+    : [geometryType];
+  const normalized = source.map((value) => {
+    if (value === "point") return "point";
+    if (value === "line") return "line";
+    if (value === "polygon" || value === "area") return "polygon";
+    return null;
+  }).filter(Boolean);
+  return ["point", "line", "polygon"].filter((family) => normalized.includes(family));
+}
+
 function isMissingLayerError(error) {
   const message = String(error?.message ?? "").toLowerCase();
   return error?.code === "PGRST116"
@@ -31,11 +44,71 @@ function mergeSchemaFields(datasetRows) {
   return { fields, seenKeys };
 }
 
+function buildTablePreviewFromDatasetsAndRows(datasets, rows, { limit = 50, offset = 0, datasetId = "" } = {}) {
+  const safeLimit = Math.max(1, Math.min(200, Number(limit) || 50));
+  const safeOffset = Math.max(0, Number(offset) || 0);
+  const scopedDatasets = datasetId
+    ? datasets.filter((dataset) => dataset.id === datasetId)
+    : datasets;
+  const datasetIds = new Set(scopedDatasets.map((dataset) => dataset.id));
+  const totalRowCount = scopedDatasets.reduce((sum, dataset) => sum + Math.max(0, Number(dataset?.feature_count) || 0), 0);
+
+  if (!scopedDatasets.length) {
+    return {
+      offset: safeOffset,
+      limit: safeLimit,
+      rows: [],
+      fields: [],
+      totalRowCount: 0,
+      hasMore: false,
+    };
+  }
+
+  const filteredRows = datasetIds.size
+    ? rows.filter((row) => {
+      if (!datasetId) {
+        return true;
+      }
+      return row?.dataset_id === datasetId
+        || row?.properties?.dataset_id === datasetId
+        || row?.properties?._dataset_id === datasetId;
+    })
+    : [];
+  const pagedRows = filteredRows.slice(safeOffset, safeOffset + safeLimit);
+  const { fields, seenKeys } = mergeSchemaFields(scopedDatasets);
+  const finalFields = [...fields];
+
+  pagedRows.forEach((row) => {
+    if (row?.properties && typeof row.properties === "object") {
+      Object.keys(row.properties).forEach((key) => {
+        if (!String(key).startsWith("_") && !seenKeys.has(key)) {
+          finalFields.push({
+            key,
+            label: key,
+            type: "text",
+            source: "property",
+          });
+          seenKeys.add(key);
+        }
+      });
+    }
+  });
+
+  return {
+    offset: safeOffset,
+    limit: safeLimit,
+    rows: pagedRows,
+    fields: finalFields,
+    totalRowCount: totalRowCount || filteredRows.length,
+    hasMore: safeOffset + pagedRows.length < (totalRowCount || filteredRows.length),
+  };
+}
+
 async function loadLayerDatasets(layerId) {
   const supabase = requireSupabase();
   const { data, error } = await supabase
     .from("datasets")
-    .select("id, layer_id, name, license, license_url, attribution, geometry_type, field_schema, render_format, artifact_url, feature_count, created_at")
+    .select("id, layer_id, name, license, license_url, attribution, geometry_type, geometry_types, field_schema, render_format, artifact_url, feature_count, created_at")
     .eq("layer_id", layerId)
     .order("created_at", { ascending: true });
 
@@ -72,7 +145,7 @@ export async function getSupabaseCatalog() {
   const supabase = requireSupabase();
   const { data, error } = await supabase
     .from("layers")
-    .select("id, name, geometry_type")
+    .select("id, name, geometry_type, geometry_types")
     .in("view_access", ["public", "unlisted"])
     .order("name");
 
@@ -82,6 +155,7 @@ export async function getSupabaseCatalog() {
     id: layer.id,
     label: layer.name,
     group: "Uploaded layers",
+    geometryTypes: normalizeGeometryTypes(layer.geometry_types, layer.geometry_type ?? "mixed"),
     geometryType: layer.geometry_type ?? "mixed",
   }));
 }
@@ -220,6 +294,24 @@ export async function getLayerTablePreview(layerId, { limit = 50, offset = 0, da
   };
 }
 
+export function getLayerTablePreviewFromLoadedData(loadedLayer, { limit = 50, offset = 0, datasetId = "" } = {}) {
+  const datasets = Array.isArray(loadedLayer?.datasets) ? loadedLayer.datasets : [];
+  const features = Array.isArray(loadedLayer?.geojson?.features) ? loadedLayer.geojson.features : [];
+  if (!datasets.length || !features.length) {
+    return null;
+  }
+
+  const rows = features.map((feature, index) => ({
+    id: feature?.id ?? feature?.properties?.id ?? `cached-${index}`,
+    dataset_id: feature?.properties?.dataset_id ?? feature?.properties?._dataset_id ?? "",
+    properties: feature?.properties && typeof feature.properties === "object" ? feature.properties : {},
+    valid_from: feature?.properties?.valid_from ?? "",
+    valid_to: feature?.properties?.valid_to ?? "",
+  }));
+
+  return buildTablePreviewFromDatasetsAndRows(datasets, rows, { limit, offset, datasetId });
+}
+
 const MAX_GEOJSON_FEATURES = 10_000;
 
 async function loadGeojsonArtifact(url) {
@@ -234,7 +326,7 @@ export async function loadLayerFromSupabase(layerId) {
   const supabase = requireSupabase();
   const { data: layer, error: layerError } = await supabase
     .from("layers")
-    .select("id, name, geometry_type, default_style, feature_count")
+    .select("id, name, geometry_type, geometry_types, default_style, feature_count")
     .eq("id", layerId)
     .single();
 
@@ -250,12 +342,28 @@ export async function loadLayerFromSupabase(layerId) {
   if (datasets.length === 1) {
     const [dataset] = datasets;
     if (dataset?.render_format === "pmtiles" && dataset?.artifact_url) {
-      return { layer, datasets, geojson: null, tilesUrl: dataset.artifact_url };
+      return {
+        layer: {
+          ...layer,
+          geometryTypes: normalizeGeometryTypes(layer.geometry_types, layer.geometry_type ?? "mixed"),
+        },
+        datasets,
+        geojson: null,
+        tilesUrl: dataset.artifact_url,
+      };
     }
 
     if (dataset?.render_format === "geojson" && dataset?.artifact_url) {
       const geojson = await loadGeojsonArtifact(dataset.artifact_url);
-      return { layer, datasets, geojson, tilesUrl: null };
+      return {
+        layer: {
+          ...layer,
+          geometryTypes: normalizeGeometryTypes(layer.geometry_types, layer.geometry_type ?? "mixed"),
+        },
+        datasets,
+        geojson,
+        tilesUrl: null,
+      };
     }
   }
 
@@ -265,11 +373,27 @@ export async function loadLayerFromSupabase(layerId) {
 
   if ((layer.feature_count ?? 0) > MAX_GEOJSON_FEATURES) {
     console.warn(`Layer has ${layer.feature_count} features - too large to load as GeoJSON. Re-upload with tile generation enabled.`);
-    return { layer, datasets, geojson: null, tilesUrl: null };
+    return {
+      layer: {
+        ...layer,
+        geometryTypes: normalizeGeometryTypes(layer.geometry_types, layer.geometry_type ?? "mixed"),
+      },
+      datasets,
+      geojson: null,
+      tilesUrl: null,
+    };
   }
 
   const { data: geojson, error: geojsonError } = await supabase.rpc("get_layer_geojson", { p_layer_id: layerId });
   if (geojsonError) throw new Error(`Failed to load features: ${geojsonError.message}`);
 
-  return { layer, datasets, geojson, tilesUrl: null };
+  return {
+    layer: {
+      ...layer,
+      geometryTypes: normalizeGeometryTypes(layer.geometry_types, layer.geometry_type ?? "mixed"),
+    },
+    datasets,
+    geojson,
+    tilesUrl: null,
+  };
 }

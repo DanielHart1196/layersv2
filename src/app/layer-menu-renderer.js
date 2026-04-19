@@ -467,6 +467,14 @@ function normalizeLegendGeometryType(geometryType) {
   return "mixed";
 }
 
+function normalizeLegendGeometryTypes(geometryTypes = [], geometryType = "mixed") {
+  const source = Array.isArray(geometryTypes) && geometryTypes.length
+    ? geometryTypes
+    : [geometryType];
+  const normalized = source.map((value) => normalizeLegendGeometryType(value)).filter((value) => value !== "mixed");
+  return ["point", "line", "polygon"].filter((family) => normalized.includes(family));
+}
+
 function getLayerLegendRuntimeId(definition, state) {
   return state?.runtimeTargetId
     ?? definition.runtimeLayerId
@@ -490,6 +498,7 @@ function getLayerLegendChildState(childRows, runtimeTargetId, layerModel, appear
 
 function getLayerLegendSpec(definition, state, layerModel, appearanceState) {
   const geometryType = normalizeLegendGeometryType(definition?.geometryType);
+  const geometryTypes = normalizeLegendGeometryTypes(definition?.geometryTypes, definition?.geometryType);
   if (!definition?.id) {
     return null;
   }
@@ -513,6 +522,63 @@ function getLayerLegendSpec(definition, state, layerModel, appearanceState) {
       strokeColor: "#FFFFFF",
       strokeOpacity: 0,
       strokeWeight: 0,
+    };
+  }
+
+  if (geometryTypes.length > 1) {
+    const items = [];
+
+    if (geometryTypes.includes("polygon")) {
+      const fillState = getLayerLegendChildState(childRows, `${runtimeLayerId}::fill`, layerModel, appearanceState);
+      const lineState = getLayerLegendChildState(childRows, `${runtimeLayerId}::line`, layerModel, appearanceState);
+      if (fillState || lineState) {
+        items.push({
+          kind: "polygon",
+          fillColor: fillState?.value?.color ?? "#FFFFFF",
+          fillOpacity: fillState?.visible ? fillState.value.opacity : 0,
+          lineColor: lineState?.value?.color ?? "#FFFFFF",
+          lineOpacity: lineState?.visible ? lineState.value.opacity : 0,
+          lineWeight: lineState?.visible ? lineState.value.weight : 0,
+          drawOrder: ["fill", "line"],
+        });
+      }
+    }
+
+    if (geometryTypes.includes("line")) {
+      const lineState = getLayerLegendChildState(childRows, `${runtimeLayerId}::line`, layerModel, appearanceState);
+      if (lineState?.value) {
+        items.push({
+          kind: "line",
+          color: lineState.value.color,
+          opacity: lineState.visible ? lineState.value.opacity : 0,
+          weight: lineState.visible ? lineState.value.weight : 0,
+        });
+      }
+    }
+
+    if (geometryTypes.includes("point")) {
+      const fillState = getLayerLegendChildState(childRows, `${runtimeLayerId}::point-fill`, layerModel, appearanceState);
+      const strokeState = getLayerLegendChildState(childRows, `${runtimeLayerId}::point-stroke`, layerModel, appearanceState);
+      if (fillState || strokeState) {
+        items.push({
+          kind: "point",
+          fillColor: fillState?.value?.color ?? "#FFFFFF",
+          fillOpacity: fillState?.visible ? fillState.value.opacity : 0,
+          radius: Number(fillState?.value?.radius ?? 0),
+          strokeColor: strokeState?.value?.color ?? "#FFFFFF",
+          strokeOpacity: strokeState?.visible ? strokeState.value.opacity : 0,
+          strokeWeight: strokeState?.visible ? strokeState.value.weight : 0,
+        });
+      }
+    }
+
+    if (!items.length) {
+      return null;
+    }
+
+    return {
+      kind: "composite",
+      items,
     };
   }
 
@@ -605,6 +671,76 @@ function createLayerLegendSwatch(spec) {
     return swatch;
   }
 
+  if (spec.kind === "composite") {
+    const items = Array.isArray(spec.items) ? spec.items : [];
+    const slots = [
+      { x: 7, width: 10, cx: 12 },
+      { x: 16, width: 10, cx: 21 },
+      { x: 25, width: 10, cx: 30 },
+    ];
+
+    items.slice(0, slots.length).forEach((item, index) => {
+      const slot = slots[index];
+      if (item.kind === "polygon") {
+        const fillRect = createSvgElement("rect");
+        fillRect.setAttribute("x", String(slot.x));
+        fillRect.setAttribute("y", "4");
+        fillRect.setAttribute("width", String(slot.width));
+        fillRect.setAttribute("height", "10");
+        fillRect.setAttribute("rx", "1.5");
+        fillRect.setAttribute("ry", "1.5");
+        fillRect.setAttribute("fill", normalizeHexColor(item.fillColor) ?? "#FFFFFF");
+        fillRect.setAttribute("fill-opacity", String(Math.max(0, Math.min(1, (Number(item.fillOpacity) || 0) / 100))));
+        fillRect.setAttribute("stroke", normalizeHexColor(item.lineColor) ?? "#FFFFFF");
+        fillRect.setAttribute("stroke-opacity", String(Math.max(0, Math.min(1, (Number(item.lineOpacity) || 0) / 100))));
+        fillRect.setAttribute("stroke-width", String(Math.max(0, Number(item.lineWeight) || 0)));
+        svg.append(fillRect);
+        return;
+      }
+
+      if (item.kind === "line") {
+        const line = createSvgElement("line");
+        line.setAttribute("x1", String(slot.x));
+        line.setAttribute("y1", "9");
+        line.setAttribute("x2", String(slot.x + slot.width));
+        line.setAttribute("y2", "9");
+        line.setAttribute("stroke", normalizeHexColor(item.color) ?? "#FFFFFF");
+        line.setAttribute("stroke-opacity", String(Math.max(0, Math.min(1, (Number(item.opacity) || 0) / 100))));
+        line.setAttribute("stroke-width", String(Math.max(0, Number(item.weight) || 0)));
+        line.setAttribute("stroke-linecap", "round");
+        svg.append(line);
+        return;
+      }
+
+      if (item.kind === "point") {
+        const fillRadius = Math.max(0, Math.min(4.5, Number(item.radius) || 0));
+        const strokeWidth = Math.max(0, Math.min(3, Number(item.strokeWeight) || 0));
+        if (strokeWidth > 0) {
+          const strokeRing = createSvgElement("circle");
+          strokeRing.setAttribute("cx", String(slot.cx));
+          strokeRing.setAttribute("cy", "9");
+          strokeRing.setAttribute("r", String(fillRadius + strokeWidth / 2));
+          strokeRing.setAttribute("fill", "none");
+          strokeRing.setAttribute("stroke", normalizeHexColor(item.strokeColor) ?? "#FFFFFF");
+          strokeRing.setAttribute("stroke-opacity", String(Math.max(0, Math.min(1, (Number(item.strokeOpacity) || 0) / 100))));
+          strokeRing.setAttribute("stroke-width", String(strokeWidth));
+          svg.append(strokeRing);
+        }
+
+        const fillDot = createSvgElement("circle");
+        fillDot.setAttribute("cx", String(slot.cx));
+        fillDot.setAttribute("cy", "9");
+        fillDot.setAttribute("r", String(fillRadius));
+        fillDot.setAttribute("fill", normalizeHexColor(item.fillColor) ?? "#FFFFFF");
+        fillDot.setAttribute("fill-opacity", String(Math.max(0, Math.min(1, (Number(item.fillOpacity) || 0) / 100))));
+        svg.append(fillDot);
+      }
+    });
+
+    swatch.append(svg);
+    return swatch;
+  }
+
   if (spec.kind === "polygon") {
     const strokeWidth = Math.max(0, Number(spec.lineWeight) || 0);
     const x = "8";
@@ -674,7 +810,33 @@ function createLayerLegendSwatch(spec) {
   return null;
 }
 
-function updateLayerLegendSwatch(rowElement, legendSpec) {
+function wireLayerLegendToggle(legend, state, expandStateKey, onToggleExpanded, { enabled = true } = {}) {
+  if (!legend || !enabled || !expandStateKey || typeof onToggleExpanded !== "function") {
+    return legend;
+  }
+
+  legend.style.cursor = "pointer";
+  legend.setAttribute("role", "button");
+  legend.setAttribute("tabindex", "0");
+  legend.setAttribute("aria-label", state?.expanded ? "Hide style rows" : "Show style rows");
+
+  const toggleStyleRows = (event) => {
+    event?.stopPropagation?.();
+    onToggleExpanded(expandStateKey);
+  };
+
+  legend.addEventListener("click", toggleStyleRows);
+  legend.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      toggleStyleRows(event);
+    }
+  });
+
+  return legend;
+}
+
+function updateLayerLegendSwatch(rowElement, legendSpec, { state = null, expandStateKey = null, onToggleExpanded = null, toggleEnabled = false } = {}) {
   if (!rowElement) {
     return;
   }
@@ -691,6 +853,8 @@ function updateLayerLegendSwatch(rowElement, legendSpec) {
     existingLegend?.remove();
     return;
   }
+
+  wireLayerLegendToggle(nextLegend, state, expandStateKey, onToggleExpanded, { enabled: toggleEnabled });
 
   if (existingLegend) {
     existingLegend.replaceWith(nextLegend);
@@ -807,21 +971,7 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
   }
 
   if (!isEarthParent && hasStyleChildren && legend) {
-    legend.style.cursor = "pointer";
-    legend.setAttribute("role", "button");
-    legend.setAttribute("tabindex", "0");
-    legend.setAttribute("aria-label", state?.expanded ? "Hide style rows" : "Show style rows");
-    const toggleStyleRows = (event) => {
-      event?.stopPropagation?.();
-      onToggleExpanded(expandStateKey);
-    };
-    legend.addEventListener("click", toggleStyleRows);
-    legend.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        toggleStyleRows(event);
-      }
-    });
+    wireLayerLegendToggle(legend, state, expandStateKey, onToggleExpanded, { enabled: true });
   }
 
   return row;
@@ -1658,10 +1808,17 @@ function renderLayerMenuRows({
       const rowById = new Map(baseRows.map((row) => [row.id, row]));
       return resolvedOrder.map((rowId) => rowById.get(rowId)).filter(Boolean);
     };
+    const getRenderedOrderedRowIds = (parentId) => {
+      const selector = `[data-parent-id="${CSS.escape(parentId)}"][data-row-id]`;
+      const renderedIds = [...scrollRegion.querySelectorAll(selector)]
+        .map((element) => element.dataset.rowId)
+        .filter(Boolean);
+      return renderedIds.length ? renderedIds : getOrderedRows(parentId).map((row) => row.id);
+    };
     const reorderApi = {
       dragState: activeDragState,
       getOrderedRows,
-      getOrderedRowIds: (parentId) => getOrderedRows(parentId).map((row) => row.id),
+      getOrderedRowIds: (parentId) => getRenderedOrderedRowIds(parentId),
       setDragging(nextDragState) {
         activeDragState = nextDragState;
         render();
@@ -1677,7 +1834,12 @@ function renderLayerMenuRows({
       },
       onCommit(parentId, nextOrder) {
         transientReorderState.delete(parentId);
-        const committedOrder = layerModel.setChildRowOrder(parentId, nextOrder);
+        const fullOrder = getOrderedRows(parentId).map((row) => row.id);
+        const nextOrderSet = new Set(nextOrder);
+        const mergedOrder = fullOrder.map((rowId) => (
+          nextOrderSet.has(rowId) ? nextOrder.shift() : rowId
+        ));
+        const committedOrder = layerModel.setChildRowOrder(parentId, mergedOrder);
         if (committedOrder) {
           onRowInput({ type: "reorder", parentId }, committedOrder);
         }
@@ -1728,6 +1890,12 @@ function renderLayerMenuRows({
       updateLayerLegendSwatch(
         parentRowElement,
         getLayerLegendSpec(parentRow, parentState, layerModel, layerModel.getAppearanceState()),
+        {
+          state: parentState,
+          expandStateKey: getRowStateKey(parentRow),
+          onToggleExpanded,
+          toggleEnabled: parentRow.id !== "earth" && layerModel.getChildRows(parentRow.id).some(isStyleChildRow),
+        },
       );
     };
 

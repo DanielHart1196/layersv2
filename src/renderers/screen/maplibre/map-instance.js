@@ -18,9 +18,6 @@ import {
 import {
   ROOT_PARENT_ID,
   ROOT_ROW_IDS,
-  createLayerDefinitions,
-  createRowDefinitionIndex,
-  getDefinitionChildOrder,
 } from "../../../core/layer-definitions.js";
 
 let protocolInstalled = false;
@@ -272,12 +269,17 @@ function localLayerMaplibreIds(entry) {
 
 function getDynamicLayerMaplibreIds(runtimeTargetId, map) {
   const sourceId = `dynamic-${runtimeTargetId}`;
-  if (!map.getSource(sourceId)) {
-    return [];
-  }
-
   return [`${sourceId}-fill`, `${sourceId}-line`, `${sourceId}-circle`]
     .filter((id) => map.getLayer(id));
+}
+
+function buildExactMatchFilterExpression(field, value) {
+  const normalizedValue = value == null ? "" : String(value);
+  return [
+    "==",
+    ["to-string", ["coalesce", ["get", field], ""]],
+    normalizedValue,
+  ];
 }
 
 function getRuntimeTargetIdFromState(layerState, rowId) {
@@ -336,7 +338,7 @@ function getMaplibreLayerIdsForRuntimeTarget(runtimeTargetId, map) {
   if (dynamicTargetMatch) {
     const [, baseLayerId, subtarget] = dynamicTargetMatch;
     const sourceId = `dynamic-${baseLayerId}`;
-    if (map.getSource(sourceId)) {
+    if (getDynamicLayerMaplibreIds(baseLayerId, map).length) {
       if (subtarget === "fill") {
         return map.getLayer(`${sourceId}-fill`) ? [`${sourceId}-fill`] : [];
       }
@@ -566,7 +568,11 @@ function applyDynamicPointLayerState(baseLayerId, map, layerState) {
   return true;
 }
 
-function getOrderedChildLayerRowIds(layerState, parentRowId, defaultOrder = []) {
+function getOrderedChildLayerRowIds(layerState, parentRowId, defaultOrder = [], getOrderedChildRowIds = null) {
+  if (typeof getOrderedChildRowIds === "function") {
+    return getOrderedChildRowIds(parentRowId);
+  }
+
   const isRoot = parentRowId === ROOT_PARENT_ID;
   const childRowIds = Object.entries(layerState ?? {})
     .filter(([, rowState]) => {
@@ -598,11 +604,11 @@ function getOrderedChildLayerRowIds(layerState, parentRowId, defaultOrder = []) 
   return ordered;
 }
 
-function moveRowSubtree(map, layerState, rowId, moveLayer) {
-  const childOrder = getOrderedChildLayerRowIds(layerState, rowId, getDefaultChildOrder(rowId));
+function moveRowSubtree(map, layerState, rowId, moveLayer, getOrderedChildRowIds = null) {
+  const childOrder = getOrderedChildLayerRowIds(layerState, rowId, [], getOrderedChildRowIds);
   if (childOrder.length) {
     for (const childId of [...childOrder].reverse()) {
-      moveRowSubtree(map, layerState, childId, moveLayer);
+      moveRowSubtree(map, layerState, childId, moveLayer, getOrderedChildRowIds);
     }
     return;
   }
@@ -611,24 +617,17 @@ function moveRowSubtree(map, layerState, rowId, moveLayer) {
   getMaplibreLayerIdsForRuntimeTarget(runtimeTargetId, map).forEach(moveLayer);
 }
 
-const STATIC_LAYER_DEFINITIONS = createLayerDefinitions();
-const STATIC_ROW_DEFINITION_INDEX = createRowDefinitionIndex(STATIC_LAYER_DEFINITIONS);
-
-function getDefaultChildOrder(parentId) {
-  return getDefinitionChildOrder(STATIC_ROW_DEFINITION_INDEX, parentId);
-}
-
 // Ordering rule:
 // - Normalized shared row order is the source of truth, including pinned rows.
 // - Higher in the menu = higher in the render pile.
 // - MapLibre moveLayer needs bottom-to-top traversal, so we iterate sibling
 //   rows in reverse and recurse generically through the row tree.
-function applyFullLayerOrder(map, layerState) {
+function applyFullLayerOrder(map, layerState, getOrderedChildRowIds = null) {
   const moveLayer = (id) => { if (map.getLayer(id)) map.moveLayer(id, undefined); };
-  const rootOrder = getOrderedChildLayerRowIds(layerState, ROOT_PARENT_ID, ROOT_ROW_IDS);
+  const rootOrder = getOrderedChildLayerRowIds(layerState, ROOT_PARENT_ID, ROOT_ROW_IDS, getOrderedChildRowIds);
 
   for (const groupId of [...rootOrder].reverse()) {
-    moveRowSubtree(map, layerState, groupId, moveLayer);
+    moveRowSubtree(map, layerState, groupId, moveLayer, getOrderedChildRowIds);
   }
 }
 
@@ -1497,7 +1496,7 @@ async function attachBritishEmpireLayer(map, layerState) {
   });
 }
 
-function createMapInstance({ container, manifest = [], viewState, initialLayerState = {} }) {
+function createMapInstance({ container, manifest = [], viewState, initialLayerState = {}, getOrderedChildRowIds = null }) {
   if (!container) {
     return null;
   }
@@ -1546,6 +1545,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     pitch: viewState.pitch,
     attributionControl: false,
   });
+  const dynamicLayerDebug = Object.create(null);
   map.on("error", (event) => {
     const message = event?.error?.message ?? event?.error?.toString?.() ?? "unknown";
     const url = String(
@@ -1616,7 +1616,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
             .map((entry) => attachStandardLayer(map, layerState, manifest, entry))
         );
 
-        applyFullLayerOrder(map, layerState);
+        applyFullLayerOrder(map, layerState, getOrderedChildRowIds);
       } catch (error) {
         console.error("Failed to attach primary layers.", error);
       }
@@ -1638,7 +1638,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
             .map((entry) => attachStandardLayer(map, layerState, manifest, entry))
         );
 
-        applyFullLayerOrder(map, layerState);
+        applyFullLayerOrder(map, layerState, getOrderedChildRowIds);
       } catch (error) {
         console.error("Failed to attach deferred layers.", error);
       }
@@ -1650,6 +1650,235 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       window.setTimeout(() => void loadDeferredLayers(), 2000);
     }
   });
+
+  function getDynamicSourceLayerProp(layerId) {
+    const sourceId = `dynamic-${layerId}`;
+    const candidates = [`${sourceId}-fill`, `${sourceId}-line`, `${sourceId}-circle`];
+    const parentLayer = candidates
+      .map((candidateId) => map.getLayer(candidateId))
+      .find(Boolean);
+    const sourceLayer = parentLayer?.["source-layer"] ?? parentLayer?.sourceLayer ?? null;
+    return sourceLayer ? { "source-layer": sourceLayer } : {};
+  }
+
+function getMapLayerDebugSnapshot(layerId, paintKeys = [], layoutKeys = []) {
+    if (!map.getLayer(layerId)) {
+      return null;
+    }
+
+    const paint = {};
+    paintKeys.forEach((key) => {
+      paint[key] = map.getPaintProperty(layerId, key);
+    });
+
+    const layout = {};
+    layoutKeys.forEach((key) => {
+      layout[key] = map.getLayoutProperty(layerId, key);
+    });
+
+    return {
+      id: layerId,
+      filter: map.getFilter(layerId) ?? null,
+      paint,
+      layout,
+    };
+  }
+
+  function normalizeDynamicGeometryTypes(geometryTypes = [], geometryType = null, style = null) {
+    const source = Array.isArray(geometryTypes) && geometryTypes.length
+      ? geometryTypes
+      : [geometryType ?? style?.renderType ?? null];
+    const normalized = source.map((value) => {
+      if (value === "point") return "point";
+      if (value === "line") return "line";
+      if (value === "polygon" || value === "area") return "polygon";
+      return null;
+    }).filter(Boolean);
+    return ["point", "line", "polygon"].filter((family) => normalized.includes(family));
+  }
+
+  function setDynamicLayerFeatureFilter(layerId, featureFilter) {
+    if (!layerId) {
+      return;
+    }
+
+    const sourceId = `dynamic-${layerId}`;
+    const layerIds = [`${sourceId}-fill`, `${sourceId}-line`, `${sourceId}-circle`];
+    let applied = false;
+
+    layerIds.forEach((mapLayerId) => {
+      if (!map.getLayer(mapLayerId)) {
+        return;
+      }
+      map.setFilter(mapLayerId, featureFilter ?? null);
+      applied = true;
+    });
+
+    if (!dynamicLayerDebug[layerId]) {
+      dynamicLayerDebug[layerId] = {
+        kind: "base",
+        sourceLayerId: null,
+        featureFilter: null,
+        geometryTypes: [],
+        visible: true,
+      };
+    }
+    dynamicLayerDebug[layerId].featureFilter = structuredClone(featureFilter ?? null);
+    return applied;
+  }
+
+  function attachDynamicLayer(layerId, geojson, tilesUrl, style, { sourceLayerId = null, featureFilter = null, geometryTypes = [], geometryType = null, visible = true, parentRowId = null } = {}) {
+    if (!layerId) {
+      return;
+    }
+
+    const resolvedGeometryTypes = normalizeDynamicGeometryTypes(geometryTypes, geometryType, style);
+
+    if (!sourceLayerId || !featureFilter) {
+      const sourceId = `dynamic-${layerId}`;
+      if (map.getSource(sourceId)) return;
+
+      const color = style?.color ?? "#e74c3c";
+      const opacity = (style?.opacity ?? 80) / 100;
+      dynamicLayerDebug[layerId] = {
+        kind: "base",
+        sourceLayerId: null,
+        featureFilter: null,
+        geometryTypes: resolvedGeometryTypes,
+        visible,
+      };
+
+      if (tilesUrl) {
+        map.addSource(sourceId, { type: "vector", url: `pmtiles://${tilesUrl}` });
+      } else {
+        map.addSource(sourceId, { type: "geojson", data: geojson });
+      }
+
+      const sourceLayer = tilesUrl ? "layer" : undefined;
+      const sourceLayerProp = tilesUrl ? { "source-layer": sourceLayer } : {};
+
+      if (resolvedGeometryTypes.includes("polygon")) {
+        map.addLayer({ id: `${sourceId}-fill`, type: "fill", source: sourceId, ...sourceLayerProp,
+          paint: { "fill-color": color, "fill-opacity": opacity } });
+      }
+      if (resolvedGeometryTypes.includes("line") || resolvedGeometryTypes.includes("polygon")) {
+        map.addLayer({ id: `${sourceId}-line`, type: "line", source: sourceId, ...sourceLayerProp,
+          paint: { "line-color": color, "line-opacity": opacity, "line-width": style?.weight ?? 2 } });
+      }
+      if (resolvedGeometryTypes.includes("point")) {
+        map.addLayer({ id: `${sourceId}-circle`, type: "circle", source: sourceId, ...sourceLayerProp,
+          paint: {
+            "circle-color": color,
+            "circle-opacity": opacity,
+            "circle-radius": style?.radius ?? 6,
+            "circle-stroke-color": style?.lineColor ?? "#ffffff",
+            "circle-stroke-opacity": (style?.lineOpacity ?? 100) / 100,
+            "circle-stroke-width": style?.lineWeight ?? 1,
+          } });
+      }
+
+      const stored = layerState[layerId];
+      if (stored) {
+        reapplyStoredDynamicRuntimeStyles(layerId, map, layerState);
+        applyRuntimeTargetVisibility(layerId, map, layerState);
+        ["fill", "line", "point-fill", "point-stroke"].forEach((subtarget) => {
+          applyRuntimeTargetVisibility(`${layerId}::${subtarget}`, map, layerState);
+        });
+      } else if (resolvedGeometryTypes.includes("point")) {
+        applyDynamicPointLayerState(layerId, map, layerState);
+      }
+      return;
+    }
+
+    const derivedSourceId = `dynamic-${sourceLayerId}`;
+    if (!map.getSource(derivedSourceId)) {
+      console.warn(`[filter] Cannot attach derived layer "${layerId}" — parent source "${derivedSourceId}" not found on map`);
+      return;
+    }
+    dynamicLayerDebug[layerId] = {
+      kind: "derived",
+      sourceLayerId,
+      featureFilter: structuredClone(featureFilter),
+      geometryTypes: resolvedGeometryTypes,
+      visible,
+    };
+
+    const fill = `dynamic-${layerId}-fill`;
+    const line = `dynamic-${layerId}-line`;
+    const circle = `dynamic-${layerId}-circle`;
+    [fill, line, circle].forEach((derivedLayerId) => {
+      if (map.getLayer(derivedLayerId)) {
+        map.removeLayer(derivedLayerId);
+      }
+    });
+
+    if (!layerState[layerId] || typeof layerState[layerId] !== "object") {
+      layerState[layerId] = {};
+    }
+    if (typeof layerState[layerId].visible !== "boolean") {
+      layerState[layerId].visible = visible;
+    }
+    if (layerState[layerId].parentRowId === undefined && parentRowId !== null) {
+      layerState[layerId].parentRowId = parentRowId;
+    }
+
+    const sourceLayerProp = getDynamicSourceLayerProp(sourceLayerId);
+    const filterExpression = featureFilter;
+
+    if (resolvedGeometryTypes.includes("polygon")) {
+      map.addLayer({
+        id: fill,
+        type: "fill",
+        source: derivedSourceId,
+        ...sourceLayerProp,
+        ...(filterExpression ? { filter: filterExpression } : {}),
+        layout: { visibility: getInheritedLayoutVisibility(layerState, `${layerId}::fill`) },
+        paint: {
+          "fill-color": getLayerStyleValue(layerState, layerId, "fillColor", "#2ecc71"),
+          "fill-opacity": Number(getLayerStyleValue(layerState, layerId, "fillOpacity", 60)) / 100,
+        },
+      });
+    }
+    if (resolvedGeometryTypes.includes("line") || resolvedGeometryTypes.includes("polygon")) {
+      map.addLayer({
+        id: line,
+        type: "line",
+        source: derivedSourceId,
+        ...sourceLayerProp,
+        ...(filterExpression ? { filter: filterExpression } : {}),
+        layout: { visibility: getInheritedLayoutVisibility(layerState, `${layerId}::line`) },
+        paint: {
+          "line-color": getLayerStyleValue(layerState, layerId, "lineColor", resolvedGeometryTypes.includes("line") ? "#3498db" : "#1f7a45"),
+          "line-width": buildLineWidthExpression(getLayerStyleValue(layerState, layerId, "lineWeight", 2)),
+          "line-opacity": Number(getLayerStyleValue(layerState, layerId, "lineOpacity", 90)) / 100,
+        },
+      });
+    }
+    if (resolvedGeometryTypes.includes("point")) {
+      map.addLayer({
+        id: circle,
+        type: "circle",
+        source: derivedSourceId,
+        ...sourceLayerProp,
+        ...(filterExpression ? { filter: filterExpression } : {}),
+        layout: { visibility: getInheritedLayoutVisibility(layerState, `${layerId}::point-fill`) },
+        paint: {
+          "circle-color": getLayerStyleValue(layerState, layerId, "pointColor", "#e74c3c"),
+          "circle-opacity": Number(getLayerStyleValue(layerState, layerId, "pointOpacity", 80)) / 100,
+          "circle-radius": Number(getLayerStyleValue(layerState, layerId, "pointRadius", 6)),
+          "circle-stroke-color": getLayerStyleValue(layerState, layerId, "lineColor", "#ffffff"),
+          "circle-stroke-opacity": Number(getLayerStyleValue(layerState, layerId, "lineOpacity", 100)) / 100,
+          "circle-stroke-width": Number(getLayerStyleValue(layerState, layerId, "lineWeight", 1)),
+        },
+      });
+    }
+
+    applyRuntimeTargetVisibility(layerId, map, layerState);
+    ["fill", "line", "point-fill", "point-stroke"].forEach((subtarget) => {
+      applyRuntimeTargetVisibility(`${layerId}::${subtarget}`, map, layerState);
+    });
+  }
+
   return {
     destroy() {
       clearScaleHideTimeout();
@@ -1674,10 +1903,10 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       if (layerState[parentId]) {
         layerState[parentId].rowOrder = orderedLayerIds;
       }
-      applyFullLayerOrder(map, layerState);
+      applyFullLayerOrder(map, layerState, getOrderedChildRowIds);
     },
     reapplyFullOrder() {
-      applyFullLayerOrder(map, layerState);
+      applyFullLayerOrder(map, layerState, getOrderedChildRowIds);
     },
     setLayerStyleValue(layerId, key, value) {
       if (!layerState[layerId] || typeof layerState[layerId] !== "object") {
@@ -1686,6 +1915,17 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
 
       layerState[layerId][key] = value;
 
+      // For runtimeTarget subtargets (e.g. "uid::fill"), also mirror the value into
+      // the base layer state so that re-attach within the same session reads it correctly.
+      if (key !== "visible") {
+        const subtargetMatch = /^(.+)::(fill|line|point-fill|point-stroke)$/.exec(layerId);
+        if (subtargetMatch) {
+          const baseId = subtargetMatch[1];
+          if (!layerState[baseId]) layerState[baseId] = {};
+          layerState[baseId][key] = value;
+        }
+      }
+
       // ── Registry-driven layers (everything except ocean) ─────────────────────
       const registryEntry = findRegistryEntry(layerId);
       if (registryEntry && applyRegistryStyleValue(registryEntry, map, layerState, key, value) && key !== "visible") {
@@ -1693,7 +1933,16 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       }
 
       // ── Runtime-target-driven styles and special background targets ────────
-      if (applyRuntimeTargetStyle(layerId, key, value, map, layerState)) {
+      const runtimeStyleApplied = applyRuntimeTargetStyle(layerId, key, value, map, layerState);
+      if (key !== "visible") {
+        const writeTrackMatch = /^(.+)::(fill|line|point-fill|point-stroke)$/.exec(layerId);
+        if (writeTrackMatch) {
+          const baseId = writeTrackMatch[1];
+          if (!dynamicLayerDebug[baseId]) dynamicLayerDebug[baseId] = {};
+          dynamicLayerDebug[baseId].lastStyleWrite = { key, applied: runtimeStyleApplied };
+        }
+      }
+      if (runtimeStyleApplied) {
         return;
       }
 
@@ -1730,57 +1979,29 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         }
       }
     },
-    attachDynamicLayer(layerId, geojson, tilesUrl, style) {
+    attachDynamicLayer(layerId, geojson, tilesUrl, style, options) {
+      attachDynamicLayer(layerId, geojson, tilesUrl, style, options);
+    },
+    getDynamicLayerDebug(layerId) {
       const sourceId = `dynamic-${layerId}`;
-      if (map.getSource(sourceId)) return;
-
-      const color = style?.color ?? "#e74c3c";
-      const opacity = (style?.opacity ?? 80) / 100;
-      const renderType = style?.renderType ?? "point";
-
-      // Prefer PMTiles vector source when available; fall back to flat GeoJSON.
-      if (tilesUrl) {
-        map.addSource(sourceId, { type: "vector", url: `pmtiles://${tilesUrl}` });
-      } else {
-        map.addSource(sourceId, { type: "geojson", data: geojson });
-      }
-
-      const sourceLayer = tilesUrl ? "layer" : undefined;
-      const sourceLayerProp = tilesUrl ? { "source-layer": sourceLayer } : {};
-
-      if (renderType === "polygon") {
-        map.addLayer({ id: `${sourceId}-fill`, type: "fill", source: sourceId, ...sourceLayerProp,
-          paint: { "fill-color": color, "fill-opacity": opacity } });
-        map.addLayer({ id: `${sourceId}-line`, type: "line", source: sourceId, ...sourceLayerProp,
-          paint: { "line-color": color, "line-opacity": Math.min(1, opacity + 0.2), "line-width": 1 } });
-      } else if (renderType === "line") {
-        map.addLayer({ id: `${sourceId}-line`, type: "line", source: sourceId, ...sourceLayerProp,
-          paint: { "line-color": color, "line-opacity": opacity, "line-width": style?.weight ?? 2 } });
-      } else {
-        map.addLayer({ id: `${sourceId}-circle`, type: "circle", source: sourceId, ...sourceLayerProp,
-          paint: {
-            "circle-color": color,
-            "circle-opacity": opacity,
-            "circle-radius": style?.radius ?? 6,
-            "circle-stroke-color": style?.lineColor ?? "#ffffff",
-            "circle-stroke-opacity": (style?.lineOpacity ?? 100) / 100,
-            "circle-stroke-width": style?.lineWeight ?? 1,
-          } });
-      }
-
-      // Apply any style values already stored in layerState through the same
-      // runtime-target path used for live updates, so restore and interaction
-      // stay aligned.
-      const stored = layerState[layerId];
-      if (stored) {
-        reapplyStoredDynamicRuntimeStyles(layerId, map, layerState);
-        applyRuntimeTargetVisibility(layerId, map, layerState);
-        ["fill", "line", "point-fill", "point-stroke"].forEach((subtarget) => {
-          applyRuntimeTargetVisibility(`${layerId}::${subtarget}`, map, layerState);
-        });
-      } else if (renderType !== "polygon" && renderType !== "line") {
-        applyDynamicPointLayerState(layerId, map, layerState);
-      }
+      return {
+        layerId,
+        metadata: structuredClone(dynamicLayerDebug[layerId] ?? null),
+        state: structuredClone(layerState[layerId] ?? null),
+        sourceExists: getDynamicLayerMaplibreIds(layerId, map).length > 0,
+        layers: {
+          fill: getMapLayerDebugSnapshot(`${sourceId}-fill`, ["fill-color", "fill-opacity"], ["visibility"]),
+          line: getMapLayerDebugSnapshot(`${sourceId}-line`, ["line-color", "line-opacity", "line-width"], ["visibility"]),
+          circle: getMapLayerDebugSnapshot(
+            `${sourceId}-circle`,
+            ["circle-color", "circle-opacity", "circle-radius", "circle-stroke-color", "circle-stroke-opacity", "circle-stroke-width"],
+            ["visibility"],
+          ),
+        },
+      };
+    },
+    setDynamicLayerFeatureFilter(layerId, featureFilter) {
+      return setDynamicLayerFeatureFilter(layerId, featureFilter);
     },
     detachDynamicLayer(layerId) {
       const sourceId = `dynamic-${layerId}`;
@@ -1788,6 +2009,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         if (map.getLayer(id)) map.removeLayer(id);
       });
       if (map.getSource(sourceId)) map.removeSource(sourceId);
+      delete dynamicLayerDebug[layerId];
     },
   };
 }

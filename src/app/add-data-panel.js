@@ -2,7 +2,7 @@ import { parseFile, SUPPORTED_EXTENSIONS } from "../upload/parse-file.js";
 import { rowsToFeatures } from "../upload/csv-mapper.js";
 import { inferFieldSchemaFromFeatures } from "../upload/field-schema.js";
 import { summarizeFeatureComplexity } from "../upload/feature-complexity.js";
-import { inferGeometryFamily } from "../upload/geometry-family.js";
+import { inferGeometryFamilies } from "../upload/geometry-family.js";
 import { addDatasetToLayer, appendFeaturesToDataset } from "../upload/insert-layer.js";
 import { getLayerDatasets as fetchLayerDatasets } from "../sources/supabase/layer-loader.js";
 import { buildPreviewTableMarkup, bindPreviewTableInteractions } from "./shared/preview-table.js";
@@ -22,6 +22,7 @@ const LICENSE_PRESETS = [
   { id: "cc-by-4", label: "CC BY 4.0", license: "CC BY 4.0", licenseUrl: "https://creativecommons.org/licenses/by/4.0/" },
   { id: "cc-by-sa-4", label: "CC BY-SA 4.0", license: "CC BY-SA 4.0", licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/" },
   { id: "cc0-1", label: "CC0 1.0", license: "CC0 1.0", licenseUrl: "https://creativecommons.org/publicdomain/zero/1.0/" },
+  { id: "odc-by-1", label: "ODC-By 1.0", license: "ODC-By 1.0", licenseUrl: "https://opendatacommons.org/licenses/by/1-0/" },
   { id: "odbl-1", label: "ODbL 1.0", license: "ODbL 1.0", licenseUrl: "https://opendatacommons.org/licenses/odbl/1-0/" },
   { id: "pddl-1", label: "PDDL 1.0", license: "PDDL 1.0", licenseUrl: "https://opendatacommons.org/licenses/pddl/1-0/" },
   { id: "custom", label: "Custom", license: null, licenseUrl: null },
@@ -78,8 +79,14 @@ function getPreviewHeaderBackground(state) {
   return `rgba(${Math.round(rgb.r * darkenFactor)}, ${Math.round(rgb.g * darkenFactor)}, ${Math.round(rgb.b * darkenFactor)}, 0.96)`;
 }
 
-function inferGeometryType(features = []) {
-  return inferGeometryFamily(features);
+function inferGeometryTypes(features = []) {
+  return inferGeometryFamilies(features);
+}
+
+function formatGeometryTypes(geometryTypes = [], fallback = "mixed") {
+  return Array.isArray(geometryTypes) && geometryTypes.length
+    ? geometryTypes.join(" + ")
+    : fallback;
 }
 
 function looksLikeHttpUrl(value) {
@@ -633,7 +640,7 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
               aria-selected="${selected ? "true" : "false"}"
             >
               <span class="clp-existing-item-name">${escapeHtml(layer.label ?? layer.name ?? "Untitled layer")}</span>
-              <span class="clp-existing-item-meta">${escapeHtml(layer.geometryType ?? "mixed")}</span>
+              <span class="clp-existing-item-meta">${escapeHtml(formatGeometryTypes(layer.geometryTypes, layer.geometryType ?? "mixed"))}</span>
             </button>
           `;
         }).join("")}
@@ -673,6 +680,7 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
         layerId: selectedLayer.id,
         name: selectedLayer.label ?? "Layer",
         parentId: state.parentId ?? null,
+        geometryTypes: selectedLayer.geometryTypes ?? [],
         geometryType: selectedLayer.geometryType ?? "mixed",
       });
       state.layerId = selectedLayer.id;

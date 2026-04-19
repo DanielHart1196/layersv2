@@ -43,6 +43,7 @@ function createMaplibreScreenRuntime({
   viewState = null,
   initialLayerState = {},
   getRuntimeVectors = () => [],
+  getOrderedChildRowIds = null,
 } = {}) {
   let mapInstance = null;
   const dependencyState = {
@@ -103,6 +104,7 @@ function createMaplibreScreenRuntime({
       manifest: pmtilesManifest,
       viewState,
       initialLayerState,
+      getOrderedChildRowIds,
     });
   }
 
@@ -135,8 +137,14 @@ function createMaplibreScreenRuntime({
     setLayerStyleValue(layerId, key, value) {
       mapInstance?.setLayerStyleValue?.(layerId, key, value);
     },
-    loadDynamicLayer({ layerId, geojson, tilesUrl, style }) {
-      mapInstance?.attachDynamicLayer?.(layerId, geojson, tilesUrl, style);
+    loadDynamicLayer({ layerId, geojson, tilesUrl, style, options = {} }) {
+      mapInstance?.attachDynamicLayer?.(layerId, geojson, tilesUrl, style, options);
+    },
+    getDynamicLayerDebug(layerId) {
+      return mapInstance?.getDynamicLayerDebug?.(layerId) ?? null;
+    },
+    setDynamicLayerFeatureFilter(layerId, featureFilter) {
+      return mapInstance?.setDynamicLayerFeatureFilter?.(layerId, featureFilter) ?? false;
     },
     detachDynamicLayer(layerId) {
       mapInstance?.detachDynamicLayer?.(layerId);

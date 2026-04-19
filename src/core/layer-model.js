@@ -24,6 +24,35 @@ function createLayerModel() {
   const staticParentAdditions = new Map(); // parentId → [rows] for rows added to static parents
   const rowDefinitionsById = new Map();
 
+  function emitFilterDebugEvent(payload) {
+    try {
+      if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
+        return;
+      }
+      window.dispatchEvent(new CustomEvent("layerv2:filter-debug", {
+        detail: {
+          ts: Date.now(),
+          ...payload,
+        },
+      }));
+    } catch {
+      // Ignore debug event failures.
+    }
+  }
+
+  function getDebugStackSnippet() {
+    try {
+      const rawStack = new Error().stack ?? "";
+      return rawStack
+        .split("\n")
+        .slice(2, 5)
+        .map((line) => line.trim())
+        .join(" | ");
+    } catch {
+      return "";
+    }
+  }
+
   function indexRowDefinitions(rows = []) {
     rows.forEach((row) => {
       rowDefinitionsById.set(row.id, row);
@@ -262,7 +291,8 @@ function createLayerModel() {
 
       // Restore root-level dynamic rows.
       (defs.rootRows ?? []).forEach((row) => {
-        row.geometryType = inferStoredRowGeometryType(row);
+        row.geometryTypes = inferStoredRowGeometryTypes(row);
+        row.geometryType = collapseGeometryTypes(row.geometryTypes);
         rootDynamicRows.push(row);
         dynamicIds.add(row.id);
         indexRowDefinitions([row]);
@@ -291,7 +321,11 @@ function createLayerModel() {
         if (!Array.isArray(parent.rows)) parent.rows = [];
         const correctLayerId = parent.layerRef ?? null;
         rows.forEach((row) => {
-          row.geometryType = inferStoredRowGeometryType(row);
+          if (parent.rows.some((existingRow) => existingRow?.id === row?.id)) {
+            return;
+          }
+          row.geometryTypes = inferStoredRowGeometryTypes(row);
+          row.geometryType = collapseGeometryTypes(row.geometryTypes);
           // Migrate: fix style target layerIds that were stored before the mapLayerId fix.
           if (correctLayerId) migrateRowTargets(row, correctLayerId);
           parent.rows.push(row);
@@ -313,6 +347,16 @@ function createLayerModel() {
             layerState[row.id].parentRowId = parentId;
           }
           initializeDynamicRowState(row.rows, row.runtimeLayerId ?? row.layerRef ?? row.layerId ?? row.id, row.id);
+          if (row.kind === "filter" && row.filter) {
+            emitFilterDebugEvent({
+              kind: "hydrate-filter",
+              rowId: row.id,
+              parentId,
+              field: row.filter.field,
+              value: row.filter.value,
+              stack: getDebugStackSnippet(),
+            });
+          }
         });
         staticParentAdditions.set(parentId, rows);
       });
@@ -550,45 +594,84 @@ function createLayerModel() {
     fix(row.target);
   }
 
-  function normalizeDatasetGeometryType(geometryType) {
-    if (geometryType === "point") return "point";
-    if (geometryType === "line") return "line";
-    if (geometryType === "polygon" || geometryType === "area") return "polygon";
+  function normalizeDatasetGeometryTypes(geometryTypes = [], geometryType = "mixed") {
+    const source = Array.isArray(geometryTypes) && geometryTypes.length
+      ? geometryTypes
+      : [geometryType];
+    const normalized = source.map((value) => {
+      if (value === "point") return "point";
+      if (value === "line") return "line";
+      if (value === "polygon" || value === "area") return "polygon";
+      return null;
+    }).filter(Boolean);
+
+    return ["point", "line", "polygon"].filter((family, index, families) => (
+      normalized.includes(family) && families.indexOf(family) === index
+    ));
+  }
+
+  function collapseGeometryTypes(geometryTypes = []) {
+    if (geometryTypes.length === 1) {
+      return geometryTypes[0];
+    }
     return "mixed";
   }
 
-  function inferStoredRowGeometryType(row) {
-    const explicitType = normalizeDatasetGeometryType(row?.geometryType);
-    if (explicitType !== "mixed") {
-      return explicitType;
+  function inferStoredRowGeometryTypes(row) {
+    const explicitTypes = normalizeDatasetGeometryTypes(row?.geometryTypes, row?.geometryType);
+    if (explicitTypes.length) {
+      return explicitTypes;
     }
 
     const runtimeTargets = Array.isArray(row?.rows)
       ? row.rows.map((childRow) => childRow?.runtimeTargetId).filter((targetId) => typeof targetId === "string")
       : [];
 
-    if (runtimeTargets.some((targetId) => targetId.endsWith("::point-fill") || targetId.endsWith("::point-stroke"))) {
-      return "point";
-    }
-    if (runtimeTargets.some((targetId) => targetId.endsWith("::fill"))) {
-      return "polygon";
-    }
-    if (runtimeTargets.some((targetId) => targetId.endsWith("::line"))) {
-      return "line";
-    }
-
-    return "mixed";
+    return normalizeDatasetGeometryTypes([
+      ...(runtimeTargets.some((targetId) => targetId.endsWith("::point-fill") || targetId.endsWith("::point-stroke")) ? ["point"] : []),
+      ...(runtimeTargets.some((targetId) => targetId.endsWith("::fill")) ? ["polygon"] : []),
+      ...(runtimeTargets.some((targetId) => targetId.endsWith("::line")) ? ["line"] : []),
+    ]);
   }
 
-  function createDefaultDatasetRows(rowId, mapLayerId, geometryType) {
-    const normalizedType = normalizeDatasetGeometryType(geometryType);
-    if (normalizedType === "point") {
-      return [
+  function createDefaultDatasetRows(rowId, mapLayerId, geometryTypes, runtimeBaseId = mapLayerId) {
+    const normalizedTypes = normalizeDatasetGeometryTypes(geometryTypes);
+    const rows = [];
+
+    if (normalizedTypes.includes("polygon")) {
+      rows.push(createStyleRow({
+        type: "fill",
+        id: `${rowId}-fill`,
+        layerId: mapLayerId,
+        runtimeTargetId: `${runtimeBaseId}::fill`,
+        storageKey: SHARED_COLOR_STORAGE_KEY,
+        presets: SHARED_COLOR_PRESETS,
+        defaultColor: "#2ecc71",
+        defaultOpacity: 60,
+      }));
+    }
+
+    if (normalizedTypes.includes("line") || normalizedTypes.includes("polygon")) {
+      rows.push(createStyleRow({
+        type: "line",
+        id: `${rowId}-line`,
+        layerId: mapLayerId,
+        runtimeTargetId: `${runtimeBaseId}::line`,
+        storageKey: SHARED_COLOR_STORAGE_KEY,
+        presets: SHARED_COLOR_PRESETS,
+        defaultColor: "#3498db",
+        defaultOpacity: 90,
+        defaultWeight: 2,
+      }));
+    }
+
+    if (normalizedTypes.includes("point")) {
+      rows.push(
         createStyleRow({
           type: "point",
           id: `${rowId}-point`,
           layerId: mapLayerId,
-          runtimeTargetId: `${mapLayerId}::point-fill`,
+          runtimeTargetId: `${runtimeBaseId}::point-fill`,
           storageKey: SHARED_COLOR_STORAGE_KEY,
           presets: SHARED_COLOR_PRESETS,
           defaultColor: "#e74c3c",
@@ -599,54 +682,17 @@ function createLayerModel() {
           type: "line",
           id: `${rowId}-line`,
           layerId: mapLayerId,
-          runtimeTargetId: `${mapLayerId}::point-stroke`,
+          runtimeTargetId: `${runtimeBaseId}::point-stroke`,
           storageKey: SHARED_COLOR_STORAGE_KEY,
           presets: SHARED_COLOR_PRESETS,
           defaultColor: "#ffffff",
           defaultOpacity: 100,
           defaultWeight: 1,
         }),
-      ];
+      );
     }
-    if (normalizedType === "line") {
-      return [createStyleRow({
-        type: "line",
-        id: `${rowId}-line`,
-        layerId: mapLayerId,
-        runtimeTargetId: `${mapLayerId}::line`,
-        storageKey: SHARED_COLOR_STORAGE_KEY,
-        presets: SHARED_COLOR_PRESETS,
-        defaultColor: "#3498db",
-        defaultOpacity: 90,
-        defaultWeight: 2,
-      })];
-    }
-    if (normalizedType === "polygon") {
-      return [
-        createStyleRow({
-          type: "fill",
-          id: `${rowId}-fill`,
-          layerId: mapLayerId,
-          runtimeTargetId: `${mapLayerId}::fill`,
-          storageKey: SHARED_COLOR_STORAGE_KEY,
-          presets: SHARED_COLOR_PRESETS,
-          defaultColor: "#2ecc71",
-          defaultOpacity: 60,
-        }),
-        createStyleRow({
-          type: "line",
-          id: `${rowId}-line`,
-          layerId: mapLayerId,
-          runtimeTargetId: `${mapLayerId}::line`,
-          storageKey: SHARED_COLOR_STORAGE_KEY,
-          presets: SHARED_COLOR_PRESETS,
-          defaultColor: "#1f7a45",
-          defaultOpacity: 100,
-          defaultWeight: 1,
-        }),
-      ];
-    }
-    return [];
+
+    return rows;
   }
 
   function initializeDynamicRowState(rows, mapLayerId, parentRowId) {
@@ -695,6 +741,22 @@ function createLayerModel() {
   // Removes a dynamic row from its parent. Returns the removed row or null if not removable.
   function removeRow(rowId, parentId) {
     if (!dynamicIds.has(rowId)) return null;
+    const removedRow = rowDefinitionsById.get(rowId) ?? null;
+
+    function removeDynamicRowState(row) {
+      if (!row) {
+        return;
+      }
+      rowDefinitionsById.delete(row.id);
+      dynamicIds.delete(row.id);
+      delete layerState[row.id];
+      if (row.type === "layer" && row.kind === "filter") {
+        delete layerState[row.runtimeLayerId ?? row.layerId];
+      }
+      if (Array.isArray(row.rows)) {
+        row.rows.forEach((childRow) => removeDynamicRowState(childRow));
+      }
+    }
 
     if (parentId === ROOT_PARENT_ID) {
       const idx = rootDynamicRows.findIndex((r) => r.id === rowId);
@@ -712,8 +774,7 @@ function createLayerModel() {
       }
     }
 
-    rowDefinitionsById.delete(rowId);
-    dynamicIds.delete(rowId);
+    removeDynamicRowState(removedRow);
     persistDynamicDefs();
     persistLayerState();
     return rowId;
@@ -777,12 +838,34 @@ function createLayerModel() {
         initialValue: 50,
       });
     } else if (rowType === "filter") {
-      newRow = createFilterRow({
+      const geometryTypes = normalizeDatasetGeometryTypes(
+        config.geometryTypes,
+        config.geometryType ?? parentDef.geometryType ?? "mixed",
+      );
+      const filterRuntimeTargetId = uid;
+      const filterRows = createDefaultDatasetRows(uid, filterRuntimeTargetId, geometryTypes, filterRuntimeTargetId);
+      newRow = createDataRow({
         id: uid,
         label: config.name || "Filter",
-        field: config.field ?? "",
+        layerId: uid,
+        runtimeLayerId: filterRuntimeTargetId,
+        geometryTypes,
+        rows: filterRows,
+      });
+      newRow.kind = "filter";
+      newRow.filter = {
+        field: String(config.field ?? ""),
         op: config.op ?? "==",
         value: config.value ?? "",
+        parentLayerId: mapLayerId,
+      };
+      emitFilterDebugEvent({
+        kind: "model-add-filter",
+        rowId: uid,
+        parentId: layerId,
+        field: newRow.filter.field,
+        value: newRow.filter.value,
+        stack: getDebugStackSnippet(),
       });
     } else if (rowType === "sort") {
       newRow = createSortRow({
@@ -802,7 +885,27 @@ function createLayerModel() {
     rowDefinitionsById.set(newRow.id, newRow);
     dynamicIds.add(newRow.id);
 
-    if (newRow.initialState) {
+    if (newRow.type === "layer") {
+      if (!layerState[newRow.id]) {
+        layerState[newRow.id] = {};
+      }
+      if (typeof layerState[newRow.id].expanded !== "boolean") {
+        layerState[newRow.id].expanded = false;
+      }
+      if (typeof layerState[newRow.id].visible !== "boolean") {
+        layerState[newRow.id].visible = true;
+      }
+      if (typeof layerState[newRow.id].runtimeTargetId !== "string") {
+        layerState[newRow.id].runtimeTargetId = newRow.runtimeLayerId ?? newRow.layerId;
+      }
+      if (layerState[newRow.id].parentRowId === undefined) {
+        layerState[newRow.id].parentRowId = layerId;
+      }
+      if (Array.isArray(newRow.rows) && newRow.rows.length) {
+        layerState[newRow.id].rowOrder = getDefaultChildOrder(newRow.id);
+        initializeDynamicRowState(newRow.rows, newRow.runtimeLayerId ?? newRow.layerId, newRow.id);
+      }
+    } else if (newRow.initialState) {
       if (!layerState[mapLayerId]) {
         layerState[mapLayerId] = {};
       }
@@ -818,33 +921,45 @@ function createLayerModel() {
       }
     }
 
-    // Track so we can re-attach to the parent on hydration.
-    if (!staticParentAdditions.has(layerId)) staticParentAdditions.set(layerId, []);
-    staticParentAdditions.get(layerId).push(newRow);
+    // Only store child additions separately for static parents. Dynamic parents are
+    // already persisted with their full child row tree, so recording the same child
+    // again in staticAdditions would restore it twice on reload.
+    if (!dynamicIds.has(layerId)) {
+      if (!staticParentAdditions.has(layerId)) staticParentAdditions.set(layerId, []);
+      staticParentAdditions.get(layerId).push(newRow);
+    }
     persistDynamicDefs();
     persistLayerState();
 
-    return newRow;
+    return structuredClone(newRow);
   }
 
   // Adds a new data row (type: "layer") pointing to an entry in the layer catalog.
   // layerRef is the catalog layer ID (e.g. "land", or a Supabase UUID later).
-  function addDataRow(parentId, { name, layerRef, geometryType = "mixed" }) {
+  function addDataRow(parentId, { name, layerRef, geometryTypes = [], geometryType = "mixed" }) {
     const uid = `dyn-${Date.now()}`;
     const mapLayerId = layerRef ?? uid;
-    const rows = createDefaultDatasetRows(uid, mapLayerId, geometryType);
+    const resolvedGeometryTypes = normalizeDatasetGeometryTypes(geometryTypes, geometryType);
+    const rows = createDefaultDatasetRows(uid, mapLayerId, resolvedGeometryTypes);
     const newRow = createDataRow({
       id: uid,
       label: name || layerRef,
       layerId: uid,
       layerRef,
-      geometryType: normalizeDatasetGeometryType(geometryType),
+      geometryTypes: resolvedGeometryTypes,
       rows,
       runtimeLayerId: mapLayerId,
     });
 
     if (parentId === ROOT_PARENT_ID) {
       rootDynamicRows.push(newRow);
+      const currentRootOrder = Array.isArray(layerState[ROOT_PARENT_ID]?.rowOrder)
+        ? layerState[ROOT_PARENT_ID].rowOrder
+        : getDefaultChildOrder(ROOT_PARENT_ID);
+      layerState[ROOT_PARENT_ID].rowOrder = normalizeChildRowOrder(
+        ROOT_PARENT_ID,
+        [...currentRootOrder, newRow.id],
+      );
     } else {
       const parentDef = rowDefinitionsById.get(parentId) ?? layerDefinitions[parentId];
       if (!parentDef) return null;
@@ -852,6 +967,16 @@ function createLayerModel() {
       parentDef.rows.push(newRow);
       if (!staticParentAdditions.has(parentId)) staticParentAdditions.set(parentId, []);
       staticParentAdditions.get(parentId).push(newRow);
+      if (!layerState[parentId]) {
+        layerState[parentId] = {};
+      }
+      const currentChildOrder = Array.isArray(layerState[parentId]?.rowOrder)
+        ? layerState[parentId].rowOrder
+        : getDefaultChildOrder(parentId);
+      layerState[parentId].rowOrder = normalizeChildRowOrder(
+        parentId,
+        [...currentChildOrder, newRow.id],
+      );
     }
 
     rowDefinitionsById.set(newRow.id, newRow);
@@ -885,6 +1010,20 @@ function createLayerModel() {
     layerState[parentId].rowOrder = normalizeChildRowOrder(parentId, nextOrder);
     persistLayerState();
     return layerState[parentId].rowOrder.slice();
+  }
+
+  function getOrderedChildRowIds(parentId) {
+    return normalizeChildRowOrder(parentId).slice();
+  }
+
+  function getOrderedChildRows(parentId) {
+    const orderedIds = getOrderedChildRowIds(parentId);
+    if (!orderedIds.length) {
+      return getChildRows(parentId);
+    }
+
+    const rowById = new Map(getChildRows(parentId).map((row) => [row.id, row]));
+    return orderedIds.map((rowId) => rowById.get(rowId)).filter(Boolean);
   }
 
   function getRowById(rowId) {
@@ -934,6 +1073,8 @@ function createLayerModel() {
     isRowVisible,
     isDynamic: (rowId) => dynamicIds.has(rowId),
     normalizeChildRowOrder,
+    getOrderedChildRowIds,
+    getOrderedChildRows,
     reorderChildRow,
     removeRow,
     setChildRowOrder,

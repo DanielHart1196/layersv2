@@ -32,6 +32,7 @@
 - When the user asks for diagnosis, explanation, or a code check, do not make code changes unless they explicitly ask for an edit, patch, or implementation, even if the likely fix seems obvious.
 - If a prompt is ambiguous between analysis and implementation, prefer analysis-only.
 - Treat question-led prompts like `can you see why...`, `are you confident...`, `what's causing...`, `does that make sense...`, and similar reasoning checks as non-implementation turns by default.
+- If a proposed or completed change depends on Supabase work the user must run or apply manually, say that explicitly before treating the change as complete. This includes schema changes, SQL, migrations, RLS/policy updates, storage config, env vars, seed data, backfills, or any other backend/data step outside the repo.
 - When a new rule, architecture decision, or repeated pitfall becomes clear during work, suggest adding it to `PROJECT_NOTES.md` rather than keeping it implicit.
 - After JavaScript edits in `layers`, run `node --check` on changed JS files before finishing.
 - Keep behavior-preserving extraction separate from behavior-changing refactors. If a change touches rendering cadence, gesture semantics, projection math, or other fragile interaction paths, say so explicitly before making it.

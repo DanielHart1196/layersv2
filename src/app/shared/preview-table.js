@@ -22,6 +22,9 @@ export function buildPreviewTableMarkup({
   sortColumn = "",
   sortDirection = "",
   sortDisabled = false,
+  columnActionText = "&#128465;",
+  columnActionAriaPrefix = "Remove",
+  columnActionTitle = "",
 }) {
   const widthStyle = (header) => {
     const width = columnWidths?.[header];
@@ -57,7 +60,13 @@ export function buildPreviewTableMarkup({
             <span class="clp-col-name">${escapeHtml(header)}</span>
           </button>
         `}
-        <button class="clp-col-remove" type="button" data-column="${escapeHtml(header)}" aria-label="Remove ${escapeHtml(header)}">&#128465;</button>
+        <button
+          class="clp-col-remove"
+          type="button"
+          data-column="${escapeHtml(header)}"
+          aria-label="${escapeHtml(`${columnActionAriaPrefix} ${header}`)}"
+          ${columnActionTitle ? `title="${escapeHtml(`${columnActionTitle} ${header}`)}"` : ""}
+        >${columnActionText}</button>
       </span>
     </th>
   `).join("");
@@ -82,6 +91,7 @@ export function bindPreviewTableInteractions(previewEl, options) {
     onRenameCommit,
     onRenameCancel,
     onRemoveColumn,
+    onColumnAction,
     getScrollLeft = () => 0,
     setScrollLeft = () => {},
     getScrollTop = () => 0,
@@ -130,7 +140,12 @@ export function bindPreviewTableInteractions(previewEl, options) {
 
   previewEl.querySelectorAll(".clp-col-remove").forEach((button) => {
     button.addEventListener("click", () => {
-      onRemoveColumn?.(button.dataset.column ?? "");
+      const columnName = button.dataset.column ?? "";
+      if (typeof onColumnAction === "function") {
+        onColumnAction(columnName);
+        return;
+      }
+      onRemoveColumn?.(columnName);
     });
   });
 

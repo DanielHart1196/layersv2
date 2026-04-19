@@ -162,7 +162,12 @@ function enableLayerMenuControls({
 
   const draggableMenuMediaQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
 
+  const isMenuOpen = () => panel.classList.contains("is-open");
+
   const stopPropagation = (event) => {
+    if (!isMenuOpen()) {
+      return;
+    }
     event.stopPropagation();
   };
 
@@ -192,10 +197,16 @@ function enableLayerMenuControls({
 
   syncLayerMenuMaxHeight(wrapper, panel, button);
   setLayerMenuOpen(wrapper, panel, button, true);
-  const savedPosition = readLayerMenuPosition();
-  applyLayerMenuPosition(wrapper, panel, savedPosition ?? resolveDefaultLayerMenuPosition(wrapper, panel), {
-    persist: !savedPosition,
-  });
+  if (draggableMenuMediaQuery.matches) {
+    const savedPosition = readLayerMenuPosition();
+    applyLayerMenuPosition(wrapper, panel, savedPosition ?? resolveDefaultLayerMenuPosition(wrapper, panel), {
+      persist: !savedPosition,
+    });
+  } else {
+    wrapper.style.left = "";
+    wrapper.style.right = "";
+    wrapper.style.top = "";
+  }
 
   let activeDrag = null;
   let suppressNextButtonClick = false;
@@ -228,6 +239,9 @@ function enableLayerMenuControls({
     closeAppearanceRows(panel, appearanceControls, rerenderLayerMenu);
     setLayerMenuOpen(wrapper, panel, button, false);
     if (!draggableMenuMediaQuery.matches) {
+      wrapper.style.left = "";
+      wrapper.style.right = "";
+      wrapper.style.top = "";
       onMobileMenuClosed?.();
     }
   }
@@ -274,7 +288,7 @@ function enableLayerMenuControls({
   }
 
   button.addEventListener("pointerdown", (event) => {
-    stopPropagation(event);
+    event.stopPropagation();
     if (!draggableMenuMediaQuery.matches) {
       return;
     }
@@ -295,7 +309,8 @@ function enableLayerMenuControls({
     window.addEventListener("pointercancel", stopDrag);
   });
 
-  button.addEventListener("click", () => {
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
     if (suppressNextButtonClick) {
       suppressNextButtonClick = false;
       return;

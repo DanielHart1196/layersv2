@@ -49,6 +49,13 @@ function getPreviewHeaderBackground(state) {
   return `rgba(${Math.round(rgb.r * darkenFactor)}, ${Math.round(rgb.g * darkenFactor)}, ${Math.round(rgb.b * darkenFactor)}, 0.96)`;
 }
 
+function formatGeometryTypes(geometryTypes = [], geometryType = "mixed") {
+  if (Array.isArray(geometryTypes) && geometryTypes.length) {
+    return geometryTypes.join(" + ");
+  }
+  return geometryType || "mixed";
+}
+
 function createPanelShell() {
   const root = document.createElement("div");
   root.className = "clp-panel dtv-panel";
@@ -113,7 +120,7 @@ function renameObjectKey(target, fromKey, toKey) {
   return Object.fromEntries(Object.entries(target).map(([key, value]) => [key === fromKey ? toKey : key, value]));
 }
 
-export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getLayerDatasets, onAddDataRequested }) {
+export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getLayerDatasets, onAddDataRequested, onCreateFilterRequested }) {
   const panel = createPanelShell();
   document.body.appendChild(panel);
 
@@ -146,8 +153,11 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       previewScrollTop: 0,
       columnWidths: {},
       headerAliases: {},
+      fieldKeyByHeader: {},
       removedSourceHeaders: {},
       loadRequestId: 0,
+      filterPickerColumn: "",
+      filterPickerValue: "",
       ...overrides,
     };
   }
@@ -178,8 +188,40 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
     return requestedDisplay;
   }
 
+  function getSourceFieldKeyForDisplay(displayHeader) {
+    return state.fieldKeyByHeader?.[displayHeader] ?? displayHeader;
+  }
+
   function normalizeRowToCurrentHeaders(row) {
     return Object.fromEntries((state.headers ?? []).map((header) => [header, row?.[header] ?? ""]));
+  }
+
+  function getFilterValuesForColumn(columnName) {
+    const seen = new Set();
+    const values = [];
+    (state.allRows ?? []).forEach((row) => {
+      const rawValue = row?.[columnName];
+      const normalized = rawValue == null ? "" : String(rawValue);
+      if (seen.has(normalized)) {
+        return;
+      }
+      seen.add(normalized);
+      values.push(normalized);
+    });
+
+    return values.sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }));
+  }
+
+  function closeFilterPicker() {
+    state.filterPickerColumn = "";
+    state.filterPickerValue = "";
+  }
+
+  function openFilterPicker(columnName) {
+    const values = getFilterValuesForColumn(columnName);
+    state.filterPickerColumn = columnName;
+    state.filterPickerValue = values[0] ?? "";
+    render();
   }
 
   function getSelectedDataset() {
@@ -236,6 +278,10 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
         return;
       }
       const displayHeader = getDisplayHeaderForSource(sourceHeader);
+      const field = fields.find((candidate) => (candidate?.label ?? candidate?.key) === sourceHeader);
+      if (displayHeader && field?.key) {
+        state.fieldKeyByHeader[displayHeader] = field.key;
+      }
       if (!state.headers.includes(displayHeader)) {
         state.headers.push(displayHeader);
         headersChanged = true;
@@ -295,6 +341,7 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       state.removedSourceHeaders[sourceHeader] = true;
       delete state.headerAliases[sourceHeader];
     }
+    delete state.fieldKeyByHeader[columnName];
     delete state.columnWidths[columnName];
     if (state.previewSortColumn === columnName) {
       state.previewSortColumn = "";
@@ -318,6 +365,10 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
     const sourceHeader = findSourceHeaderForDisplay(fromColumnName);
     if (sourceHeader) {
       state.headerAliases[sourceHeader] = nextColumnName;
+    }
+    if (Object.prototype.hasOwnProperty.call(state.fieldKeyByHeader, fromColumnName)) {
+      state.fieldKeyByHeader[nextColumnName] = state.fieldKeyByHeader[fromColumnName];
+      delete state.fieldKeyByHeader[fromColumnName];
     }
     if (Object.prototype.hasOwnProperty.call(state.columnWidths, fromColumnName)) {
       state.columnWidths[nextColumnName] = state.columnWidths[fromColumnName];
@@ -411,227 +462,6 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
     setPreviewColumnWidth(previewEl, columnIndex, columnName, maxWidth);
   }
 
-  function bindPreviewColumnResize(previewEl, headers) {
-    const table = previewEl.querySelector(".upload-preview");
-    const tableWrap = previewEl.querySelector(".clp-table-wrap");
-    if (!table || !tableWrap || headers.length < 2) return;
-
-    let activeResize = null;
-    let activeReorder = null;
-    let autoScrollFrame = 0;
-
-    function clearTargets() {
-      table.querySelectorAll(".is-col-resize-target, .is-col-reorder-target").forEach((cell) => {
-        cell.classList.remove("is-col-resize-target", "is-col-reorder-target");
-      });
-    }
-
-    function syncPreviewTable(previewHeaders = state.headers ?? []) {
-      const headRow = previewEl.querySelector(".upload-preview thead tr");
-      if (!headRow) return;
-      const headCells = new Map([...headRow.children].map((cell) => [cell.dataset.columnKey, cell]));
-      previewHeaders.forEach((header, index) => {
-        const cell = headCells.get(header);
-        if (!cell) return;
-        cell.dataset.columnIndex = String(index);
-        headRow.append(cell);
-      });
-      previewEl.querySelectorAll(".upload-preview tbody tr").forEach((row) => {
-        const cells = new Map([...row.children].map((cell) => [cell.dataset.columnKey, cell]));
-        previewHeaders.forEach((header, index) => {
-          const cell = cells.get(header);
-          if (!cell) return;
-          cell.dataset.columnIndex = String(index);
-          row.append(cell);
-        });
-      });
-    }
-
-    function updateActiveResizeWidth() {
-      if (!activeResize) return;
-      const nextWidth = activeResize.startWidth
-        + (activeResize.currentX - activeResize.startX)
-        + (tableWrap.scrollLeft - activeResize.startScrollLeft);
-      setPreviewColumnWidth(previewEl, activeResize.columnIndex, activeResize.columnName, nextWidth);
-    }
-
-    function applyActiveReorderAtPointer(pointerX) {
-      if (!activeReorder) return;
-      const currentHeaders = state.headers ?? [];
-      const currentIndex = currentHeaders.indexOf(activeReorder.columnName);
-      if (currentIndex === -1) return;
-      const currentHeader = table.querySelector(`th[data-column-key="${CSS.escape(activeReorder.columnName)}"]`);
-      if (!currentHeader) return;
-      const rect = currentHeader.getBoundingClientRect();
-      let direction = null;
-      if (pointerX < rect.left) direction = "left";
-      else if (pointerX > rect.right) direction = "right";
-      if (!direction) return;
-      const nextIndex = direction === "left" ? currentIndex - 1 : currentIndex + 1;
-      if (nextIndex < 0 || nextIndex >= currentHeaders.length) return;
-      reorderPreviewColumn(activeReorder.columnName, nextIndex);
-      syncPreviewTable(state.headers);
-    }
-
-    function computeAutoScrollDelta() {
-      const currentX = activeResize?.currentX ?? activeReorder?.currentX;
-      if (!Number.isFinite(currentX)) return 0;
-      const rect = tableWrap.getBoundingClientRect();
-      const leftDistance = currentX - rect.left;
-      const rightDistance = rect.right - currentX;
-      const clampedLeftDistance = Math.max(0, Math.min(PREVIEW_AUTO_SCROLL_EDGE, leftDistance));
-      const clampedRightDistance = Math.max(0, Math.min(PREVIEW_AUTO_SCROLL_EDGE, rightDistance));
-      if (leftDistance < PREVIEW_AUTO_SCROLL_EDGE && tableWrap.scrollLeft > 0) {
-        const intensity = (PREVIEW_AUTO_SCROLL_EDGE - clampedLeftDistance) / PREVIEW_AUTO_SCROLL_EDGE;
-        return -Math.max(1, Math.round(PREVIEW_AUTO_SCROLL_MAX_SPEED * intensity));
-      }
-      const maxScrollLeft = tableWrap.scrollWidth - tableWrap.clientWidth;
-      if (rightDistance < PREVIEW_AUTO_SCROLL_EDGE && tableWrap.scrollLeft < maxScrollLeft) {
-        const intensity = (PREVIEW_AUTO_SCROLL_EDGE - clampedRightDistance) / PREVIEW_AUTO_SCROLL_EDGE;
-        return Math.max(1, Math.round(PREVIEW_AUTO_SCROLL_MAX_SPEED * intensity));
-      }
-      return 0;
-    }
-
-    function stepAutoScroll() {
-      autoScrollFrame = 0;
-      if (!activeResize && !activeReorder) return;
-      const delta = computeAutoScrollDelta();
-      if (delta !== 0) {
-        const maxScrollLeft = tableWrap.scrollWidth - tableWrap.clientWidth;
-        const nextScrollLeft = Math.max(0, Math.min(maxScrollLeft, tableWrap.scrollLeft + delta));
-        if (nextScrollLeft !== tableWrap.scrollLeft) {
-          tableWrap.scrollLeft = nextScrollLeft;
-          if (activeResize) updateActiveResizeWidth();
-          if (activeReorder) applyActiveReorderAtPointer(activeReorder.currentX);
-        }
-      }
-      if (activeResize || activeReorder) autoScrollFrame = window.requestAnimationFrame(stepAutoScroll);
-    }
-
-    function stopActiveGesture() {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-      window.removeEventListener("pointercancel", handlePointerUp);
-      if (autoScrollFrame) {
-        window.cancelAnimationFrame(autoScrollFrame);
-        autoScrollFrame = 0;
-      }
-      previewEl.classList.remove("is-resizing-columns", "is-reordering-columns");
-      clearTargets();
-      activeResize = null;
-      activeReorder = null;
-      state.previewScrollLeft = tableWrap.scrollLeft;
-    }
-
-    function handlePointerMove(event) {
-      if (activeReorder) {
-        const deltaX = event.clientX - activeReorder.startX;
-        const deltaY = event.clientY - activeReorder.startY;
-        if (!activeReorder.dragging) {
-          if (Math.hypot(deltaX, deltaY) < 6) return;
-          activeReorder.dragging = true;
-          previewEl.classList.add("is-reordering-columns");
-        }
-        event.preventDefault();
-        activeReorder.currentX = event.clientX;
-        applyActiveReorderAtPointer(activeReorder.currentX);
-        return;
-      }
-      if (!activeResize) return;
-      activeResize.currentX = event.clientX;
-      updateActiveResizeWidth();
-    }
-
-    function handlePointerUp() {
-      stopActiveGesture();
-      render();
-    }
-
-    table.querySelectorAll("th[data-column-index]").forEach((headerCell, columnIndex) => {
-      function isNearDivider(event) {
-        const rect = headerCell.getBoundingClientRect();
-        return rect.right - event.clientX <= PREVIEW_RESIZE_HIT_WIDTH;
-      }
-
-      function isInReorderZone(event) {
-        const rect = headerCell.getBoundingClientRect();
-        return (
-          event.clientY - rect.top <= PREVIEW_REORDER_HIT_HEIGHT
-          && !isNearDivider(event)
-          && !event.target.closest(".clp-col-sort")
-          && !event.target.closest(".clp-col-remove")
-          && !event.target.closest(".clp-col-name-button")
-          && !event.target.closest(".clp-col-name-input")
-        );
-      }
-
-      headerCell.addEventListener("pointermove", (event) => {
-        if (activeResize || activeReorder) return;
-        headerCell.classList.toggle("is-col-resize-target", isNearDivider(event));
-        headerCell.classList.toggle("is-col-reorder-target", isInReorderZone(event));
-      });
-
-      headerCell.addEventListener("pointerleave", () => {
-        if (!activeResize && !activeReorder) {
-          headerCell.classList.remove("is-col-resize-target", "is-col-reorder-target");
-        }
-      });
-
-      headerCell.addEventListener("dblclick", (event) => {
-        if (!isNearDivider(event)) return;
-        event.preventDefault();
-        autosizePreviewColumn(previewEl, columnIndex, headers[columnIndex]);
-        render();
-      });
-
-      headerCell.addEventListener("pointerdown", (event) => {
-        if (isInReorderZone(event)) {
-          event.preventDefault();
-          clearTargets();
-          activeReorder = {
-            columnName: headers[columnIndex],
-            startX: event.clientX,
-            startY: event.clientY,
-            currentX: event.clientX,
-            dragging: false,
-          };
-          window.addEventListener("pointermove", handlePointerMove, { passive: false });
-          window.addEventListener("pointerup", handlePointerUp, { passive: false });
-          window.addEventListener("pointercancel", handlePointerUp);
-          if (!autoScrollFrame) autoScrollFrame = window.requestAnimationFrame(stepAutoScroll);
-          return;
-        }
-
-        if (
-          event.button !== 0
-          || event.target.closest(".clp-col-remove")
-          || event.target.closest(".clp-col-name-button")
-          || event.target.closest(".clp-col-name-input")
-          || !isNearDivider(event)
-        ) {
-          return;
-        }
-        event.preventDefault();
-        clearTargets();
-        activeResize = {
-          columnIndex,
-          columnName: headers[columnIndex],
-          startX: event.clientX,
-          currentX: event.clientX,
-          startWidth: headerCell.getBoundingClientRect().width,
-          startScrollLeft: tableWrap.scrollLeft,
-        };
-        previewEl.classList.add("is-resizing-columns");
-        headerCell.classList.add("is-col-resize-target");
-        window.addEventListener("pointermove", handlePointerMove);
-        window.addEventListener("pointerup", handlePointerUp);
-        window.addEventListener("pointercancel", handlePointerUp);
-        if (!autoScrollFrame) autoScrollFrame = window.requestAnimationFrame(stepAutoScroll);
-      });
-    });
-  }
-
   function render() {
     applyPanelBackground();
     const content = panel.querySelector(".clp-content");
@@ -655,10 +485,13 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       sortColumn: state.previewSortColumn,
       sortDirection: state.previewSortDirection,
       sortDisabled,
+      columnActionText: "Filter",
+      columnActionAriaPrefix: "Filter by",
+      columnActionTitle: "Filter by",
     });
     const selectedDataset = getSelectedDataset();
     const datasetOptions = (state.datasets ?? []).map((dataset) => `
-      <option value="${escapeHtml(dataset.id)}"${dataset.id === state.selectedDatasetId ? " selected" : ""}>${escapeHtml(dataset.name || "Dataset")}</option>
+      <option value="${escapeHtml(dataset.id)}"${dataset.id === state.selectedDatasetId ? " selected" : ""}>${escapeHtml(`${dataset.name || "Dataset"} (${formatGeometryTypes(dataset.geometryTypes, dataset.geometry_type)})`)}</option>
     `).join("");
     const licenseLabel = String(selectedDataset?.license ?? "").trim();
     const licenseUrl = String(selectedDataset?.license_url ?? "").trim();
@@ -673,6 +506,11 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       : state.isBackgroundLoading && totalRowCount > rowCount
         ? `Loading ${rowCount.toLocaleString()} of ${totalRowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns`
         : `${rowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns`;
+    const filterColumn = state.filterPickerColumn;
+    const filterValues = filterColumn ? getFilterValuesForColumn(filterColumn) : [];
+    const filterSelectionLabel = state.filterPickerValue === ""
+      ? "Empty value"
+      : state.filterPickerValue;
 
     content.innerHTML = `
       <div class="clp-preview dtv-preview">
@@ -720,6 +558,34 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
             </div>
           </div>
         ` : `<div class="dtv-empty">${state.loading ? "Loading..." : "No rows to show yet."}</div>`}
+        ${filterColumn ? `
+          <div class="dtv-filter-picker-backdrop">
+            <div class="dtv-filter-picker" role="dialog" aria-modal="true" aria-label="Create filter">
+              <h3 class="upload-step-title">Create filter</h3>
+              <p class="upload-step-sub">
+                ${escapeHtml(filterColumn)}
+                ${state.isFullyLoaded ? "" : " · values from loaded rows so far"}
+              </p>
+              <label class="clp-field">
+                <span class="clp-field-label">Value</span>
+                <select class="clp-field-input dtv-filter-value-select" ${filterValues.length ? "" : "disabled"}>
+                  ${filterValues.length
+                    ? filterValues.map((value) => `
+                      <option value="${escapeHtml(value)}"${value === state.filterPickerValue ? " selected" : ""}>
+                        ${escapeHtml(value === "" ? "Empty value" : value)}
+                      </option>
+                    `).join("")
+                    : `<option value="">No values loaded</option>`}
+                </select>
+              </label>
+              <p class="upload-step-sub">This will add a persistent filter row with its own style rows.</p>
+              <div class="clp-actions">
+                <button class="clp-btn clp-btn-secondary" type="button" id="dtvFilterCancel">Cancel</button>
+                <button class="clp-btn clp-btn-primary" type="button" id="dtvFilterCreate" ${filterValues.length ? "" : "disabled"}>Create filter for ${escapeHtml(filterSelectionLabel)}</button>
+              </div>
+            </div>
+          </div>
+        ` : ""}
       </div>
     `;
 
@@ -769,6 +635,37 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       syncPreviewPageRows();
       render();
     });
+    content.querySelector("#dtvFilterCancel")?.addEventListener("click", () => {
+      closeFilterPicker();
+      render();
+    });
+    content.querySelector(".dtv-filter-picker-backdrop")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) {
+        closeFilterPicker();
+        render();
+      }
+    });
+    content.querySelector(".dtv-filter-value-select")?.addEventListener("change", (event) => {
+      state.filterPickerValue = event.target.value ?? "";
+    });
+    content.querySelector("#dtvFilterCreate")?.addEventListener("click", async () => {
+      try {
+        await onCreateFilterRequested?.({
+          layerId: state.layerId,
+          layerName: state.layerName,
+          columnName: getSourceFieldKeyForDisplay(state.filterPickerColumn),
+          columnLabel: state.filterPickerColumn,
+          value: state.filterPickerValue,
+          datasetId: state.selectedDatasetId,
+        });
+        closeFilterPicker();
+        render();
+      } catch (error) {
+        state.error = error?.message ?? "Failed to create filter.";
+        closeFilterPicker();
+        render();
+      }
+    });
     if (headers.length) {
       bindPreviewTableInteractions(content, {
         headers,
@@ -799,8 +696,8 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
           state.renameDraft = "";
           render();
         },
-        onRemoveColumn: (columnName) => {
-          removePreviewColumn(columnName);
+        onColumnAction: (columnName) => {
+          openFilterPicker(columnName);
         },
         getScrollLeft: () => state.previewScrollLeft,
         setScrollLeft: (scrollLeft) => {
@@ -817,6 +714,60 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
     }
   }
 
+  function syncRenderedBackgroundLoadUi() {
+    if (!panel.classList.contains("is-open")) {
+      return;
+    }
+
+    const content = panel.querySelector(".clp-content");
+    if (!content) {
+      return;
+    }
+
+    const rowCount = state.rowCount ?? 0;
+    const totalRowCount = state.totalRowCount ?? rowCount;
+    const columnCount = state.columnCount ?? 0;
+    const pageOffset = state.previewPageOffset ?? 0;
+    const rows = state.rows ?? [];
+    const pageStart = rowCount ? pageOffset + 1 : 0;
+    const pageEnd = Math.min(pageOffset + rows.length, rowCount);
+    const sortDisabled = !state.isFullyLoaded;
+
+    const summaryText = state.loading
+      ? "Loading rows..."
+      : state.isBackgroundLoading && totalRowCount > rowCount
+        ? `Loading ${rowCount.toLocaleString()} of ${totalRowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns`
+        : `${rowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns`;
+
+    const summaryEl = content.querySelector(".upload-step-sub");
+    if (summaryEl) {
+      summaryEl.textContent = summaryText;
+    }
+
+    const pageRangeEl = content.querySelector(".clp-preview-page-range");
+    if (pageRangeEl) {
+      pageRangeEl.textContent = `${pageStart}-${pageEnd}`;
+    }
+
+    const prevButton = content.querySelector("#dtvPrev");
+    if (prevButton) {
+      prevButton.disabled = pageOffset <= 0;
+    }
+
+    const nextButton = content.querySelector("#dtvNext");
+    if (nextButton) {
+      nextButton.disabled = pageOffset + PREVIEW_PAGE_SIZE >= rowCount;
+    }
+
+    content.querySelectorAll(".clp-col-sort").forEach((button) => {
+      const columnName = button.getAttribute("data-column") ?? "";
+      button.disabled = sortDisabled;
+      button.title = sortDisabled
+        ? "Sort available when all rows are loaded"
+        : `Sort ${columnName}`;
+    });
+  }
+
   async function loadRemainingRows(layerId, datasetId, offset, requestId) {
     let nextOffset = offset;
     while (requestId === state.loadRequestId) {
@@ -828,7 +779,7 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       const rows = Array.isArray(result?.rows) ? result.rows : [];
       appendChunk(fields, rows, result?.totalRowCount);
       state.isBackgroundLoading = Boolean(result?.hasMore);
-      render();
+      syncRenderedBackgroundLoadUi();
       if (!result?.hasMore || !rows.length) {
         break;
       }
@@ -891,6 +842,7 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       state.previewScrollTop = 0;
       state.columnWidths = {};
       state.headerAliases = {};
+      state.fieldKeyByHeader = {};
       state.removedSourceHeaders = {};
       state.selectedDatasetId = datasetId;
 
@@ -927,7 +879,7 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
     }
     state.isBackgroundLoading = false;
     state.isFullyLoaded = state.rowCount >= state.totalRowCount;
-    render();
+    syncRenderedBackgroundLoadUi();
   }
 
   function close() {

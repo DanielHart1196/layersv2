@@ -5,6 +5,29 @@ const ROOT_ROW_IDS = ["earth"];
 const SHARED_COLOR_STORAGE_KEY = "layerv2.colors.customColors";
 const SHARED_COLOR_PRESETS = ["#000000", "#FFFFFF", "#d94b4b", "#e58a2b", "#e5c84a", "#5b8c5a", "#4b6ed9", "#8c5bd6"];
 
+function normalizeGeometryTypes(geometryTypes = [], geometryType = "mixed") {
+  const source = Array.isArray(geometryTypes) && geometryTypes.length
+    ? geometryTypes
+    : [geometryType];
+  const normalized = source.map((value) => {
+    if (value === "polygon" || value === "area") return "polygon";
+    if (value === "line") return "line";
+    if (value === "point") return "point";
+    return null;
+  }).filter(Boolean);
+
+  return ["point", "line", "polygon"].filter((family, index, families) => (
+    normalized.includes(family) && families.indexOf(family) === index
+  ));
+}
+
+function collapseGeometryTypes(geometryTypes = []) {
+  if (geometryTypes.length === 1) {
+    return geometryTypes[0];
+  }
+  return "mixed";
+}
+
 function createDataRow({
   id,
   label,
@@ -15,8 +38,10 @@ function createDataRow({
   pinnedOrder = null,
   layerRef = null,
   runtimeLayerId = null,
+  geometryTypes = [],
   geometryType = "mixed",
 }) {
+  const resolvedGeometryTypes = normalizeGeometryTypes(geometryTypes, geometryType);
   return {
     id,
     type: "layer",
@@ -25,7 +50,8 @@ function createDataRow({
     layerId,
     runtimeLayerId: runtimeLayerId ?? layerId,
     layerRef,
-    geometryType,
+    geometryTypes: resolvedGeometryTypes,
+    geometryType: collapseGeometryTypes(resolvedGeometryTypes),
     hidden,
     defaultExpanded,
     ...(pinnedOrder ? { pinnedOrder } : {}),

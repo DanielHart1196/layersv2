@@ -1,5 +1,5 @@
 import { requireSupabase } from "../lib/supabase.js";
-import { inferGeometryFamily } from "./geometry-family.js";
+import { inferGeometryFamilies, inferGeometryFamily } from "./geometry-family.js";
 
 const BATCH_SIZE = 500;
 
@@ -83,12 +83,31 @@ function inferGeometryType(features = []) {
   return inferGeometryFamily(features);
 }
 
+function inferGeometryTypes(features = []) {
+  return inferGeometryFamilies(features);
+}
+
+function collapseGeometryTypes(geometryTypes = []) {
+  if (geometryTypes.length === 1) {
+    return geometryTypes[0];
+  }
+  return "mixed";
+}
+
 function mergeLayerGeometryType(currentType, nextType) {
   if (!currentType) return nextType;
   if (!nextType) return currentType;
   if (currentType === "mixed" || nextType === "mixed") return "mixed";
   if (currentType === nextType) return currentType;
   return "mixed";
+}
+
+function mergeGeometryTypes(currentTypes = [], nextTypes = []) {
+  const merged = new Set([
+    ...(Array.isArray(currentTypes) ? currentTypes : []),
+    ...(Array.isArray(nextTypes) ? nextTypes : []),
+  ]);
+  return ["point", "line", "polygon"].filter((family) => merged.has(family));
 }
 
 function defaultStyleForType(type) {
@@ -298,6 +317,7 @@ async function loadDatasetFeatures(supabase, datasetId) {
 async function createDatasetRecord(supabase, {
   layerId,
   name,
+  geometryTypes,
   geometryType,
   fieldSchema,
   license,
@@ -312,6 +332,7 @@ async function createDatasetRecord(supabase, {
       license: normalizeDatasetMetadataValue(license),
       license_url: normalizeDatasetMetadataValue(licenseUrl),
       attribution: normalizeDatasetMetadataValue(attribution),
+      geometry_types: Array.isArray(geometryTypes) ? geometryTypes : [],
       geometry_type: geometryType,
       field_schema: normalizeFieldSchema(fieldSchema),
     })
@@ -325,10 +346,10 @@ async function createDatasetRecord(supabase, {
   return data.id;
 }
 
-async function updateLayerSummary(supabase, layerId, nextGeometryType) {
+async function updateLayerSummary(supabase, layerId, nextGeometryTypes, nextGeometryType = collapseGeometryTypes(nextGeometryTypes)) {
   const { data: layer, error: readError } = await supabase
     .from("layers")
-    .select("geometry_type")
+    .select("geometry_type, geometry_types")
     .eq("id", layerId)
     .single();
 
@@ -336,10 +357,14 @@ async function updateLayerSummary(supabase, layerId, nextGeometryType) {
     throw new Error(`Failed to read layer summary: ${readError.message}`);
   }
 
+  const mergedGeometryTypes = mergeGeometryTypes(layer?.geometry_types ?? [], nextGeometryTypes);
   const mergedGeometryType = mergeLayerGeometryType(layer?.geometry_type ?? null, nextGeometryType);
   const { error: updateError } = await supabase
     .from("layers")
-    .update({ geometry_type: mergedGeometryType })
+    .update({
+      geometry_types: mergedGeometryTypes,
+      geometry_type: mergedGeometryType,
+    })
     .eq("id", layerId);
 
   if (updateError) {
@@ -361,6 +386,7 @@ export async function createLayerWithDataset({
   onProgress,
 }) {
   const supabase = requireSupabase();
+  const geometryTypes = inferGeometryTypes(features);
   const geometryType = inferGeometryType(features);
   const resolvedDatasetName = String(datasetName || rawFile?.name || name || "Dataset").replace(/\.[^.]+$/, "").trim() || "Dataset";
   const artifactFormat = usePmtiles ? "pmtiles" : "geojson";
@@ -387,6 +413,7 @@ export async function createLayerWithDataset({
       .insert({
         name,
         view_access: viewAccess,
+        geometry_types: geometryTypes,
         geometry_type: geometryType,
         default_style: defaultStyleForType(geometryType),
       })
@@ -401,6 +428,7 @@ export async function createLayerWithDataset({
     datasetId = await createDatasetRecord(supabase, {
       layerId,
       name: resolvedDatasetName,
+      geometryTypes,
       license,
       licenseUrl,
       attribution,
@@ -450,6 +478,7 @@ export async function addDatasetToLayer({
   onProgress,
 }) {
   const supabase = requireSupabase();
+  const geometryTypes = inferGeometryTypes(features);
   const geometryType = inferGeometryType(features);
   const datasetName = String(name || rawFile?.name || "Dataset").replace(/\.[^.]+$/, "").trim() || "Dataset";
   const artifactFormat = usePmtiles ? "pmtiles" : "geojson";
@@ -485,6 +514,7 @@ export async function addDatasetToLayer({
     datasetId = await createDatasetRecord(supabase, {
       layerId,
       name: datasetName,
+      geometryTypes,
       license,
       licenseUrl,
       attribution,
@@ -511,7 +541,7 @@ export async function addDatasetToLayer({
       progressEnd: 100,
     });
 
-    await updateLayerSummary(supabase, layerId, geometryType);
+    await updateLayerSummary(supabase, layerId, geometryTypes, geometryType);
     return { datasetId };
   } catch (error) {
     const cleanupIssues = await cleanupPartialUpload(supabase, { datasetId, layerId: null });
@@ -537,7 +567,7 @@ export async function appendFeaturesToDataset({
   const supabase = requireSupabase();
   const { data: dataset, error: datasetError } = await supabase
     .from("datasets")
-    .select("id, layer_id, name, license, license_url, attribution, geometry_type, field_schema")
+    .select("id, layer_id, name, license, license_url, attribution, geometry_type, geometry_types, field_schema")
     .eq("id", datasetId)
     .single();
 
@@ -556,7 +586,9 @@ export async function appendFeaturesToDataset({
   }
 
   const existingFeatures = await loadDatasetFeatures(supabase, datasetId);
+  const incomingGeometryTypes = inferGeometryTypes(features);
   const incomingGeometryType = inferGeometryType(features);
+  const nextGeometryTypes = mergeGeometryTypes(dataset.geometry_types ?? [], incomingGeometryTypes);
   const nextGeometryType = mergeLayerGeometryType(dataset.geometry_type, incomingGeometryType);
   const normalizedFieldSchema = normalizeFieldSchema(fieldSchema);
   const artifactFormat = usePmtiles ? "pmtiles" : "geojson";
@@ -591,6 +623,7 @@ export async function appendFeaturesToDataset({
       license: normalizeDatasetMetadataValue(license),
       license_url: normalizeDatasetMetadataValue(licenseUrl),
       attribution: normalizeDatasetMetadataValue(attribution),
+      geometry_types: nextGeometryTypes,
       geometry_type: nextGeometryType,
       field_schema: normalizedFieldSchema,
     })
@@ -613,7 +646,7 @@ export async function appendFeaturesToDataset({
     progressOffset: usePmtiles ? 82 : 76,
   });
 
-  await updateLayerSummary(supabase, dataset.layer_id, nextGeometryType);
+  await updateLayerSummary(supabase, dataset.layer_id, nextGeometryTypes, nextGeometryType);
 
   return { datasetId, inserted };
 }

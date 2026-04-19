@@ -5,25 +5,29 @@ function geometryTypeToFamily(type) {
   return null;
 }
 
-function inferGeometryFamily(features = []) {
+function inferGeometryFamilies(features = []) {
   const families = new Set(
     features
       .map((feature) => geometryTypeToFamily(feature?.geometry?.type))
       .filter(Boolean),
   );
 
-  if (families.size === 1) {
-    return [...families][0];
-  }
+  return ["point", "line", "polygon"].filter((family) => families.has(family));
+}
 
-  if (families.size > 1) {
+function inferGeometryFamily(features = []) {
+  const families = inferGeometryFamilies(features);
+  if (families.length === 1) {
+    return families[0];
+  }
+  if (families.length > 1) {
     return "mixed";
   }
-
   return "mixed";
 }
 
 export {
   geometryTypeToFamily,
+  inferGeometryFamilies,
   inferGeometryFamily,
 };

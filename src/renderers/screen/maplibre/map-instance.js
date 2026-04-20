@@ -605,16 +605,24 @@ function getOrderedChildLayerRowIds(layerState, parentRowId, defaultOrder = [], 
 }
 
 function moveRowSubtree(map, layerState, rowId, moveLayer, getOrderedChildRowIds = null) {
+  const movedLayerIds = new Set();
   const childOrder = getOrderedChildLayerRowIds(layerState, rowId, [], getOrderedChildRowIds);
   if (childOrder.length) {
     for (const childId of [...childOrder].reverse()) {
-      moveRowSubtree(map, layerState, childId, moveLayer, getOrderedChildRowIds);
+      const childMovedLayerIds = moveRowSubtree(map, layerState, childId, moveLayer, getOrderedChildRowIds);
+      childMovedLayerIds.forEach((layerId) => movedLayerIds.add(layerId));
     }
-    return;
   }
 
   const runtimeTargetId = getRuntimeTargetIdFromState(layerState, rowId);
-  getMaplibreLayerIdsForRuntimeTarget(runtimeTargetId, map).forEach(moveLayer);
+  getMaplibreLayerIdsForRuntimeTarget(runtimeTargetId, map).forEach((layerId) => {
+    if (!movedLayerIds.has(layerId)) {
+      moveLayer(layerId);
+      movedLayerIds.add(layerId);
+    }
+  });
+
+  return movedLayerIds;
 }
 
 // Ordering rule:
@@ -629,6 +637,11 @@ function applyFullLayerOrder(map, layerState, getOrderedChildRowIds = null) {
   for (const groupId of [...rootOrder].reverse()) {
     moveRowSubtree(map, layerState, groupId, moveLayer, getOrderedChildRowIds);
   }
+}
+
+function applyRowSubtreeOrder(map, layerState, rowId, getOrderedChildRowIds = null) {
+  const moveLayer = (id) => { if (map.getLayer(id)) map.moveLayer(id, undefined); };
+  moveRowSubtree(map, layerState, rowId, moveLayer, getOrderedChildRowIds);
 }
 
 function isRealPmtilesUrl(url) {
@@ -1598,12 +1611,6 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
   });
   map.on("load", () => {
     updateCompassOverlay(map, compassOverlay);
-    // Upgrade any layers that loaded with a fast initialUrl — swap to full
-    // quality in the background. Non-blocking: map stays interactive.
-    LOCAL_LAYERS.filter((l) => l.source.initialUrl).forEach((l) => {
-      map.getSource(localLayerSourceId(l.id))?.setData(l.source.url);
-    });
-
     // Phase 1: All visible-by-default layers — load immediately in parallel
     // Note: water, land, and graticules are already in the initial style
     // and start loading before this event fires. attachStandardLayer's source
@@ -1615,6 +1622,13 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
             .filter((entry) => !entry.deferred)
             .map((entry) => attachStandardLayer(map, layerState, manifest, entry))
         );
+
+        // Upgrade any layers that loaded with a fast initialUrl only after the
+        // primary visible layers have attached, so the detailed land swap does
+        // not compete with first-pass visible layer loading.
+        LOCAL_LAYERS.filter((l) => l.source.initialUrl).forEach((l) => {
+          map.getSource(localLayerSourceId(l.id))?.setData(l.source.url);
+        });
 
         applyFullLayerOrder(map, layerState, getOrderedChildRowIds);
       } catch (error) {
@@ -1907,6 +1921,9 @@ function getMapLayerDebugSnapshot(layerId, paintKeys = [], layoutKeys = []) {
     },
     reapplyFullOrder() {
       applyFullLayerOrder(map, layerState, getOrderedChildRowIds);
+    },
+    reapplyRowSubtreeOrder(rowId) {
+      applyRowSubtreeOrder(map, layerState, rowId, getOrderedChildRowIds);
     },
     setLayerStyleValue(layerId, key, value) {
       if (!layerState[layerId] || typeof layerState[layerId] !== "object") {

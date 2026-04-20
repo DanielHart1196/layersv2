@@ -134,6 +134,9 @@ function createMaplibreScreenRuntime({
     reapplyFullOrder() {
       mapInstance?.reapplyFullOrder?.();
     },
+    reapplyRowSubtreeOrder(rowId) {
+      mapInstance?.reapplyRowSubtreeOrder?.(rowId);
+    },
     setLayerStyleValue(layerId, key, value) {
       mapInstance?.setLayerStyleValue?.(layerId, key, value);
     },

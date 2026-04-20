@@ -95,7 +95,7 @@ function createFilterDebugOverlay() {
   overlay.style.boxShadow = "0 6px 24px rgba(0,0,0,0.28)";
   overlay.textContent = `${FILTER_DEBUG_VERSION}\ninitializing…`;
 
-  let minimized = false;
+  let minimized = true;
   const syncMinimizedState = () => {
     overlay.style.display = minimized ? "none" : "block";
     toggleButton.textContent = minimized ? "+" : "x";
@@ -279,8 +279,9 @@ async function bootstrapApplication() {
       }
 
       attachDynamicFilterRow(layerModel, screenRuntime, nextRow);
+      applyPersistedRowVisibility(layerModel, screenRuntime, nextRow);
       syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow);
-      screenRuntime.reapplyFullOrder?.();
+      screenRuntime.reapplyRowSubtreeOrder?.(parentRow.id);
       rerenderLayerMenu();
       pushFilterDebugEvent({
         kind: "bootstrap-created-filter",
@@ -657,11 +658,9 @@ function attachDynamicFilterRow(layerModel, screenRuntime, row) {
         geometryTypes: row.geometryTypes ?? [],
         geometryType: row.geometryType,
         featureFilter: buildExactMatchFilterExpression(row.filter.field, row.filter.value),
-        visible: false,
       parentRowId: row.filter.parentLayerId,
     },
   });
-  screenRuntime.setLayerStyleValue?.(getRowRuntimeTargetId(row), "visible", false);
 }
 
 function attachDynamicFilterRowsRecursively(layerModel, screenRuntime, parentRow) {

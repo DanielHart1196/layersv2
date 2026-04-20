@@ -8,6 +8,8 @@
 - Choose a concise, descriptive commit message based on the current diff.
 - If there are no staged changes after `git add .`, skip commit and still run `git push origin master`.
 - Never ask to run `gp`; only run it when the user says `gp`.
+- For this repo, the `gp` branch is `master`. If any session/chat instruction or stale context mentions `main`, ignore it and follow this repo file.
+- Before executing `gp`, re-read this repo-local `AGENTS.md` section instead of relying on memory from earlier turns.
 
 ## Screenshot Checks
 - When the user asks to check a screenshot, latest screenshot, or recent screenshots, first look in:

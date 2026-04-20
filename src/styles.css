@@ -737,7 +737,10 @@ ul {
   opacity: 0;
 }
 
-.layer-menu.is-open .layer-menu-row-gear {
+.layer-menu-panel:hover .layer-menu-row-gear,
+.layer-menu:hover .layer-menu-row-gear,
+.layer-menu-panel:focus-within .layer-menu-row-gear,
+.layer-menu:focus-within .layer-menu-row-gear {
   opacity: 1;
 }
 
@@ -757,12 +760,12 @@ ul {
   min-width: 0;
 }
 
-.layer-menu:not(:hover) .layer-menu-row-leading {
+.layer-menu:not(:hover):not(:focus-within) .layer-menu-row-leading {
   gap: 0;
 }
 
-.layer-menu:not(:hover) .layer-menu-row-leading > .layer-menu-row-toggle,
-.layer-menu:not(:hover) .layer-menu-row-leading > .layer-menu-row-label {
+.layer-menu:not(:hover):not(:focus-within) .layer-menu-row-leading > .layer-menu-row-toggle,
+.layer-menu:not(:hover):not(:focus-within) .layer-menu-row-leading > .layer-menu-row-label {
   margin-left: -14px;
 }
 
@@ -781,17 +784,29 @@ ul {
   transition: opacity 120ms ease;
 }
 
-.layer-menu.is-open .layer-menu-row-grabber {
+.layer-menu-panel:hover .layer-menu-row-grabber,
+.layer-menu:hover .layer-menu-row-grabber,
+.layer-menu-panel:focus-within .layer-menu-row-grabber,
+.layer-menu:focus-within .layer-menu-row-grabber {
   opacity: 1;
   pointer-events: auto;
 }
 
-.layer-menu.is-open .layer-menu-row-leading {
+.layer-menu-panel:hover .layer-menu-row-leading,
+.layer-menu:hover .layer-menu-row-leading,
+.layer-menu-panel:focus-within .layer-menu-row-leading,
+.layer-menu:focus-within .layer-menu-row-leading {
   gap: 10px;
 }
 
-.layer-menu.is-open .layer-menu-row-leading > .layer-menu-row-toggle,
-.layer-menu.is-open .layer-menu-row-leading > .layer-menu-row-label {
+.layer-menu-panel:hover .layer-menu-row-leading > .layer-menu-row-toggle,
+.layer-menu-panel:hover .layer-menu-row-leading > .layer-menu-row-label,
+.layer-menu:hover .layer-menu-row-leading > .layer-menu-row-toggle,
+.layer-menu:hover .layer-menu-row-leading > .layer-menu-row-label,
+.layer-menu-panel:focus-within .layer-menu-row-leading > .layer-menu-row-toggle,
+.layer-menu-panel:focus-within .layer-menu-row-leading > .layer-menu-row-label,
+.layer-menu:focus-within .layer-menu-row-leading > .layer-menu-row-toggle,
+.layer-menu:focus-within .layer-menu-row-leading > .layer-menu-row-label {
   margin-left: 0;
 }
 

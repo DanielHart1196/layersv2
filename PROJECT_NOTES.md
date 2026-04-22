@@ -49,6 +49,15 @@
 - The Earth control may open a dedicated Earth styling panel instead of appearing as a normal row in the main layer list.
 - Earth can be bespoke in presentation while still reusing proven row-style UI patterns internally where they help.
 
+## Earthlab UI Notes
+- `earthlab` is the current reference surface for simple Earth-only control behavior.
+- In Earthlab, `Land` should be a parent row with child rows for:
+  - `Fill`
+  - `Line`
+- Child Earth rows, not only parent rows, should be allowed to own visibility, styling, and order state when they map to real render units.
+- If Earth rows are shown in a compact stack, supporting controls such as `Add layer` should live in that same stack rhythm rather than being spaced by outer panel gaps.
+- Header controls may be bespoke, but Earth layer controls should still behave like rows first.
+
 ## Earth State Direction
 - Even if Earth UI is bespoke, Earth state should stay disciplined and explicit.
 - Prefer simple persisted Earth targets such as:
@@ -64,6 +73,23 @@
   - `lineWeight`
 - Persist Earth styling state locally from the beginning.
 - Earth persistence should be easy to read, easy to reset, and not entangled with old Earth compatibility state.
+
+## Earthlab Ordering Notes
+- In Earthlab, menu order, persisted order, and deck render order should all come from the same shared Earth order state.
+- In Earthlab, the top item in the Earth menu should be the topmost rendered Earth layer. Do not invert that relationship.
+- `Land` child order should map directly to `land.fill` and `land.line` render order, not through a parent-only special case.
+- Persisted order restore should reorder the DOM on startup, but routine style sync should not re-append rows if order has not changed.
+- Do not perform DOM row reordering during slider/color input refresh paths; that breaks focus and drag continuity for controls.
+
+## Earthlab Reorder Interaction
+- Earthlab row reordering should follow the proven main-project model:
+  - drag starts after a movement threshold
+  - once dragging starts, collapse the open row
+  - reorder one adjacent slot at a time
+  - move up when the pointer goes above the dragged row's top
+  - move down when the pointer goes below the dragged row's bottom
+- Avoid hover-target insertion math for Earthlab rows unless there is a clear demonstrated need; the adjacent-step model is easier to reason about and matched user expectations better here.
+- While dragging, preview order updates should happen live as the row crosses its own top/bottom thresholds, not only on release.
 
 ## Rebuild Rules
 - Build the next Earth runtime as if the old Earth runtime does not exist.

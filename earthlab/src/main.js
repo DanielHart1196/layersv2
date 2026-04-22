@@ -22,14 +22,32 @@ const DEFAULT_RENDER_ORDER = [
   "land.line",
   "land.fill",
 ];
+const TOP_ROW_TO_LAYER_IDS = {
+  ocean: ["ocean.fill"],
+  graticules: ["graticules.line"],
+  land: ["land.line", "land.fill"],
+};
+const LAYER_ID_TO_TOP_ROW = {
+  "ocean.fill": "ocean",
+  "graticules.line": "graticules",
+  "land.line": "land",
+  "land.fill": "land",
+};
 
 const DEFAULT_STYLE = {
   oceanColor: "#2c6f92",
+  oceanOpacity: 100,
   landFillColor: "#6eaa6e",
+  landFillOpacity: 100,
   landLineColor: "#d9e4da",
+  landLineOpacity: 100,
+  landLineWidth: 1,
   graticulesColor: "#8fa9bc",
+  graticulesOpacity: 100,
+  graticulesWidth: 1,
   oceanVisible: true,
-  landVisible: true,
+  landFillVisible: true,
+  landLineVisible: true,
   graticulesVisible: true,
   renderOrder: DEFAULT_RENDER_ORDER,
 };
@@ -42,6 +60,7 @@ const state = {
   graticules: null,
   style: readStyleState(),
   openStyleRow: null,
+  drag: null,
 };
 
 function setBootStage(stage) {
@@ -124,17 +143,28 @@ const controls = {
   oceanSwatch: document.getElementById("oceanSwatch"),
   graticulesSwatch: document.getElementById("graticulesSwatch"),
   landSwatch: document.getElementById("landSwatch"),
+  landFillSwatch: document.getElementById("landFillSwatch"),
+  landLineSwatch: document.getElementById("landLineSwatch"),
   oceanToggle: document.getElementById("oceanToggle"),
   graticulesToggle: document.getElementById("graticulesToggle"),
   landToggle: document.getElementById("landToggle"),
+  landFillToggle: document.getElementById("landFillToggle"),
+  landLineToggle: document.getElementById("landLineToggle"),
   oceanStyle: document.getElementById("oceanStyle"),
   graticulesStyle: document.getElementById("graticulesStyle"),
-  landStyle: document.getElementById("landStyle"),
+  landChildren: document.getElementById("landChildren"),
+  landFillStyle: document.getElementById("landFillStyle"),
+  landLineStyle: document.getElementById("landLineStyle"),
   oceanColorPicker: document.getElementById("oceanColorPicker"),
+  oceanOpacitySlider: document.getElementById("oceanOpacitySlider"),
   graticulesColorPicker: document.getElementById("graticulesColorPicker"),
+  graticulesOpacitySlider: document.getElementById("graticulesOpacitySlider"),
+  graticulesWidthSlider: document.getElementById("graticulesWidthSlider"),
   landFillColorPicker: document.getElementById("landFillColorPicker"),
+  landFillOpacitySlider: document.getElementById("landFillOpacitySlider"),
   landLineColorPicker: document.getElementById("landLineColorPicker"),
-  status: document.getElementById("status"),
+  landLineOpacitySlider: document.getElementById("landLineOpacitySlider"),
+  landLineWidthSlider: document.getElementById("landLineWidthSlider"),
 };
 
 function readStyleState() {
@@ -144,9 +174,12 @@ function readStyleState() {
       return { ...DEFAULT_STYLE };
     }
     const parsed = JSON.parse(raw);
+    const sharedLandVisible = parsed?.landVisible;
     return {
       ...DEFAULT_STYLE,
       ...parsed,
+      landFillVisible: parsed?.landFillVisible ?? sharedLandVisible ?? DEFAULT_STYLE.landFillVisible,
+      landLineVisible: parsed?.landLineVisible ?? sharedLandVisible ?? DEFAULT_STYLE.landLineVisible,
       renderOrder: normalizeRenderOrder(parsed?.renderOrder),
     };
   } catch {
@@ -192,6 +225,11 @@ function toDeckColor(hex, alpha = 255) {
   return [r, g, b, alpha];
 }
 
+function percentToAlpha(percent = 100) {
+  const normalized = Math.max(0, Math.min(100, Number(percent) || 0));
+  return Math.round((normalized / 100) * 255);
+}
+
 function loadJson(url) {
   return fetch(url).then((response) => {
     if (!response.ok) {
@@ -209,43 +247,93 @@ function defer(task) {
   window.setTimeout(task, 0);
 }
 
+function getElementTarget(event) {
+  return event.target instanceof Element ? event.target : null;
+}
+
+function isLandGroupVisible() {
+  return state.style.landFillVisible || state.style.landLineVisible;
+}
+
+function getLandChildOrder(renderOrder = state.style.renderOrder) {
+  return normalizeRenderOrder(renderOrder).filter((layerId) => layerId.startsWith("land."));
+}
+
+function getTopRowOrder(renderOrder = state.style.renderOrder) {
+  const topRowIds = [];
+  normalizeRenderOrder(renderOrder).forEach((layerId) => {
+    const topRowId = LAYER_ID_TO_TOP_ROW[layerId];
+    if (topRowId && !topRowIds.includes(topRowId)) {
+      topRowIds.push(topRowId);
+    }
+  });
+  return topRowIds;
+}
+
+function syncRowOrderFromState() {
+  getTopRowOrder().forEach((rowId) => {
+    const rowElement = controls.rows.querySelector(`:scope > [data-reorder-id="${rowId}"]`);
+    if (rowElement) {
+      controls.rows.append(rowElement);
+    }
+  });
+
+  getLandChildOrder().forEach((layerId) => {
+    const rowElement = controls.landChildren.querySelector(`:scope > [data-reorder-id="${layerId}"]`);
+    if (rowElement) {
+      controls.landChildren.append(rowElement);
+    }
+  });
+}
+
+function rebuildRenderOrderFromDom() {
+  const nextOrder = [];
+
+  controls.rows.querySelectorAll(':scope > [data-reorder-scope="top"]').forEach((rowElement) => {
+    const rowId = rowElement.dataset.reorderId;
+    if (rowId === "land") {
+      controls.landChildren.querySelectorAll(':scope > [data-reorder-scope="land"]').forEach((childRow) => {
+        nextOrder.push(childRow.dataset.reorderId);
+      });
+      return;
+    }
+
+    TOP_ROW_TO_LAYER_IDS[rowId]?.forEach((layerId) => nextOrder.push(layerId));
+  });
+
+  state.style.renderOrder = normalizeRenderOrder(nextOrder);
+}
+
 function syncControlsFromState() {
   controls.oceanSwatch.style.background = state.style.oceanColor;
   controls.graticulesSwatch.style.background = state.style.graticulesColor;
   controls.landSwatch.style.background = `linear-gradient(135deg, ${state.style.landFillColor} 0 62%, ${state.style.landLineColor} 62% 100%)`;
+  controls.landFillSwatch.style.background = state.style.landFillColor;
+  controls.landLineSwatch.style.background = state.style.landLineColor;
   controls.oceanToggle.setAttribute("aria-checked", String(state.style.oceanVisible));
   controls.graticulesToggle.setAttribute("aria-checked", String(state.style.graticulesVisible));
-  controls.landToggle.setAttribute("aria-checked", String(state.style.landVisible));
+  controls.landToggle.setAttribute("aria-checked", String(isLandGroupVisible()));
+  controls.landFillToggle.setAttribute("aria-checked", String(state.style.landFillVisible));
+  controls.landLineToggle.setAttribute("aria-checked", String(state.style.landLineVisible));
   controls.oceanStyle.hidden = state.openStyleRow !== "ocean";
   controls.graticulesStyle.hidden = state.openStyleRow !== "graticules";
-  controls.landStyle.hidden = state.openStyleRow !== "land";
+  controls.landChildren.hidden = !["land", "landFill", "landLine"].includes(state.openStyleRow);
+  controls.landFillStyle.hidden = state.openStyleRow !== "landFill";
+  controls.landLineStyle.hidden = state.openStyleRow !== "landLine";
   controls.oceanColorPicker.value = state.style.oceanColor;
+  controls.oceanOpacitySlider.value = String(state.style.oceanOpacity);
   controls.graticulesColorPicker.value = state.style.graticulesColor;
+  controls.graticulesOpacitySlider.value = String(state.style.graticulesOpacity);
+  controls.graticulesWidthSlider.value = String(state.style.graticulesWidth);
   controls.landFillColorPicker.value = state.style.landFillColor;
+  controls.landFillOpacitySlider.value = String(state.style.landFillOpacity);
   controls.landLineColorPicker.value = state.style.landLineColor;
+  controls.landLineOpacitySlider.value = String(state.style.landLineOpacity);
+  controls.landLineWidthSlider.value = String(state.style.landLineWidth);
 }
 
 function updateStatus() {
-  if (!state.map) {
-    controls.status.textContent = "Loading...";
-    return;
-  }
-
-  const center = state.map.getCenter();
-  const canvas = state.map.getCanvas();
-  const canvasContainer = canvas?.parentElement;
-  controls.status.textContent = [
-    "mode: overlaid deck Earth",
-    "projection: globe",
-    `zoom: ${state.map.getZoom().toFixed(2)}`,
-    `center: ${center.lng.toFixed(2)}, ${center.lat.toFixed(2)}`,
-    `land loaded: ${state.land ? "yes" : "no"}`,
-    `land detail: ${state.landLow ? "low" : "none"}`,
-    `graticules loaded: ${state.graticules ? "yes" : "no"}`,
-    `dragPan enabled: ${state.map.dragPan?.isEnabled?.() ? "yes" : "no"}`,
-    `touchZoomRotate enabled: ${state.map.touchZoomRotate?.isEnabled?.() ? "yes" : "no"}`,
-    `canvas interactive class: ${canvasContainer?.classList?.contains("maplibregl-interactive") ? "yes" : "no"}`,
-  ].join("\n");
+  return;
 }
 
 function buildLayers() {
@@ -260,7 +348,7 @@ function buildLayers() {
       id: "earthlab-ocean",
       data: [{ polygon: OCEAN_RING }],
       getPolygon: (entry) => entry.polygon,
-      getFillColor: toDeckColor(state.style.oceanColor),
+      getFillColor: toDeckColor(state.style.oceanColor, percentToAlpha(state.style.oceanOpacity)),
       visible: state.style.oceanVisible,
       pickable: false,
       parameters: { depthTest: false },
@@ -271,10 +359,10 @@ function buildLayers() {
       data: state.graticules ?? { type: "FeatureCollection", features: [] },
       filled: false,
       stroked: true,
-      getLineColor: toDeckColor(state.style.graticulesColor),
-      getLineWidth: 1,
+      getLineColor: toDeckColor(state.style.graticulesColor, percentToAlpha(state.style.graticulesOpacity)),
+      getLineWidth: Number(state.style.graticulesWidth) || 0,
       lineWidthUnits: "pixels",
-      lineWidthMinPixels: 1,
+      lineWidthMinPixels: Number(state.style.graticulesWidth) || 0,
       visible: state.style.graticulesVisible,
       pickable: false,
       parameters: { depthTest: false },
@@ -285,11 +373,11 @@ function buildLayers() {
       data: state.land ?? { type: "FeatureCollection", features: [] },
       filled: false,
       stroked: true,
-      getLineColor: toDeckColor(state.style.landLineColor),
-      getLineWidth: 1,
+      getLineColor: toDeckColor(state.style.landLineColor, percentToAlpha(state.style.landLineOpacity)),
+      getLineWidth: Number(state.style.landLineWidth) || 0,
       lineWidthUnits: "pixels",
-      lineWidthMinPixels: 1,
-      visible: state.style.landVisible,
+      lineWidthMinPixels: Number(state.style.landLineWidth) || 0,
+      visible: state.style.landLineVisible,
       pickable: false,
       parameters: { depthTest: false },
     }),
@@ -299,14 +387,15 @@ function buildLayers() {
       data: state.land ?? { type: "FeatureCollection", features: [] },
       filled: true,
       stroked: false,
-      getFillColor: toDeckColor(state.style.landFillColor),
-      visible: state.style.landVisible,
+      getFillColor: toDeckColor(state.style.landFillColor, percentToAlpha(state.style.landFillOpacity)),
+      visible: state.style.landFillVisible,
       pickable: false,
       parameters: { depthTest: false },
     }),
   };
 
-  return normalizeRenderOrder(state.style.renderOrder)
+  return [...normalizeRenderOrder(state.style.renderOrder)]
+    .reverse()
     .map((layerId) => layerBuilders[layerId]?.())
     .filter(Boolean);
 }
@@ -325,24 +414,200 @@ function toggleStyleRow(rowId) {
   syncControlsFromState();
 }
 
+function getReorderContainer(scope) {
+  return scope === "land" ? controls.landChildren : controls.rows;
+}
+
+function getAdjacentReorderRow(rowElement, direction) {
+  let sibling = direction === "up"
+    ? rowElement.previousElementSibling
+    : rowElement.nextElementSibling;
+
+  while (sibling && sibling.dataset?.reorderScope !== rowElement.dataset.reorderScope) {
+    sibling = direction === "up"
+      ? sibling.previousElementSibling
+      : sibling.nextElementSibling;
+  }
+
+  return sibling ?? null;
+}
+
+function bindRowReordering() {
+  let suppressRowClickUntil = 0;
+
+  document.addEventListener("click", (event) => {
+    if (Date.now() <= suppressRowClickUntil) {
+      event.stopPropagation();
+      event.preventDefault();
+    }
+  }, true);
+
+  controls.rows.querySelectorAll(".earthlab-row").forEach((rowElement) => {
+    rowElement.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const target = getElementTarget(event);
+      if (!target) {
+        return;
+      }
+
+      if (target.closest(".earthlab-row") !== rowElement) {
+        return;
+      }
+
+      if (
+        target.closest(".earthlab-row-style") ||
+        target.closest(".earthlab-row-toggle") ||
+        target.closest(".earthlab-row-swatch")
+      ) {
+        return;
+      }
+
+      state.drag = {
+        pointerId: event.pointerId,
+        rowElement,
+        scope: rowElement.dataset.reorderScope,
+        startX: event.clientX,
+        startY: event.clientY,
+        dragging: false,
+        lastOrderKey: null,
+      };
+    });
+  });
+
+  document.addEventListener("pointermove", (event) => {
+    const drag = state.drag;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+    if (!drag.dragging && distance < 6) {
+      return;
+    }
+
+    if (!drag.dragging) {
+      drag.dragging = true;
+      if (state.openStyleRow === drag.rowElement.dataset.rowId) {
+        state.openStyleRow = null;
+      }
+      syncControlsFromState();
+      drag.rowElement.classList.add("earthlab-row-dragging");
+    }
+
+    const renderedRow = drag.rowElement;
+    const rect = renderedRow.getBoundingClientRect();
+    let direction = null;
+
+    if (event.clientY < rect.top) {
+      direction = "up";
+    } else if (event.clientY > rect.bottom) {
+      direction = "down";
+    }
+
+    if (!direction) {
+      return;
+    }
+
+    const container = getReorderContainer(drag.scope);
+    const adjacentRow = getAdjacentReorderRow(drag.rowElement, direction);
+    if (!adjacentRow) {
+      return;
+    }
+
+    const previousSibling = drag.rowElement.previousElementSibling;
+    const previousParent = drag.rowElement.parentElement;
+
+    if (direction === "up") {
+      container.insertBefore(drag.rowElement, adjacentRow);
+    } else {
+      container.insertBefore(drag.rowElement, adjacentRow.nextElementSibling);
+    }
+
+    const positionChanged =
+      drag.rowElement.parentElement !== previousParent ||
+      drag.rowElement.previousElementSibling !== previousSibling;
+
+    if (!positionChanged) {
+      return;
+    }
+
+    rebuildRenderOrderFromDom();
+    const orderKey = state.style.renderOrder.join("|");
+    if (orderKey === drag.lastOrderKey) {
+      return;
+    }
+
+    drag.lastOrderKey = orderKey;
+    persistStyleState();
+    updateOverlay();
+  });
+
+  document.addEventListener("pointerup", (event) => {
+    const drag = state.drag;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (drag.dragging) {
+      drag.rowElement.classList.remove("earthlab-row-dragging");
+      syncRowOrderFromState();
+      suppressRowClickUntil = Date.now() + 180;
+    }
+
+    state.drag = null;
+  });
+
+  document.addEventListener("pointercancel", (event) => {
+    const drag = state.drag;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    drag.rowElement.classList.remove("earthlab-row-dragging");
+    syncRowOrderFromState();
+    state.drag = null;
+  });
+}
+
 function bindControls() {
   [
     ["oceanSwatch", "ocean"],
     ["graticulesSwatch", "graticules"],
     ["landSwatch", "land"],
+    ["landFillSwatch", "landFill"],
+    ["landLineSwatch", "landLine"],
   ].forEach(([controlKey, rowId]) => {
-    controls[controlKey].addEventListener("click", () => {
+    controls[controlKey].addEventListener("click", (event) => {
+      event.stopPropagation();
       toggleStyleRow(rowId);
     });
   });
 
   [
-    ["oceanToggle", "oceanVisible"],
-    ["graticulesToggle", "graticulesVisible"],
-    ["landToggle", "landVisible"],
-  ].forEach(([controlKey, styleKey]) => {
-    controls[controlKey].addEventListener("click", () => {
-      state.style[styleKey] = !state.style[styleKey];
+    ["oceanToggle", () => {
+      state.style.oceanVisible = !state.style.oceanVisible;
+    }],
+    ["graticulesToggle", () => {
+      state.style.graticulesVisible = !state.style.graticulesVisible;
+    }],
+    ["landToggle", () => {
+      const nextVisible = !isLandGroupVisible();
+      state.style.landFillVisible = nextVisible;
+      state.style.landLineVisible = nextVisible;
+    }],
+    ["landFillToggle", () => {
+      state.style.landFillVisible = !state.style.landFillVisible;
+    }],
+    ["landLineToggle", () => {
+      state.style.landLineVisible = !state.style.landLineVisible;
+    }],
+  ].forEach(([controlKey, onToggle]) => {
+    controls[controlKey].addEventListener("click", (event) => {
+      event.stopPropagation();
+      onToggle();
       persistStyleState();
       updateOverlay();
     });
@@ -350,27 +615,61 @@ function bindControls() {
 
   [
     ["oceanColorPicker", "oceanColor"],
+    ["oceanOpacitySlider", "oceanOpacity"],
     ["graticulesColorPicker", "graticulesColor"],
+    ["graticulesOpacitySlider", "graticulesOpacity"],
+    ["graticulesWidthSlider", "graticulesWidth"],
     ["landFillColorPicker", "landFillColor"],
+    ["landFillOpacitySlider", "landFillOpacity"],
     ["landLineColorPicker", "landLineColor"],
+    ["landLineOpacitySlider", "landLineOpacity"],
+    ["landLineWidthSlider", "landLineWidth"],
   ].forEach(([controlKey, styleKey]) => {
     controls[controlKey].addEventListener("input", (event) => {
-      state.style[styleKey] = event.currentTarget.value;
+      const { value, type } = event.currentTarget;
+      state.style[styleKey] = type === "range" ? Number(value) : value;
       persistStyleState();
       updateOverlay();
     });
   });
 
+  controls.rows.querySelectorAll(".earthlab-row").forEach((rowElement) => {
+    const rowId = rowElement.dataset.rowId;
+    const toggleButton = rowElement.querySelector(":scope > .earthlab-row-toggle");
+    const stylePanel = rowElement.querySelector(":scope > .earthlab-row-style");
+
+    rowElement.addEventListener("click", (event) => {
+      const target = getElementTarget(event);
+      if (!rowId) {
+        return;
+      }
+
+      if (!target || target.closest(".earthlab-row") !== rowElement) {
+        return;
+      }
+
+      if (toggleButton?.contains(target) || stylePanel?.contains(target)) {
+        return;
+      }
+
+      toggleStyleRow(rowId);
+    });
+  });
+
   document.addEventListener("pointerdown", (event) => {
-    if (!controls.rows.contains(event.target)) {
+    const target = getElementTarget(event);
+    if (!target || !controls.rows.contains(target)) {
       state.openStyleRow = null;
       syncControlsFromState();
     }
   });
+
+  bindRowReordering();
 }
 
 async function bootstrap() {
   setBootStage("boot");
+  syncRowOrderFromState();
   syncControlsFromState();
   bindControls();
   bindReloadControls();
@@ -481,6 +780,5 @@ function bindReloadControls() {
 }
 
 bootstrap().catch((error) => {
-  controls.status.textContent = `Failed to start Earthlab.\n${error instanceof Error ? error.message : String(error)}`;
   console.error(error);
 });

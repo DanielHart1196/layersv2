@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Earthlab</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --earthlab-bg-top: #041019;
+        --earthlab-bg-bottom: #07141b;
+        --earthlab-panel-bg: rgba(9, 20, 29, 0.84);
+        --earthlab-panel-border: rgba(255, 255, 255, 0.14);
+        --earthlab-text: #edf6fb;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background:
+          radial-gradient(circle at top left, rgba(68, 118, 145, 0.24), transparent 26%),
+          linear-gradient(180deg, var(--earthlab-bg-top), var(--earthlab-bg-bottom));
+        color: var(--earthlab-text);
+      }
+
+      body {
+        min-height: 100dvh;
+      }
+
+      .earthlab-app {
+        position: relative;
+        width: 100vw;
+        height: 100dvh;
+        overflow: hidden;
+      }
+
+      .earthlab-map {
+        position: absolute;
+        inset: 0;
+      }
+
+      .earthlab-panel,
+      .earthlab-reload {
+        opacity: 0;
+        visibility: hidden;
+        transition:
+          opacity 180ms ease,
+          transform 180ms ease;
+        transform: translateY(8px);
+      }
+
+      body[data-earthlab-stage="ready"] .earthlab-panel,
+      body[data-earthlab-stage="ready"] .earthlab-reload {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+      }
+
+      .earthlab-status {
+        margin: 0;
+        color: rgba(237, 246, 251, 0.72);
+        white-space: pre-line;
+      }
+    </style>
+  </head>
+  <body data-earthlab-stage="boot">
+    <main class="earthlab-app" id="app">
+      <div class="earthlab-map" id="map"></div>
+
+      <section class="earthlab-panel" aria-label="Earth controls">
+        <div class="earthlab-panel-header">
+          <p class="earthlab-kicker">Earthlab</p>
+          <h1>Clean Earth runtime</h1>
+          <p class="earthlab-copy">
+            Fresh rebuild surface using MapLibre as the shell and a deck overlay
+            for Earth rendering.
+          </p>
+        </div>
+
+        <div class="earthlab-rows" id="earthRows">
+          <article class="earthlab-row" data-row-id="land">
+            <button class="earthlab-row-swatch" id="landSwatch" type="button" aria-label="Set land colors"></button>
+            <button class="earthlab-row-toggle" id="landToggle" type="button" role="checkbox" aria-checked="true">
+              Land
+            </button>
+            <span class="earthlab-row-slot" aria-hidden="true"></span>
+            <div class="earthlab-row-style" id="landStyle" hidden>
+              <div class="earthlab-style-control">
+                <label class="earthlab-row-style-label" for="landFillColorPicker">Fill color</label>
+                <input class="earthlab-color-picker" type="color" id="landFillColorPicker" value="#6eaa6e" />
+              </div>
+              <div class="earthlab-style-control">
+                <label class="earthlab-row-style-label" for="landLineColorPicker">Outline color</label>
+                <input class="earthlab-color-picker" type="color" id="landLineColorPicker" value="#d9e4da" />
+              </div>
+            </div>
+          </article>
+          <article class="earthlab-row" data-row-id="graticules">
+            <button class="earthlab-row-swatch" id="graticulesSwatch" type="button" aria-label="Set graticules color"></button>
+            <button class="earthlab-row-toggle" id="graticulesToggle" type="button" role="checkbox" aria-checked="true">
+              Graticules
+            </button>
+            <span class="earthlab-row-slot" aria-hidden="true"></span>
+            <div class="earthlab-row-style" id="graticulesStyle" hidden>
+              <label class="earthlab-row-style-label" for="graticulesColorPicker">Graticules color</label>
+              <input class="earthlab-color-picker" type="color" id="graticulesColorPicker" value="#8fa9bc" />
+            </div>
+          </article>
+          <article class="earthlab-row" data-row-id="ocean">
+            <button class="earthlab-row-swatch" id="oceanSwatch" type="button" aria-label="Set ocean color"></button>
+            <button class="earthlab-row-toggle" id="oceanToggle" type="button" role="checkbox" aria-checked="true">
+              Ocean
+            </button>
+            <span class="earthlab-row-slot" aria-hidden="true"></span>
+            <div class="earthlab-row-style" id="oceanStyle" hidden>
+              <label class="earthlab-row-style-label" for="oceanColorPicker">Ocean color</label>
+              <input class="earthlab-color-picker" type="color" id="oceanColorPicker" value="#2c6f92" />
+            </div>
+          </article>
+        </div>
+
+        <pre class="earthlab-status" id="status">Loading...</pre>
+      </section>
+      <button class="earthlab-reload" id="reloadBtn" type="button" title="Reload" aria-label="Reload page"></button>
+      <menu class="earthlab-reload-menu" id="reloadMenu" hidden>
+        <li><button type="button" id="hardReloadBtn">Hard reload</button></li>
+        <li><button type="button" id="clearReloadBtn">Clear cache &amp; reload</button></li>
+      </menu>
+    </main>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

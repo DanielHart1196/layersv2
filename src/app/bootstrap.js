@@ -377,6 +377,7 @@ async function bootstrapApplication() {
     wrapper: document.getElementById("layerMenu"),
     button: document.getElementById("layerMenuButton"),
     panel: document.getElementById("layerMenuPanel"),
+    earthButton: document.getElementById("layerMenuEarthButton"),
     appearanceButton: document.getElementById("layerMenuAppearanceButton"),
     screenButton: document.getElementById("layerMenuScreenButton"),
     rerenderLayerMenu,

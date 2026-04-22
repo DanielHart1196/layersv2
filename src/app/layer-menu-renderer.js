@@ -1,4 +1,9 @@
-import { getRowRuntimeTargetId, getRowStateKey } from "../core/layer-definitions.js";
+import {
+  DECK_EARTH_ROW_ID,
+  DECK_EARTH_TARGET_IDS,
+  getRowRuntimeTargetId,
+  getRowStateKey,
+} from "../core/layer-definitions.js";
 
 function formatRowValue(row, value) {
   if (row?.valueFormat === "points") {
@@ -183,6 +188,11 @@ function applyScreenBackground(state, screenButton) {
   const fillColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
   mapStage.style.backgroundColor = fillColor;
   screenButton?.style.setProperty("--swatch-color", normalizeHexColor(state?.color) ?? DEFAULT_SCREEN_BACKGROUND.color);
+}
+
+function applyDeckEarthButtonState(layerModel, earthButton) {
+  const oceanFill = layerModel.getState()?.[DECK_EARTH_TARGET_IDS.ocean]?.fillColor ?? "#2C6F92";
+  earthButton?.style.setProperty("--swatch-color", normalizeHexColor(oceanFill) ?? "#2C6F92");
 }
 
 function createColorPressRuntime() {
@@ -1767,11 +1777,13 @@ function renderLayerMenuRows({
   function render(nextUiState = null) {
     const appearanceState = layerModel.getAppearanceState();
     const appearanceButton = document.getElementById("layerMenuAppearanceButton");
+    const earthButton = document.getElementById("layerMenuEarthButton");
     const screenButton = document.getElementById("layerMenuScreenButton");
     const scrollRegion = document.getElementById("layerMenuPanelScroll") ?? panel;
     const footerRegion = document.getElementById("layerMenuPanelFooter");
     applySettingsBackground(panel, appearanceButton, appearanceState.settings);
     applyScreenBackground(appearanceState.screen, screenButton);
+    applyDeckEarthButtonState(layerModel, earthButton);
 
     if (nextUiState?.rowId) {
       transientColorRowState.set(nextUiState.rowId, nextUiState);
@@ -1874,6 +1886,7 @@ function renderLayerMenuRows({
       }
 
       onRowInput(row, nextValue);
+      applyDeckEarthButtonState(layerModel, earthButton);
 
       const parentRowId = row?.id ? layerModel.getState()?.[row.id]?.parentRowId : null;
       if (!parentRowId) {
@@ -1911,6 +1924,26 @@ function renderLayerMenuRows({
           appearanceState,
           0,
           null,
+          false,
+          null,
+          null,
+          onDataAction ?? null,
+        ),
+      );
+    }
+
+    if (panel.dataset.earthRowOpen === "true") {
+      scrollRegion.append(
+        buildRows(
+          layerModel.getChildRows(DECK_EARTH_ROW_ID),
+          layerModel,
+          onToggleExpanded,
+          onToggleVisibility,
+          reorderApi,
+          onPanelRowInput,
+          appearanceState,
+          0,
+          DECK_EARTH_ROW_ID,
           false,
           null,
           null,

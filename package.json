@@ -29,11 +29,13 @@
   },
   "dependencies": {
     "@deck.gl/core": "^9.3.1",
+    "@deck.gl/geo-layers": "^9.3.1",
     "@deck.gl/layers": "^9.3.1",
     "@deck.gl/mapbox": "^9.3.1",
     "@loaders.gl/gis": "^4.4.1",
     "@supabase/supabase-js": "^2.101.1",
     "@tmcw/togeojson": "^7.1.2",
+    "cesium": "^1.140.0",
     "geojson-vt": "^4.0.2",
     "maplibre-gl": "^5.21.1",
     "papaparse": "^5.5.3",
@@ -46,6 +48,7 @@
   },
   "devDependencies": {
     "vite": "^7.1.12",
+    "vite-plugin-cesium": "^1.2.23",
     "world-atlas": "^2.0.2"
   }
 }

@@ -62,6 +62,10 @@ Do NOT write upload scripts or data manipulation scripts — the goal is tooling
 
 `atlas.layerState.v1.<context>` in localStorage — delta only (changed keys), per URL context. Canonical state lives in the URL; localStorage is the user's personal override. See memory notes for full design.
 
+## Communication
+
+- If the user's message ends with a question mark, answer the question first. Do not jump into making changes or proposing solutions.
+
 ## Conventions
 
 - No TypeScript — vanilla JS only

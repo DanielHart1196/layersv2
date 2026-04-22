@@ -4,6 +4,12 @@ const ROOT_PARENT_ID = "__root__";
 const ROOT_ROW_IDS = ["earth"];
 const SHARED_COLOR_STORAGE_KEY = "layerv2.colors.customColors";
 const SHARED_COLOR_PRESETS = ["#000000", "#FFFFFF", "#d94b4b", "#e58a2b", "#e5c84a", "#5b8c5a", "#4b6ed9", "#8c5bd6"];
+const DECK_EARTH_ROW_ID = "deck-earth";
+const DECK_EARTH_TARGET_IDS = {
+  ocean: "deck-earth-ocean",
+  land: "deck-earth-land",
+  graticules: "deck-earth-graticules",
+};
 
 function normalizeGeometryTypes(geometryTypes = [], geometryType = "mixed") {
   const source = Array.isArray(geometryTypes) && geometryTypes.length
@@ -245,6 +251,61 @@ function createLayerDefinitions() {
         ...LOCAL_LAYERS.filter((l) => l.group === "earth").map(localLayerToRow),
       ],
     }),
+    [DECK_EARTH_ROW_ID]: createDataRow({
+      id: DECK_EARTH_ROW_ID,
+      label: "Globe",
+      layerId: DECK_EARTH_ROW_ID,
+      hidden: true,
+      defaultExpanded: true,
+      rows: [
+        createStyleRow({
+          id: "deck-earth-ocean-fill",
+          type: "fill",
+          label: "Ocean",
+          layerId: DECK_EARTH_TARGET_IDS.ocean,
+          runtimeTargetId: `${DECK_EARTH_TARGET_IDS.ocean}::fill`,
+          storageKey: SHARED_COLOR_STORAGE_KEY,
+          presets: SHARED_COLOR_PRESETS,
+          defaultColor: "#2C6F92",
+          defaultOpacity: 100,
+        }),
+        createStyleRow({
+          id: "deck-earth-land-fill",
+          type: "fill",
+          label: "Land",
+          layerId: DECK_EARTH_TARGET_IDS.land,
+          runtimeTargetId: `${DECK_EARTH_TARGET_IDS.land}::fill`,
+          storageKey: SHARED_COLOR_STORAGE_KEY,
+          presets: SHARED_COLOR_PRESETS,
+          defaultColor: "#6EAA6E",
+          defaultOpacity: 100,
+        }),
+        createStyleRow({
+          id: "deck-earth-land-line",
+          type: "line",
+          label: "Outline",
+          layerId: DECK_EARTH_TARGET_IDS.land,
+          runtimeTargetId: `${DECK_EARTH_TARGET_IDS.land}::line`,
+          storageKey: SHARED_COLOR_STORAGE_KEY,
+          presets: SHARED_COLOR_PRESETS,
+          defaultColor: "#D9E4DA",
+          defaultOpacity: 100,
+          defaultWeight: 1,
+        }),
+        createStyleRow({
+          id: "deck-earth-graticules-line",
+          type: "line",
+          label: "Graticules",
+          layerId: DECK_EARTH_TARGET_IDS.graticules,
+          runtimeTargetId: `${DECK_EARTH_TARGET_IDS.graticules}::line`,
+          storageKey: SHARED_COLOR_STORAGE_KEY,
+          presets: SHARED_COLOR_PRESETS,
+          defaultColor: "#8FA9BC",
+          defaultOpacity: 100,
+          defaultWeight: 1,
+        }),
+      ],
+    }),
   };
 }
 
@@ -260,9 +321,8 @@ function createRowDefinitionIndex(layerDefinitions) {
     });
   }
 
-  ROOT_ROW_IDS.forEach((id) => {
-    const definition = layerDefinitions[id];
-    if (!definition) {
+  Object.values(layerDefinitions).forEach((definition) => {
+    if (!definition?.id) {
       return;
     }
     byId.set(definition.id, definition);
@@ -298,6 +358,8 @@ function getRowRuntimeTargetId(row) {
 export {
   ROOT_PARENT_ID,
   ROOT_ROW_IDS,
+  DECK_EARTH_ROW_ID,
+  DECK_EARTH_TARGET_IDS,
   SHARED_COLOR_PRESETS,
   SHARED_COLOR_STORAGE_KEY,
   createLayerDefinitions,

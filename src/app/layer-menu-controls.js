@@ -151,6 +151,7 @@ function enableLayerMenuControls({
   wrapper,
   button,
   panel,
+  earthButton,
   appearanceButton,
   screenButton,
   rerenderLayerMenu,
@@ -172,6 +173,14 @@ function enableLayerMenuControls({
   };
 
   const appearanceControls = [
+    {
+      button: earthButton,
+      datasetKey: "earthRowOpen",
+      labels: {
+        open: "Hide globe styling rows",
+        closed: "Show globe styling rows",
+      },
+    },
     {
       button: screenButton,
       datasetKey: "screenRowOpen",
@@ -229,6 +238,9 @@ function enableLayerMenuControls({
         panel.scrollTop = 0;
       }
       rerenderLayerMenu?.();
+      if (draggableMenuMediaQuery.matches && event.detail > 0) {
+        controlButton.blur();
+      }
     });
   });
 
@@ -279,6 +291,9 @@ function enableLayerMenuControls({
         left: activeDrag.originLeft,
         top: activeDrag.originTop,
       });
+      if (draggableMenuMediaQuery.matches) {
+        button.blur();
+      }
     }
     button.classList.remove("is-dragging");
     window.removeEventListener("pointermove", handleDragMove);
@@ -327,6 +342,9 @@ function enableLayerMenuControls({
         wrapper.style.top = "";
       }
     }
+    if (draggableMenuMediaQuery.matches && event.detail > 0) {
+      button.blur();
+    }
   });
 
   document.addEventListener("click", (event) => {
@@ -350,6 +368,13 @@ function enableLayerMenuControls({
     if (event.key === "Escape" && panel.classList.contains("is-open")) {
       closeLayerMenu();
     }
+  });
+
+  wrapper.addEventListener("pointerleave", () => {
+    if (!draggableMenuMediaQuery.matches) {
+      return;
+    }
+    closeAppearanceRows(panel, appearanceControls, rerenderLayerMenu);
   });
 
   window.addEventListener("resize", () => {

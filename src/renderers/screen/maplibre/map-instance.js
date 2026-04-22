@@ -2,7 +2,7 @@
 // import maplibregl from "maplibre-gl";
 // import "maplibre-gl/dist/maplibre-gl.css";
 import { MapboxOverlay } from "@deck.gl/mapbox";
-import { GeoJsonLayer } from "@deck.gl/layers";
+import { GeoJsonLayer, SolidPolygonLayer } from "@deck.gl/layers";
 import { Protocol } from "pmtiles";
 import polygonClipping from "polygon-clipping";
 import {
@@ -19,6 +19,8 @@ import {
   localLayerLineId,
 } from "../../../config/local-layers.js";
 import {
+  DECK_EARTH_ROW_ID,
+  DECK_EARTH_TARGET_IDS,
   ROOT_PARENT_ID,
   ROOT_ROW_IDS,
 } from "../../../core/layer-definitions.js";
@@ -94,19 +96,25 @@ const WATER_BACKGROUND_COLOR = { r: 44, g: 111, b: 146 };
 const DEFAULT_LAND_FILL_COLOR = "#6EAA6E";
 const DEFAULT_OCEAN_FILL_COLOR = "#2C6F92";
 const DEFAULT_OUTLINE_LINE_COLOR = "#d9e4da";
-const DECK_FULL_LAND_TEST = false;
-const DECK_FULL_LAND_SOURCE_URL = "/data/world-atlas/ne_110m_land.geojson";
+const DECK_EARTH_LAND_SOURCE_URL = "/data/world-atlas/countries-dissolved-land.geojson";
+const DECK_EARTH_GRATICULES_SOURCE_URL = "/data/graticules/world-graticules-10deg.geojson";
+const DECK_EARTH_OCEAN_RING = [
+  [-180, -85],
+  [-180, 85],
+  [180, 85],
+  [180, -85],
+];
 const SOUTH_POLAR_CAP_SOURCE_URL = "/data/world-atlas/ne_110m_land.geojson";
 const GRATICULES_SOURCE_URL = "/data/graticules/world-graticules-10deg.geojson";
-const SOUTH_POLAR_CAP_MAIN_LAND_LATITUDE = -85;
 const SOUTH_POLAR_CAP_DECK_LATITUDE = -84;
 const SOUTH_POLAR_CAP_SOURCE_DECK_LATITUDE = -83;
 const SOUTH_POLAR_CAP_RING_STEP_DEGREES = 0.1;
+const POLAR_CAP_VISIBLE_LATITUDE = Math.abs(SOUTH_POLAR_CAP_DECK_LATITUDE);
+const POLAR_CAP_SOURCE_LATITUDE = Math.abs(SOUTH_POLAR_CAP_SOURCE_DECK_LATITUDE);
 const SOUTH_POLAR_BACKGROUND_LAYER_ID = "polar-background-south-cap";
 const SOUTH_POLAR_OCEAN_LAYER_ID = "polar-ocean-south-cap";
 const SOUTH_POLAR_CAP_LAYER_ID = "polar-land-south-cap";
 const POLAR_GRATICULES_LAYER_ID = "polar-graticules";
-const MAP_DEBUG_VERSION = "map-debug-2026-04-22-v1";
 const SCALE_BAR_MAX_WIDTH_PX = 120;
 const SCALE_BAR_HIDE_DELAY_MS = 1200;
 const SCALE_BAR_SCREEN_OFFSET_X = 18;
@@ -114,6 +122,12 @@ const SCALE_BAR_SCREEN_OFFSET_Y = 28;
 const COMPASS_ACTIVE_BEARING_THRESHOLD = 0.5;
 const METERS_PER_FOOT = 0.3048;
 const METERS_PER_MILE = 1609.344;
+const POLAR_RENDER_MODES = {
+  NONE: "none",
+  SOUTH: "south",
+  NORTH: "north",
+  BOTH: "both",
+};
 
 function getFirstExistingLayerId(map, candidateIds) {
   return candidateIds.find((id) => map.getLayer(id)) ?? null;
@@ -160,55 +174,6 @@ function createCompassOverlay(container) {
   `;
   container.append(button);
   return button;
-}
-
-function createMapDebugOverlay(container) {
-  const overlay = document.createElement("pre");
-  overlay.className = "map-debug-overlay";
-  overlay.setAttribute("aria-live", "polite");
-  Object.assign(overlay.style, {
-    position: "absolute",
-    top: "12px",
-    left: "12px",
-    zIndex: "25000",
-    maxWidth: "280px",
-    maxHeight: "34vh",
-    overflow: "hidden",
-    margin: "0",
-    padding: "8px 10px",
-    borderRadius: "8px",
-    background: "rgba(0, 0, 0, 0.84)",
-    color: "#d7f7d9",
-    font: "10px/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-    whiteSpace: "pre-wrap",
-    pointerEvents: "none",
-    boxShadow: "0 6px 24px rgba(0,0,0,0.28)",
-  });
-  overlay.textContent = `${MAP_DEBUG_VERSION}\ninit`;
-  container.append(overlay);
-  return overlay;
-}
-
-function renderMapDebugOverlay(overlay, state) {
-  if (!overlay || !state) {
-    return;
-  }
-
-  const lines = [
-    MAP_DEBUG_VERSION,
-    `phase ${state.phase ?? "unknown"}`,
-    `map ${state.mapCreated ? "created" : "pending"}`,
-    `mapLoad ${state.mapLoaded ? "yes" : "no"}`,
-    `deck ${state.deckAttached ? "attached" : "pending"}`,
-    `landLoad ${state.landLoadState ?? "idle"}`,
-    `graticulesLoad ${state.graticulesLoadState ?? "idle"}`,
-  ];
-
-  if (state.lastError) {
-    lines.push(`err ${state.lastError}`);
-  }
-
-  overlay.textContent = lines.join("\n");
 }
 
 function haversineDistanceMeters(a, b) {
@@ -811,13 +776,20 @@ function buildStyle(layerState) {
 
 function getLayerStyleValue(layerState, layerId, key, fallback) {
   const nextValue = layerState?.[layerId]?.[key];
-  return nextValue === undefined ? fallback : nextValue;
+  if (nextValue !== undefined) {
+    return nextValue;
+  }
+  const runtimeTarget = parseRuntimeTarget(layerId);
+  if (runtimeTarget?.baseLayerId) {
+    const inheritedValue = layerState?.[runtimeTarget.baseLayerId]?.[key];
+    if (inheritedValue !== undefined) {
+      return inheritedValue;
+    }
+  }
+  return fallback;
 }
 
-function getMaplibreLayerVisibility(layerState, runtimeTargetId, layerId = null) {
-  if (DECK_FULL_LAND_TEST && layerId === "land") {
-    return "none";
-  }
+function getMaplibreLayerVisibility(layerState, runtimeTargetId) {
   return getInheritedLayoutVisibility(layerState, runtimeTargetId);
 }
 
@@ -837,6 +809,16 @@ function hexToRgb(value, fallback) {
 function buildWaterBackgroundColor(fillColor, alphaPercent) {
   const rgb = hexToRgb(fillColor, WATER_BACKGROUND_COLOR);
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${Number(alphaPercent) / 100})`;
+}
+
+function buildDeckColor(fillColor, alphaPercent, fallback = WATER_BACKGROUND_COLOR) {
+  const rgb = hexToRgb(fillColor, fallback);
+  return [
+    rgb.r,
+    rgb.g,
+    rgb.b,
+    Math.max(0, Math.min(255, Math.round((Number(alphaPercent) / 100) * 255))),
+  ];
 }
 
 function clampColorChannel(value) {
@@ -910,25 +892,50 @@ function clipFeatureCollectionToMask(featureCollection, clipMask) {
   };
 }
 
-function buildSouthPolarCapMaskGeometry(latitude = SOUTH_POLAR_CAP_DECK_LATITUDE) {
-  const ring = [];
-  for (let longitude = -180; longitude <= 180; longitude += SOUTH_POLAR_CAP_RING_STEP_DEGREES) {
-    ring.push([longitude, latitude]);
+function getPolarBoundaryLatitudes(mode, latitude = POLAR_CAP_VISIBLE_LATITUDE) {
+  const resolvedLatitude = Math.abs(Number(latitude) || POLAR_CAP_VISIBLE_LATITUDE);
+  if (mode === POLAR_RENDER_MODES.SOUTH) {
+    return [-resolvedLatitude];
   }
-  if (ring[ring.length - 1]?.[0] !== 180) {
-    ring.push([180, latitude]);
+  if (mode === POLAR_RENDER_MODES.NORTH) {
+    return [resolvedLatitude];
   }
-
-  return [[[
-    [-180, -90],
-    ...ring,
-    [180, -90],
-    [-180, -90],
-  ]]];
+  if (mode === POLAR_RENDER_MODES.BOTH) {
+    return [-resolvedLatitude, resolvedLatitude];
+  }
+  return [];
 }
 
-function buildSouthPolarCapFeatureCollection(latitude = SOUTH_POLAR_CAP_DECK_LATITUDE) {
-  const geometry = multiPolygonToGeometry(buildSouthPolarCapMaskGeometry(latitude));
+function buildPolarCapMaskGeometry(mode = POLAR_RENDER_MODES.SOUTH, latitude = POLAR_CAP_VISIBLE_LATITUDE) {
+  return getPolarBoundaryLatitudes(mode, latitude).map((boundaryLatitude) => {
+    const ring = [];
+    for (let longitude = -180; longitude <= 180; longitude += SOUTH_POLAR_CAP_RING_STEP_DEGREES) {
+      ring.push([longitude, boundaryLatitude]);
+    }
+    if (ring[ring.length - 1]?.[0] !== 180) {
+      ring.push([180, boundaryLatitude]);
+    }
+
+    if (boundaryLatitude < 0) {
+      return [[
+        [-180, -90],
+        ...ring,
+        [180, -90],
+        [-180, -90],
+      ]];
+    }
+
+    return [[
+      [-180, 90],
+      [180, 90],
+      ...ring.slice().reverse(),
+      [-180, 90],
+    ]];
+  });
+}
+
+function buildPolarCapFeatureCollection(mode = POLAR_RENDER_MODES.SOUTH, latitude = POLAR_CAP_VISIBLE_LATITUDE) {
+  const geometry = multiPolygonToGeometry(buildPolarCapMaskGeometry(mode, latitude));
   return geometry
     ? {
       type: "FeatureCollection",
@@ -988,7 +995,10 @@ function densifyRingAlongLatitude(ring, targetLatitude, stepDegrees = SOUTH_POLA
   return densified;
 }
 
-function redensifyFeatureCollectionAlongLatitude(featureCollection, targetLatitude) {
+function redensifyFeatureCollectionAlongLatitudes(featureCollection, targetLatitudes = []) {
+  const latitudes = Array.isArray(targetLatitudes)
+    ? targetLatitudes.filter((value) => Number.isFinite(value))
+    : [];
   return {
     type: "FeatureCollection",
     features: (featureCollection?.features ?? []).map((feature) => {
@@ -1002,7 +1012,9 @@ function redensifyFeatureCollectionAlongLatitude(featureCollection, targetLatitu
           ...feature,
           geometry: {
             type: "Polygon",
-            coordinates: geometry.coordinates.map((ring) => densifyRingAlongLatitude(ring, targetLatitude)),
+            coordinates: geometry.coordinates.map((ring) => (
+              latitudes.reduce((nextRing, latitude) => densifyRingAlongLatitude(nextRing, latitude), ring)
+            )),
           },
         };
       }
@@ -1012,7 +1024,9 @@ function redensifyFeatureCollectionAlongLatitude(featureCollection, targetLatitu
           ...feature,
           geometry: {
             type: "MultiPolygon",
-            coordinates: geometry.coordinates.map((polygon) => polygon.map((ring) => densifyRingAlongLatitude(ring, targetLatitude))),
+            coordinates: geometry.coordinates.map((polygon) => polygon.map((ring) => (
+              latitudes.reduce((nextRing, latitude) => densifyRingAlongLatitude(nextRing, latitude), ring)
+            ))),
           },
         };
       }
@@ -1022,58 +1036,229 @@ function redensifyFeatureCollectionAlongLatitude(featureCollection, targetLatitu
   };
 }
 
-function buildSouthPolarLandSplit(
+function clipLineStringToCap(coordinates, boundaryLatitude, { keepAbove = false } = {}) {
+  if (!Array.isArray(coordinates) || coordinates.length < 2) {
+    return [];
+  }
+
+  const isInside = (point) => keepAbove ? point?.[1] >= boundaryLatitude : point?.[1] <= boundaryLatitude;
+  const intersectSegment = (start, end) => {
+    const startLat = start?.[1];
+    const endLat = end?.[1];
+    const startLon = start?.[0];
+    const endLon = end?.[0];
+    if (
+      !Number.isFinite(startLat)
+      || !Number.isFinite(endLat)
+      || !Number.isFinite(startLon)
+      || !Number.isFinite(endLon)
+      || Math.abs(endLat - startLat) < 1e-9
+    ) {
+      return [startLon, boundaryLatitude];
+    }
+    const ratio = (boundaryLatitude - startLat) / (endLat - startLat);
+    return [startLon + ((endLon - startLon) * ratio), boundaryLatitude];
+  };
+
+  const segments = [];
+  let current = isInside(coordinates[0]) ? [coordinates[0]] : null;
+
+  for (let index = 0; index < coordinates.length - 1; index += 1) {
+    const start = coordinates[index];
+    const end = coordinates[index + 1];
+    const startInside = isInside(start);
+    const endInside = isInside(end);
+
+    if (startInside && endInside) {
+      if (!current) {
+        current = [start];
+      }
+      current.push(end);
+      continue;
+    }
+
+    if (startInside && !endInside) {
+      if (!current) {
+        current = [start];
+      }
+      current.push(intersectSegment(start, end));
+      if (current.length > 1) {
+        segments.push(current);
+      }
+      current = null;
+      continue;
+    }
+
+    if (!startInside && endInside) {
+      current = [intersectSegment(start, end), end];
+      continue;
+    }
+  }
+
+  if (current?.length > 1) {
+    segments.push(current);
+  }
+
+  return segments;
+}
+
+function clipLineGeometryToPolarMode(geometry, mode = POLAR_RENDER_MODES.SOUTH, latitude = POLAR_CAP_VISIBLE_LATITUDE) {
+  const latitudes = getPolarBoundaryLatitudes(mode, latitude);
+  if (!geometry || typeof geometry !== "object" || !latitudes.length) {
+    return null;
+  }
+
+  const clipCoordinates = (coordinates, boundaryLatitude) => clipLineStringToCap(coordinates, boundaryLatitude, {
+    keepAbove: boundaryLatitude > 0,
+  });
+
+  if (geometry.type === "LineString" && Array.isArray(geometry.coordinates)) {
+    const segments = latitudes.flatMap((boundaryLatitude) => clipCoordinates(geometry.coordinates, boundaryLatitude));
+    if (!segments.length) {
+      return null;
+    }
+    if (segments.length === 1) {
+      return { type: "LineString", coordinates: segments[0] };
+    }
+    return { type: "MultiLineString", coordinates: segments };
+  }
+
+  if (geometry.type === "MultiLineString" && Array.isArray(geometry.coordinates)) {
+    const segments = geometry.coordinates.flatMap((line) => (
+      latitudes.flatMap((boundaryLatitude) => clipCoordinates(line, boundaryLatitude))
+    ));
+    return segments.length ? { type: "MultiLineString", coordinates: segments } : null;
+  }
+
+  return null;
+}
+
+function clipPointGeometryToPolarMode(geometry, mode = POLAR_RENDER_MODES.SOUTH, latitude = POLAR_CAP_VISIBLE_LATITUDE) {
+  const boundaryLatitudes = getPolarBoundaryLatitudes(mode, latitude);
+  if (!geometry || typeof geometry !== "object" || !boundaryLatitudes.length) {
+    return null;
+  }
+
+  const isInside = (coordinate) => boundaryLatitudes.some((boundaryLatitude) => (
+    boundaryLatitude < 0 ? coordinate?.[1] <= boundaryLatitude : coordinate?.[1] >= boundaryLatitude
+  ));
+
+  if (geometry.type === "Point" && Array.isArray(geometry.coordinates)) {
+    return isInside(geometry.coordinates) ? geometry : null;
+  }
+
+  if (geometry.type === "MultiPoint" && Array.isArray(geometry.coordinates)) {
+    const coordinates = geometry.coordinates.filter(isInside);
+    return coordinates.length ? { type: "MultiPoint", coordinates } : null;
+  }
+
+  return null;
+}
+
+function prepareFeatureCollectionForPolarRendering(
   featureCollection,
   {
-    mainLandLatitude = SOUTH_POLAR_CAP_MAIN_LAND_LATITUDE,
-    sourceDeckLatitude = SOUTH_POLAR_CAP_SOURCE_DECK_LATITUDE,
-    deckLatitude = SOUTH_POLAR_CAP_DECK_LATITUDE,
+    geometryFamily = "polygon",
+    mode = POLAR_RENDER_MODES.SOUTH,
+    sourceLatitude = POLAR_CAP_SOURCE_LATITUDE,
+    visibleLatitude = POLAR_CAP_VISIBLE_LATITUDE,
   } = {},
 ) {
-  const southCapSourceMask = buildSouthPolarCapMaskGeometry(sourceDeckLatitude);
-  const southCapVisibleMask = buildSouthPolarCapMaskGeometry(deckLatitude);
-  const mainLandMask = [[[[-180, mainLandLatitude], [180, mainLandLatitude], [180, 90], [-180, 90], [-180, mainLandLatitude]]]];
-  const southCapSource = clipFeatureCollectionToMask(featureCollection, southCapSourceMask);
-  const southCapVisible = clipFeatureCollectionToMask(southCapSource, southCapVisibleMask);
+  if (geometryFamily === "polygon") {
+    const sourceMask = buildPolarCapMaskGeometry(mode, sourceLatitude);
+    const visibleMask = buildPolarCapMaskGeometry(mode, visibleLatitude);
+    const sourceCap = clipFeatureCollectionToMask(featureCollection, sourceMask);
+    const visibleCap = clipFeatureCollectionToMask(sourceCap, visibleMask);
+    return redensifyFeatureCollectionAlongLatitudes(
+      visibleCap,
+      getPolarBoundaryLatitudes(mode, visibleLatitude),
+    );
+  }
+
+  if (geometryFamily === "line" || geometryFamily === "point") {
+    const features = (featureCollection?.features ?? []).map((feature) => {
+      const geometry = geometryFamily === "line"
+        ? clipLineGeometryToPolarMode(feature?.geometry, mode, visibleLatitude)
+        : clipPointGeometryToPolarMode(feature?.geometry, mode, visibleLatitude);
+      if (!geometry) {
+        return null;
+      }
+      return {
+        type: "Feature",
+        properties: feature?.properties ?? {},
+        geometry,
+      };
+    }).filter(Boolean);
+
+    return {
+      type: "FeatureCollection",
+      features,
+    };
+  }
+
   return {
-    mainLand: clipFeatureCollectionToMask(featureCollection, mainLandMask),
-    southCap: redensifyFeatureCollectionAlongLatitude(southCapVisible, deckLatitude),
+    type: "FeatureCollection",
+    features: [],
   };
 }
 
-let southPolarLandSplitPromise = null;
+let southPolarCapPromise = null;
 let polarGraticulesPromise = null;
+let deckEarthLandPromise = null;
+let deckEarthGraticulesPromise = null;
 
-function loadDeckFullLandData() {
-  return fetch(DECK_FULL_LAND_SOURCE_URL)
+function loadDeckEarthLand() {
+  if (deckEarthLandPromise) {
+    return deckEarthLandPromise;
+  }
+
+  deckEarthLandPromise = fetch(DECK_EARTH_LAND_SOURCE_URL)
     .then((response) => {
       if (!response.ok) {
-        throw new Error(`Failed to load full deck land source: ${response.status}`);
+        throw new Error(`Failed to load deck earth land source: ${response.status}`);
       }
       return response.json();
     });
+
+  return deckEarthLandPromise;
 }
 
-function loadSouthPolarLandSplit() {
-  if (southPolarLandSplitPromise) {
-    return southPolarLandSplitPromise;
+function loadDeckEarthGraticules() {
+  if (deckEarthGraticulesPromise) {
+    return deckEarthGraticulesPromise;
   }
 
-  southPolarLandSplitPromise = DECK_FULL_LAND_TEST
-    ? loadDeckFullLandData().then((featureCollection) => ({
-      mainLand: null,
-      southCap: featureCollection,
-    }))
-    : fetch(SOUTH_POLAR_CAP_SOURCE_URL)
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`Failed to load south polar cap source: ${response.status}`);
-        }
-        return response.json();
-      })
-      .then((featureCollection) => buildSouthPolarLandSplit(featureCollection));
+  deckEarthGraticulesPromise = fetch(DECK_EARTH_GRATICULES_SOURCE_URL)
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error(`Failed to load deck earth graticules source: ${response.status}`);
+      }
+      return response.json();
+    });
 
-  return southPolarLandSplitPromise;
+  return deckEarthGraticulesPromise;
+}
+
+function loadSouthPolarCap() {
+  if (southPolarCapPromise) {
+    return southPolarCapPromise;
+  }
+
+  southPolarCapPromise = fetch(SOUTH_POLAR_CAP_SOURCE_URL)
+    .then((response) => {
+      if (!response.ok) {
+        throw new Error(`Failed to load south polar cap source: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then((featureCollection) => prepareFeatureCollectionForPolarRendering(featureCollection, {
+      geometryFamily: "polygon",
+      mode: POLAR_RENDER_MODES.SOUTH,
+      sourceLatitude: POLAR_CAP_SOURCE_LATITUDE,
+      visibleLatitude: POLAR_CAP_VISIBLE_LATITUDE,
+    }));
+
+  return southPolarCapPromise;
 }
 
 function loadPolarGraticules() {
@@ -1088,9 +1273,11 @@ function loadPolarGraticules() {
       }
       return response.json();
     })
-    .then((featureCollection) => ({
-      type: "FeatureCollection",
-      features: (featureCollection?.features ?? []).filter((feature) => feature?.properties?.polar === true),
+    .then((featureCollection) => prepareFeatureCollectionForPolarRendering(featureCollection, {
+      geometryFamily: "line",
+      mode: POLAR_RENDER_MODES.BOTH,
+      sourceLatitude: POLAR_CAP_SOURCE_LATITUDE,
+      visibleLatitude: POLAR_CAP_VISIBLE_LATITUDE,
     }));
 
   return polarGraticulesPromise;
@@ -1550,36 +1737,266 @@ function createSouthPolarCapOverlayState(layerState) {
     loadPromise: null,
     graticulesLoadError: null,
     graticulesLoadPromise: null,
-    mainLand: null,
     map: null,
     destroyed: false,
     initialized: false,
     getOrderedChildRowIds: null,
     layerState,
-    debugState: null,
-    debugOverlay: null,
+    backendEntries: [],
   };
 }
 
-function buildSouthPolarCapDeckLayer(layerState, polarCapData) {
-  if (!polarCapData?.features?.length) {
+function createDeckEarthOverlayState(layerState) {
+  return {
+    overlay: null,
+    map: null,
+    destroyed: false,
+    initialized: false,
+    landData: null,
+    graticulesData: null,
+    landLoadPromise: null,
+    graticulesLoadPromise: null,
+    landLoadError: null,
+    graticulesLoadError: null,
+    layerState,
+  };
+}
+
+function isDeckEarthRuntimeTarget(runtimeTargetId) {
+  return typeof runtimeTargetId === "string"
+    && Object.values(DECK_EARTH_TARGET_IDS).some((targetId) => (
+      runtimeTargetId === targetId || runtimeTargetId.startsWith(`${targetId}::`)
+    ));
+}
+
+function createDeckEarthLayers(state) {
+  if (!state) {
+    return [];
+  }
+
+  return [
+    new SolidPolygonLayer({
+      id: "deck-earth-ocean-fill",
+      data: [{ polygon: DECK_EARTH_OCEAN_RING }],
+      getPolygon: (entry) => entry.polygon,
+      getFillColor: buildDeckColor(
+        getLayerStyleValue(state.layerState, `${DECK_EARTH_TARGET_IDS.ocean}::fill`, "fillColor", DEFAULT_OCEAN_FILL_COLOR),
+        getLayerStyleValue(state.layerState, `${DECK_EARTH_TARGET_IDS.ocean}::fill`, "fillOpacity", 100),
+      ),
+      visible: getInheritedLayoutVisibility(state.layerState, `${DECK_EARTH_TARGET_IDS.ocean}::fill`) === "visible",
+      pickable: false,
+    }),
+    new GeoJsonLayer({
+      id: "deck-earth-land-fill",
+      data: state.landData ?? { type: "FeatureCollection", features: [] },
+      filled: true,
+      stroked: false,
+      getFillColor: buildDeckColor(
+        getLayerStyleValue(state.layerState, `${DECK_EARTH_TARGET_IDS.land}::fill`, "fillColor", DEFAULT_LAND_FILL_COLOR),
+        getLayerStyleValue(state.layerState, `${DECK_EARTH_TARGET_IDS.land}::fill`, "fillOpacity", 100),
+        { r: 110, g: 170, b: 110 },
+      ),
+      visible: getInheritedLayoutVisibility(state.layerState, `${DECK_EARTH_TARGET_IDS.land}::fill`) === "visible",
+      pickable: false,
+    }),
+    new GeoJsonLayer({
+      id: "deck-earth-land-line",
+      data: state.landData ?? { type: "FeatureCollection", features: [] },
+      filled: false,
+      stroked: true,
+      getLineColor: buildDeckColor(
+        getLayerStyleValue(state.layerState, `${DECK_EARTH_TARGET_IDS.land}::line`, "lineColor", DEFAULT_OUTLINE_LINE_COLOR),
+        getLayerStyleValue(state.layerState, `${DECK_EARTH_TARGET_IDS.land}::line`, "lineOpacity", 100),
+        hexToRgb(DEFAULT_OUTLINE_LINE_COLOR, { r: 217, g: 228, b: 218 }),
+      ),
+      getLineWidth: Number(getLayerStyleValue(state.layerState, `${DECK_EARTH_TARGET_IDS.land}::line`, "lineWeight", 1)) || 1,
+      lineWidthUnits: "pixels",
+      lineWidthMinPixels: 1,
+      visible: getInheritedLayoutVisibility(state.layerState, `${DECK_EARTH_TARGET_IDS.land}::line`) === "visible",
+      pickable: false,
+    }),
+    new GeoJsonLayer({
+      id: "deck-earth-graticules-line",
+      data: state.graticulesData ?? { type: "FeatureCollection", features: [] },
+      filled: false,
+      stroked: true,
+      getLineColor: buildDeckColor(
+        getLayerStyleValue(state.layerState, `${DECK_EARTH_TARGET_IDS.graticules}::line`, "lineColor", "#8FA9BC"),
+        getLayerStyleValue(state.layerState, `${DECK_EARTH_TARGET_IDS.graticules}::line`, "lineOpacity", 100),
+        { r: 143, g: 169, b: 188 },
+      ),
+      getLineWidth: Number(getLayerStyleValue(state.layerState, `${DECK_EARTH_TARGET_IDS.graticules}::line`, "lineWeight", 1)) || 1,
+      lineWidthUnits: "pixels",
+      lineWidthMinPixels: 1,
+      visible: getInheritedLayoutVisibility(state.layerState, `${DECK_EARTH_TARGET_IDS.graticules}::line`) === "visible",
+      pickable: false,
+    }),
+  ];
+}
+
+function updateDeckEarthOverlay(state) {
+  if (!state?.overlay || state.destroyed) {
+    return;
+  }
+
+  state.overlay.setProps({
+    layers: createDeckEarthLayers(state),
+  });
+}
+
+function ensureDeckEarthLandLoaded(state) {
+  if (!state || state.landLoadPromise) {
+    return;
+  }
+
+  state.landLoadPromise = loadDeckEarthLand()
+    .then((featureCollection) => {
+      if (state.destroyed) {
+        return;
+      }
+      state.landData = featureCollection;
+      updateDeckEarthOverlay(state);
+    })
+    .catch((error) => {
+      state.landLoadError = error;
+      console.warn("[deck-earth] Failed to load land source.", error);
+    });
+}
+
+function ensureDeckEarthGraticulesLoaded(state) {
+  if (!state || state.graticulesLoadPromise) {
+    return;
+  }
+
+  state.graticulesLoadPromise = loadDeckEarthGraticules()
+    .then((featureCollection) => {
+      if (state.destroyed) {
+        return;
+      }
+      state.graticulesData = featureCollection;
+      updateDeckEarthOverlay(state);
+    })
+    .catch((error) => {
+      state.graticulesLoadError = error;
+      console.warn("[deck-earth] Failed to load graticules source.", error);
+    });
+}
+
+function supportsPolarMode(mode) {
+  return mode === POLAR_RENDER_MODES.SOUTH
+    || mode === POLAR_RENDER_MODES.NORTH
+    || mode === POLAR_RENDER_MODES.BOTH;
+}
+
+function createBuiltInPolarBackendEntries() {
+  return [
+    {
+      id: "polar-background",
+      orderKey: null,
+      stackOrder: 0,
+      mode: POLAR_RENDER_MODES.BOTH,
+      runtimeTargetIds: ["land::fill", "graticules::line", "ocean", "ocean::fill"],
+      buildLayer: (state) => buildSouthPolarBackgroundDeckLayer(state.layerState, POLAR_RENDER_MODES.BOTH),
+    },
+    {
+      id: "ocean::fill",
+      orderKey: "ocean",
+      stackOrder: 0,
+      mode: POLAR_RENDER_MODES.BOTH,
+      runtimeTargetIds: ["ocean", "ocean::fill"],
+      kind: "fill",
+      visibilityTargetId: "ocean::fill",
+      styleTargetId: "ocean::fill",
+      defaultColor: DEFAULT_OCEAN_FILL_COLOR,
+      defaultOpacity: 100,
+      getData: () => buildPolarCapFeatureCollection(POLAR_RENDER_MODES.BOTH),
+    },
+    {
+      id: "land::fill",
+      orderKey: "land",
+      stackOrder: 0,
+      mode: POLAR_RENDER_MODES.SOUTH,
+      runtimeTargetIds: ["land", "land::fill"],
+      kind: "fill",
+      visibilityTargetId: "land::fill",
+      styleTargetId: "land::fill",
+      defaultColor: DEFAULT_LAND_FILL_COLOR,
+      defaultOpacity: 100,
+      getData: (state) => state.southPolarCapData,
+    },
+    {
+      id: "land::line",
+      orderKey: "land",
+      stackOrder: 1,
+      mode: POLAR_RENDER_MODES.SOUTH,
+      runtimeTargetIds: ["land", "land::line"],
+      kind: "line",
+      visibilityTargetId: "land::line",
+      styleTargetId: "land::line",
+      defaultColor: DEFAULT_OUTLINE_LINE_COLOR,
+      defaultOpacity: 100,
+      defaultWeight: 1,
+      getData: (state) => state.southPolarCapData,
+    },
+    {
+      id: "graticules::line",
+      orderKey: "graticules",
+      stackOrder: 0,
+      mode: POLAR_RENDER_MODES.BOTH,
+      runtimeTargetIds: ["graticules", "graticules::line"],
+      kind: "line",
+      visibilityTargetId: "graticules::line",
+      styleTargetId: "graticules::line",
+      defaultColor: "#8FA9BC",
+      defaultOpacity: 100,
+      defaultWeight: 1,
+      getData: (state) => state.polarGraticulesData,
+    },
+  ];
+}
+
+function getSouthPolarBackendEntries(state) {
+  const backends = Array.isArray(state?.backendEntries) ? state.backendEntries : [];
+  return backends.filter((entry) => supportsPolarMode(entry?.mode));
+}
+
+function shouldRefreshSouthPolarOverlay(state, runtimeTargetId) {
+  if (!runtimeTargetId) {
+    return false;
+  }
+
+  return getSouthPolarBackendEntries(state).some((entry) => (
+    Array.isArray(entry?.runtimeTargetIds) && entry.runtimeTargetIds.includes(runtimeTargetId)
+  ));
+}
+
+function buildPolarFillDeckLayer({
+  deckLayerId,
+  visibilityTargetId,
+  styleTargetId,
+  defaultColor,
+  defaultOpacity = 100,
+  layerState,
+  data,
+}) {
+  if (!data?.features?.length) {
     return null;
   }
 
-  const visible = getInheritedLayoutVisibility(layerState, "land::fill") === "visible";
+  const visible = getInheritedLayoutVisibility(layerState, visibilityTargetId) === "visible";
   if (!visible) {
     return null;
   }
 
-  const fillOpacity = Number(getLayerStyleValue(layerState, "land", "fillOpacity", 100)) / 100;
+  const fillOpacity = Number(getLayerStyleValue(layerState, styleTargetId, "fillOpacity", defaultOpacity)) / 100;
   const rgb = hexToRgb(
-    getLayerStyleValue(layerState, "land", "fillColor", DEFAULT_LAND_FILL_COLOR),
-    hexToRgb(DEFAULT_LAND_FILL_COLOR, { r: 110, g: 170, b: 110 }),
+    getLayerStyleValue(layerState, styleTargetId, "fillColor", defaultColor),
+    hexToRgb(defaultColor, { r: 110, g: 170, b: 110 }),
   );
 
   return new GeoJsonLayer({
-    id: SOUTH_POLAR_CAP_LAYER_ID,
-    data: polarCapData,
+    id: deckLayerId,
+    data,
     filled: true,
     stroked: false,
     pickable: false,
@@ -1592,7 +2009,107 @@ function buildSouthPolarCapDeckLayer(layerState, polarCapData) {
   });
 }
 
-function buildSouthPolarBackgroundDeckLayer(layerState) {
+function buildPolarLineDeckLayer({
+  deckLayerId,
+  visibilityTargetId,
+  styleTargetId,
+  defaultColor,
+  defaultOpacity = 100,
+  defaultWeight = 1,
+  layerState,
+  data,
+}) {
+  if (!data?.features?.length) {
+    return null;
+  }
+
+  const visible = getInheritedLayoutVisibility(layerState, visibilityTargetId) === "visible";
+  if (!visible) {
+    return null;
+  }
+
+  const rgb = hexToRgb(
+    getLayerStyleValue(layerState, styleTargetId, "lineColor", defaultColor),
+    hexToRgb(defaultColor, { r: 143, g: 169, b: 188 }),
+  );
+  const lineWidth = Number(getLayerStyleValue(layerState, styleTargetId, "lineWeight", defaultWeight));
+
+  return new GeoJsonLayer({
+    id: deckLayerId,
+    data,
+    filled: false,
+    stroked: true,
+    pickable: false,
+    getLineColor: [rgb.r, rgb.g, rgb.b, 255],
+    getLineWidth: lineWidth,
+    lineWidthUnits: "pixels",
+    lineWidthMinPixels: lineWidth,
+    opacity: Number(getLayerStyleValue(layerState, styleTargetId, "lineOpacity", defaultOpacity)) / 100,
+    parameters: {
+      depthWriteEnabled: false,
+      depthCompare: "always",
+    },
+  });
+}
+
+function buildPolarPointDeckLayer({
+  deckLayerId,
+  visibilityTargetId,
+  fillStyleTargetId,
+  strokeStyleTargetId,
+  defaultColor = "#e74c3c",
+  defaultOpacity = 80,
+  defaultRadius = 6,
+  defaultStrokeColor = "#ffffff",
+  defaultStrokeOpacity = 100,
+  defaultStrokeWeight = 1,
+  layerState,
+  data,
+}) {
+  if (!data?.features?.length) {
+    return null;
+  }
+
+  const visible = getInheritedLayoutVisibility(layerState, visibilityTargetId) === "visible";
+  if (!visible) {
+    return null;
+  }
+
+  const fillRgb = hexToRgb(
+    getLayerStyleValue(layerState, fillStyleTargetId, "pointColor", defaultColor),
+    hexToRgb(defaultColor, { r: 231, g: 76, b: 60 }),
+  );
+  const strokeRgb = hexToRgb(
+    getLayerStyleValue(layerState, strokeStyleTargetId, "lineColor", defaultStrokeColor),
+    hexToRgb(defaultStrokeColor, { r: 255, g: 255, b: 255 }),
+  );
+  const radius = Number(getLayerStyleValue(layerState, fillStyleTargetId, "pointRadius", defaultRadius));
+  const strokeWidth = Number(getLayerStyleValue(layerState, strokeStyleTargetId, "lineWeight", defaultStrokeWeight));
+
+  return new GeoJsonLayer({
+    id: deckLayerId,
+    data,
+    filled: true,
+    stroked: true,
+    pointType: "circle",
+    pickable: false,
+    getPointRadius: radius,
+    pointRadiusUnits: "pixels",
+    pointRadiusMinPixels: radius,
+    getFillColor: [fillRgb.r, fillRgb.g, fillRgb.b, 255],
+    getLineColor: [strokeRgb.r, strokeRgb.g, strokeRgb.b, 255],
+    getLineWidth: strokeWidth,
+    lineWidthUnits: "pixels",
+    lineWidthMinPixels: strokeWidth,
+    opacity: Number(getLayerStyleValue(layerState, fillStyleTargetId, "pointOpacity", defaultOpacity)) / 100,
+    parameters: {
+      depthWriteEnabled: false,
+      depthCompare: "always",
+    },
+  });
+}
+
+function buildSouthPolarBackgroundDeckLayer(layerState, mode = POLAR_RENDER_MODES.SOUTH) {
   const shouldShowBackground = [
     getInheritedLayoutVisibility(layerState, "land::fill"),
     getInheritedLayoutVisibility(layerState, "graticules::line"),
@@ -1605,7 +2122,7 @@ function buildSouthPolarBackgroundDeckLayer(layerState) {
 
   return new GeoJsonLayer({
     id: SOUTH_POLAR_BACKGROUND_LAYER_ID,
-    data: buildSouthPolarCapFeatureCollection(),
+    data: buildPolarCapFeatureCollection(mode),
     filled: true,
     stroked: false,
     pickable: false,
@@ -1618,65 +2135,62 @@ function buildSouthPolarBackgroundDeckLayer(layerState) {
   });
 }
 
-function buildSouthPolarOceanDeckLayer(layerState) {
-  const visible = getInheritedLayoutVisibility(layerState, "ocean::fill") === "visible";
-  if (!visible) {
+function buildPolarBackendLayer(entry, state) {
+  if (!entry || typeof entry !== "object") {
     return null;
   }
 
-  const fillOpacity = Number(getLayerStyleValue(layerState, "ocean::fill", "fillOpacity", 100)) / 100;
-  const rgb = hexToRgb(
-    getLayerStyleValue(layerState, "ocean::fill", "fillColor", DEFAULT_OCEAN_FILL_COLOR),
-    WATER_BACKGROUND_COLOR,
-  );
-
-  return new GeoJsonLayer({
-    id: SOUTH_POLAR_OCEAN_LAYER_ID,
-    data: buildSouthPolarCapFeatureCollection(),
-    filled: true,
-    stroked: false,
-    pickable: false,
-    opacity: fillOpacity,
-    getFillColor: [rgb.r, rgb.g, rgb.b, 255],
-    parameters: {
-      depthWriteEnabled: false,
-      depthCompare: "always",
-    },
-  });
-}
-
-function buildPolarGraticulesDeckLayer(layerState, polarGraticulesData) {
-  if (!polarGraticulesData?.features?.length) {
-    return null;
+  if (typeof entry.buildLayer === "function") {
+    return entry.buildLayer(state);
   }
 
-  const visible = getInheritedLayoutVisibility(layerState, "graticules::line") === "visible";
-  if (!visible) {
-    return null;
+  const data = entry.getData?.(state) ?? null;
+  if (entry.kind === "fill") {
+    return buildPolarFillDeckLayer({
+      deckLayerId: entry.id === "ocean::fill" ? SOUTH_POLAR_OCEAN_LAYER_ID : SOUTH_POLAR_CAP_LAYER_ID,
+      visibilityTargetId: entry.visibilityTargetId ?? entry.id,
+      styleTargetId: entry.styleTargetId ?? entry.id,
+      defaultColor: entry.defaultColor ?? DEFAULT_LAND_FILL_COLOR,
+      defaultOpacity: entry.defaultOpacity ?? 100,
+      layerState: state.layerState,
+      data,
+    });
   }
 
-  const rgb = hexToRgb(
-    getLayerStyleValue(layerState, "graticules", "lineColor", "#8FA9BC"),
-    { r: 143, g: 169, b: 188 },
-  );
-  const lineWidth = Number(getLayerStyleValue(layerState, "graticules", "lineWeight", 1));
+  if (entry.kind === "line") {
+    const deckLayerId = entry.id === "graticules::line"
+      ? POLAR_GRATICULES_LAYER_ID
+      : `${entry.id}-polar`;
+    return buildPolarLineDeckLayer({
+      deckLayerId,
+      visibilityTargetId: entry.visibilityTargetId ?? entry.id,
+      styleTargetId: entry.styleTargetId ?? entry.id,
+      defaultColor: entry.defaultColor ?? DEFAULT_OUTLINE_LINE_COLOR,
+      defaultOpacity: entry.defaultOpacity ?? 100,
+      defaultWeight: entry.defaultWeight ?? 1,
+      layerState: state.layerState,
+      data,
+    });
+  }
 
-  return new GeoJsonLayer({
-    id: POLAR_GRATICULES_LAYER_ID,
-    data: polarGraticulesData,
-    filled: false,
-    stroked: true,
-    pickable: false,
-    getLineColor: [rgb.r, rgb.g, rgb.b, 255],
-    getLineWidth: lineWidth,
-    lineWidthUnits: "pixels",
-    lineWidthMinPixels: lineWidth,
-    opacity: Number(getLayerStyleValue(layerState, "graticules", "lineOpacity", 100)) / 100,
-    parameters: {
-      depthWriteEnabled: false,
-      depthCompare: "always",
-    },
-  });
+  if (entry.kind === "point") {
+    return buildPolarPointDeckLayer({
+      deckLayerId: `${entry.id}-polar`,
+      visibilityTargetId: entry.visibilityTargetId ?? entry.id,
+      fillStyleTargetId: entry.fillStyleTargetId ?? entry.styleTargetId ?? entry.id,
+      strokeStyleTargetId: entry.strokeStyleTargetId ?? entry.id,
+      defaultColor: entry.defaultColor ?? "#e74c3c",
+      defaultOpacity: entry.defaultOpacity ?? 80,
+      defaultRadius: entry.defaultRadius ?? 6,
+      defaultStrokeColor: entry.defaultStrokeColor ?? "#ffffff",
+      defaultStrokeOpacity: entry.defaultStrokeOpacity ?? 100,
+      defaultStrokeWeight: entry.defaultStrokeWeight ?? 1,
+      layerState: state.layerState,
+      data,
+    });
+  }
+
+  return null;
 }
 
 function buildPolarDeckLayers(state) {
@@ -1687,22 +2201,25 @@ function buildPolarDeckLayers(state) {
   const orderedEarthRowIds = typeof state.getOrderedChildRowIds === "function"
     ? state.getOrderedChildRowIds("earth")
     : [];
-  const menuOrderedLayerIds = Array.isArray(orderedEarthRowIds) && orderedEarthRowIds.length
+  const orderedBackendKeys = Array.isArray(orderedEarthRowIds) && orderedEarthRowIds.length
     ? orderedEarthRowIds
-    : ["land", "graticules"];
-  const deckBuilders = {
-    land: () => buildSouthPolarCapDeckLayer(state.layerState, state.southPolarCapData),
-    graticules: () => buildPolarGraticulesDeckLayer(state.layerState, state.polarGraticulesData),
-  };
-
-  const orderedContentLayers = [...menuOrderedLayerIds]
+    : ["land", "graticules", "ocean"];
+  const orderedContentLayers = [...orderedBackendKeys]
     .reverse()
-    .map((rowId) => deckBuilders[rowId]?.())
+    .flatMap((rowId) => (
+      getSouthPolarBackendEntries(state)
+        .filter((entry) => entry?.orderKey === rowId)
+        .sort((a, b) => (Number(a?.stackOrder) || 0) - (Number(b?.stackOrder) || 0))
+    ))
+    .map((entry) => buildPolarBackendLayer(entry, state))
+    .filter(Boolean);
+  const overlayLayers = getSouthPolarBackendEntries(state)
+    .filter((entry) => entry?.orderKey == null)
+    .map((entry) => buildPolarBackendLayer(entry, state))
     .filter(Boolean);
 
   return [
-    buildSouthPolarBackgroundDeckLayer(state.layerState),
-    buildSouthPolarOceanDeckLayer(state.layerState),
+    ...overlayLayers,
     ...orderedContentLayers,
   ].filter(Boolean);
 }
@@ -1722,35 +2239,16 @@ function ensureSouthPolarCapOverlayLoaded(state) {
     return;
   }
 
-  if (state.debugState) {
-    state.debugState.landLoadState = "loading";
-    renderMapDebugOverlay(state.debugOverlay, state.debugState);
-  }
-
-  state.loadPromise = loadSouthPolarLandSplit()
-    .then(({ mainLand, southCap }) => {
+  state.loadPromise = loadSouthPolarCap()
+    .then((southCap) => {
       if (state.destroyed) {
         return;
       }
-      state.mainLand = mainLand;
       state.southPolarCapData = southCap;
-      const landSource = state.map?.getSource?.(localLayerSourceId("land"));
-      if (landSource?.setData && state.mainLand) {
-        landSource.setData(state.mainLand);
-      }
-      if (state.debugState) {
-        state.debugState.landLoadState = "loaded";
-        renderMapDebugOverlay(state.debugOverlay, state.debugState);
-      }
       updateSouthPolarCapOverlay(state);
     })
     .catch((error) => {
       state.loadError = error;
-      if (state.debugState) {
-        state.debugState.landLoadState = "error";
-        state.debugState.lastError = String(error?.message ?? error);
-        renderMapDebugOverlay(state.debugOverlay, state.debugState);
-      }
       console.warn("[polar-cap] Failed to build south polar cap overlay.", error);
     });
 }
@@ -1760,30 +2258,16 @@ function ensurePolarGraticulesLoaded(state) {
     return;
   }
 
-  if (state.debugState) {
-    state.debugState.graticulesLoadState = "loading";
-    renderMapDebugOverlay(state.debugOverlay, state.debugState);
-  }
-
   state.graticulesLoadPromise = loadPolarGraticules()
     .then((polarGraticulesData) => {
       if (state.destroyed) {
         return;
       }
       state.polarGraticulesData = polarGraticulesData;
-      if (state.debugState) {
-        state.debugState.graticulesLoadState = "loaded";
-        renderMapDebugOverlay(state.debugOverlay, state.debugState);
-      }
       updateSouthPolarCapOverlay(state);
     })
     .catch((error) => {
       state.graticulesLoadError = error;
-      if (state.debugState) {
-        state.debugState.graticulesLoadState = "error";
-        state.debugState.lastError = String(error?.message ?? error);
-        renderMapDebugOverlay(state.debugOverlay, state.debugState);
-      }
       console.warn("[polar-graticules] Failed to build polar graticules overlay.", error);
     });
 }
@@ -2095,20 +2579,9 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
   const layerState = structuredClone(initialLayerState);
   const scaleOverlay = createScaleOverlay(container);
   const compassOverlay = createCompassOverlay(container);
-  const debugOverlay = createMapDebugOverlay(container);
   const southPolarCapOverlay = createSouthPolarCapOverlayState(layerState);
-  const debugState = {
-    phase: "map-construct",
-    mapCreated: false,
-    mapLoaded: false,
-    deckAttached: false,
-    landLoadState: "idle",
-    graticulesLoadState: "idle",
-    lastError: "",
-  };
-  southPolarCapOverlay.debugState = debugState;
-  southPolarCapOverlay.debugOverlay = debugOverlay;
-  renderMapDebugOverlay(debugOverlay, debugState);
+  const deckEarthOverlay = createDeckEarthOverlayState(layerState);
+  southPolarCapOverlay.backendEntries = [];
   let scaleHideTimeout = null;
 
   function clearScaleHideTimeout() {
@@ -2150,14 +2623,15 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     interleaved: false,
     layers: [],
   });
-  debugState.mapCreated = true;
-  debugState.phase = "map-created";
+  deckEarthOverlay.overlay = new MapboxOverlay({
+    interleaved: false,
+    layers: [],
+  });
   southPolarCapOverlay.map = map;
+  deckEarthOverlay.map = map;
   southPolarCapOverlay.getOrderedChildRowIds = getOrderedChildRowIds;
+  map.addControl(deckEarthOverlay.overlay);
   map.addControl(southPolarCapOverlay.deckOverlay);
-  debugState.deckAttached = true;
-  debugState.phase = "deck-attached";
-  renderMapDebugOverlay(debugOverlay, debugState);
   ensureSouthPolarCapOverlayLoaded(southPolarCapOverlay);
   ensurePolarGraticulesLoaded(southPolarCapOverlay);
   const dynamicLayerDebug = Object.create(null);
@@ -2187,9 +2661,6 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       return;
     }
 
-    debugState.lastError = message;
-    debugState.phase = "map-error";
-    renderMapDebugOverlay(debugOverlay, debugState);
     console.error("[MapLibre]", message, event?.error);
   });
   map.on("movestart", () => {
@@ -2215,9 +2686,8 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     map.easeTo({ bearing: 0 });
   });
   map.on("load", () => {
-    debugState.mapLoaded = true;
-    debugState.phase = "map-load";
-    renderMapDebugOverlay(debugOverlay, debugState);
+    ensureDeckEarthLandLoaded(deckEarthOverlay);
+    ensureDeckEarthGraticulesLoaded(deckEarthOverlay);
     updateCompassOverlay(map, compassOverlay);
     updateSouthPolarCapOverlay(southPolarCapOverlay);
     // Phase 1: All visible-by-default layers — load immediately in parallel
@@ -2243,6 +2713,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         });
 
         applyFullLayerOrder(map, layerState, getOrderedChildRowIds);
+        updateDeckEarthOverlay(deckEarthOverlay);
       } catch (error) {
         console.error("Failed to attach primary layers.", error);
       }
@@ -2507,7 +2978,11 @@ function getMapLayerDebugSnapshot(layerId, paintKeys = [], layoutKeys = []) {
 
   return {
     destroy() {
+      deckEarthOverlay.destroyed = true;
       southPolarCapOverlay.destroyed = true;
+      if (deckEarthOverlay.overlay) {
+        map.removeControl(deckEarthOverlay.overlay);
+      }
       if (southPolarCapOverlay.deckOverlay) {
         map.removeControl(southPolarCapOverlay.deckOverlay);
       }
@@ -2534,15 +3009,20 @@ function getMapLayerDebugSnapshot(layerId, paintKeys = [], layoutKeys = []) {
         layerState[parentId].rowOrder = orderedLayerIds;
       }
       applyFullLayerOrder(map, layerState, getOrderedChildRowIds);
-      updateSouthPolarCapOverlay(southPolarCapOverlay);
+      if (parentId === "earth") {
+        updateSouthPolarCapOverlay(southPolarCapOverlay);
+      }
+      updateDeckEarthOverlay(deckEarthOverlay);
     },
     reapplyFullOrder() {
       applyFullLayerOrder(map, layerState, getOrderedChildRowIds);
       updateSouthPolarCapOverlay(southPolarCapOverlay);
+      updateDeckEarthOverlay(deckEarthOverlay);
     },
     reapplyRowSubtreeOrder(rowId) {
       applyRowSubtreeOrder(map, layerState, rowId, getOrderedChildRowIds);
       updateSouthPolarCapOverlay(southPolarCapOverlay);
+      updateDeckEarthOverlay(deckEarthOverlay);
     },
     setLayerStyleValue(layerId, key, value) {
       if (!layerState[layerId] || typeof layerState[layerId] !== "object") {
@@ -2563,9 +3043,14 @@ function getMapLayerDebugSnapshot(layerId, paintKeys = [], layoutKeys = []) {
       }
 
       // ── Registry-driven layers (everything except ocean) ─────────────────────
+      if (layerId === DECK_EARTH_ROW_ID || isDeckEarthRuntimeTarget(layerId)) {
+        updateDeckEarthOverlay(deckEarthOverlay);
+        return;
+      }
+
       const registryEntry = findRegistryEntry(layerId);
       if (registryEntry && applyRegistryStyleValue(registryEntry, map, layerState, key, value) && key !== "visible") {
-        if (registryEntry.layerId === "land" || registryEntry.layerId === "graticules") {
+        if (shouldRefreshSouthPolarOverlay(southPolarCapOverlay, layerId)) {
           updateSouthPolarCapOverlay(southPolarCapOverlay);
         }
         return;
@@ -2582,7 +3067,7 @@ function getMapLayerDebugSnapshot(layerId, paintKeys = [], layoutKeys = []) {
         }
       }
       if (runtimeStyleApplied) {
-        if (layerId === "land::fill" || layerId === "graticules::line" || layerId === "ocean" || layerId === "ocean::fill") {
+        if (shouldRefreshSouthPolarOverlay(southPolarCapOverlay, layerId)) {
           updateSouthPolarCapOverlay(southPolarCapOverlay);
         }
         return;
@@ -2595,14 +3080,7 @@ function getMapLayerDebugSnapshot(layerId, paintKeys = [], layoutKeys = []) {
         getDescendantRuntimeTargetIds(layerState, rowStateKey).forEach((runtimeTargetId) => {
           applyRuntimeTargetVisibility(runtimeTargetId, map, layerState);
         });
-        if (
-          layerId === "land"
-          || layerId === "land::fill"
-          || layerId === "ocean"
-          || layerId === "ocean::fill"
-          || layerId === "graticules"
-          || layerId === "graticules::line"
-        ) {
+        if (shouldRefreshSouthPolarOverlay(southPolarCapOverlay, layerId)) {
           updateSouthPolarCapOverlay(southPolarCapOverlay);
         }
         return;
@@ -2633,6 +3111,7 @@ function getMapLayerDebugSnapshot(layerId, paintKeys = [], layoutKeys = []) {
     },
     attachDynamicLayer(layerId, geojson, tilesUrl, style, options) {
       attachDynamicLayer(layerId, geojson, tilesUrl, style, options);
+      updateDeckEarthOverlay(deckEarthOverlay);
     },
     getDynamicLayerDebug(layerId) {
       const sourceId = `dynamic-${layerId}`;

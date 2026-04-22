@@ -62,13 +62,12 @@ function createLayerModel() {
     });
   }
 
-  ROOT_ROW_IDS.forEach((id) => {
-    const rootDefinition = layerDefinitions[id];
-    if (!rootDefinition) {
+  Object.values(layerDefinitions).forEach((definition) => {
+    if (!definition?.id) {
       return;
     }
-    rowDefinitionsById.set(rootDefinition.id, rootDefinition);
-    indexRowDefinitions(rootDefinition.rows);
+    rowDefinitionsById.set(definition.id, definition);
+    indexRowDefinitions(definition.rows);
   });
 
   function getParentRows(parentId) {

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Earth Lab</title>
+    <script src="https://unpkg.com/maplibre-gl@5.21.1/dist/maplibre-gl.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.21.1/dist/maplibre-gl.css" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #061018;
+        --panel: rgba(7, 18, 28, 0.88);
+        --panel-border: rgba(255, 255, 255, 0.14);
+        --text: #eff7fb;
+        --muted: rgba(239, 247, 251, 0.72);
+        --accent: #87c9ff;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: #000;
+        color: var(--text);
+        font-family: "Manrope", system-ui, sans-serif;
+      }
+
+      #app {
+        position: relative;
+        width: 100vw;
+        height: 100dvh;
+        overflow: hidden;
+        background: #000;
+      }
+
+      #map {
+        position: absolute;
+        inset: 0;
+      }
+
+      .lab-panel {
+        position: absolute;
+        top: 14px;
+        left: 14px;
+        z-index: 10;
+        width: min(320px, calc(100vw - 28px));
+        padding: 14px 14px 12px;
+        border: 1px solid var(--panel-border);
+        background: var(--panel);
+        box-shadow:
+          0 0 0 1px rgba(0, 0, 0, 0.84),
+          0 20px 44px rgba(0, 0, 0, 0.34);
+        backdrop-filter: blur(12px);
+      }
+
+      .lab-panel h1 {
+        margin: 0 0 4px;
+        font-size: 1rem;
+      }
+
+      .lab-panel p {
+        margin: 0 0 12px;
+        color: var(--muted);
+        font-size: 0.85rem;
+        line-height: 1.4;
+      }
+
+      .lab-grid {
+        display: grid;
+        gap: 8px;
+      }
+
+      .lab-toggle {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 10px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .lab-toggle label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.9rem;
+      }
+
+      .lab-toggle input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+      }
+
+      .lab-select {
+        width: 100%;
+        padding: 8px 10px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: rgba(0, 0, 0, 0.24);
+        color: var(--text);
+        font: inherit;
+      }
+
+      .lab-status {
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.12);
+        color: var(--muted);
+        font-size: 0.8rem;
+        line-height: 1.5;
+        white-space: pre-line;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="app">
+      <div id="map"></div>
+      <section class="lab-panel">
+        <h1>Earth Lab</h1>
+        <p>Fresh repro page for MapLibre globe plus deck Earth layers.</p>
+        <div class="lab-grid">
+          <select class="lab-select" id="modeSelect">
+            <option value="interleaved">Interleaved deck overlay</option>
+            <option value="overlaid">Overlaid deck overlay</option>
+          </select>
+          <div class="lab-toggle">
+            <label><input type="checkbox" id="oceanToggle" checked /> Ocean fill</label>
+          </div>
+          <div class="lab-toggle">
+            <label><input type="checkbox" id="landFillToggle" checked /> Land fill</label>
+          </div>
+          <div class="lab-toggle">
+            <label><input type="checkbox" id="landLineToggle" checked /> Land outline</label>
+          </div>
+          <div class="lab-toggle">
+            <label><input type="checkbox" id="graticulesToggle" checked /> Graticules</label>
+          </div>
+        </div>
+        <div class="lab-status" id="status">Loading…</div>
+      </section>
+    </main>
+    <script type="module" src="./src/lab/earth-lab.js"></script>
+  </body>
+</html>

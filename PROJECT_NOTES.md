@@ -5,6 +5,74 @@
 - This file is the local architecture note set for the MapLibre Atlas app.
 - Keep this file active and current, not archival.
 
+## Current Reset Direction
+- If Atlas Earth is rebuilt cleanly, start from the proven `earth-lab` shape, not from the current main-app Earth runtime.
+- Treat the current main-app Earth experiments as learning material, not as architecture to preserve.
+- Favor a fresh runtime with explicit simplicity over a "bridge" migration that carries hidden Earth exceptions forward.
+- The goal of the reset is to preserve what worked:
+  - MapLibre as the map shell
+  - deck as the Earth renderer
+  - local persistence for Earth styling state
+  - a compact top control surface for Earth/background/settings
+- The goal of the reset is to drop what did not earn its keep:
+  - interleaved Earth rendering
+  - legacy Earth rows/controllers that are only kept alive for compatibility
+  - separate polar overlay machinery
+  - implicit ordering exceptions spread across renderer code
+  - any "shared" abstraction that only looks unified in UI while staying bespoke in runtime
+
+## Earth Reset Baseline
+- The current proven Earth baseline is:
+  - MapLibre globe as the base map shell
+  - one non-interleaved `MapboxOverlay` deck overlay for Earth
+  - deck `SolidPolygonLayer` for ocean
+  - deck `GeoJsonLayer` for land fill
+  - deck `GeoJsonLayer` for land outline
+  - deck `GeoJsonLayer` for graticules
+- `earth-lab` is the reference for this baseline because it proved simpler and more stable than the interleaved/main-app experiments.
+- Prefer one Earth overlay path only.
+- Do not keep a second hidden/legacy Earth renderer active "just in case."
+- If Earth needs polar coverage, solve that inside the one Earth overlay path rather than reintroducing a separate polar overlay system.
+
+## Earth Reset Lessons
+- Interleaved deck Earth with MapLibre globe was not reliable enough in this project, even though high-level library support exists on paper.
+- A working overlay baseline is more valuable than a theoretically cleaner interleaved architecture that flickers or disappears.
+- Large Earth/base geometry should be proven first in a clean page before being integrated into a bigger app shell.
+- When diagnosing map/render issues, isolate the renderer in a fresh page before changing menu/state architecture.
+- Do not trust "supported" as equivalent to "production-safe in this exact runtime."
+- If a simple lab page works and the app shell does not, prefer rebuilding from the lab page rather than repeatedly adapting the broken shell.
+
+## Earth UI Direction
+- Earth is a product-level base control, not just another ordinary user dataset row.
+- A globe button in the top control strip is the preferred entry point for Earth controls.
+- `Background`, `Earth`, and `Settings` can live beside each other as sibling top controls.
+- The Earth control may open a dedicated Earth styling panel instead of appearing as a normal row in the main layer list.
+- Earth can be bespoke in presentation while still reusing proven row-style UI patterns internally where they help.
+
+## Earth State Direction
+- Even if Earth UI is bespoke, Earth state should stay disciplined and explicit.
+- Prefer simple persisted Earth targets such as:
+  - `earth/ocean/fill`
+  - `earth/land/fill`
+  - `earth/land/line`
+  - `earth/graticules/line`
+- Reuse the existing style vocabulary where possible:
+  - `fillColor`
+  - `fillOpacity`
+  - `lineColor`
+  - `lineOpacity`
+  - `lineWeight`
+- Persist Earth styling state locally from the beginning.
+- Earth persistence should be easy to read, easy to reset, and not entangled with old Earth compatibility state.
+
+## Rebuild Rules
+- Build the next Earth runtime as if the old Earth runtime does not exist.
+- Add only one Earth rendering path at a time.
+- Do not reintroduce interleaving unless a fresh isolated proof demonstrates it working for the exact Earth geometry we need.
+- Do not carry forward old Earth-specific ordering, restore, or polar exceptions unless the new build proves they are still necessary.
+- Prefer a new small app shell over carefully transplanting old Earth code if transplanting would reintroduce hidden assumptions.
+- Keep the rebuild notes opinionated enough that future work can say "no" to baggage quickly.
+
 ## Product Model
 - Atlas/Layers is an open geodata canvas, not only a layer editor.
 - Datasets are public building blocks intended to be reusable by everyone.
@@ -182,6 +250,18 @@
 - Avoid root-only or parent-only reorder algorithms.
 - If a runtime ordering exception is required, encode it as a narrow data-driven exception inside the shared ordering system.
 - Runtime rendering should resolve primarily by visual layer, not by treating each dataset as an independent top-level runtime layer.
+- A runtime target may have more than one renderer backend attached:
+  - MapLibre
+  - deck
+  - or both
+- Shared row targets must drive all attached renderer backends through the same runtime contract for:
+  - style updates
+  - visibility inheritance
+  - ordering
+  - live drag/reorder updates
+- Deck-backed rendering should not be wired as a bespoke per-layer overlay path once a target can be expressed through the shared runtime-target system.
+- Polar rendering should be modeled as a backend capability of a normal runtime target, not as a separate menu/controller concept.
+- Built-in layers may opt into explicit polar backend rules first, but Supabase-backed targets should use the same backend contract even before dataset polar metadata is populated.
 - Default runtime behavior for a layer with many linked datasets should be:
   - load all datasets linked to the layer
   - combine or co-resolve them under one visual layer contract

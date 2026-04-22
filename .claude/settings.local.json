@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(npm show:*)",
+      "Bash(npm install:*)",
+      "WebFetch(domain:luma.gl)",
+      "WebFetch(domain:deck.gl)"
+    ]
+  }
+}

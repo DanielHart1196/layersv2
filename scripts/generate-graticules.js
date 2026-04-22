@@ -5,7 +5,7 @@ const cwd = process.cwd();
 const outputPath = path.join(cwd, "public/data/graticules/world-graticules-10deg.geojson");
 const STEP_DEGREES = 10;
 const POLAR_MERIDIAN_STEP = 90;
-const POLAR_BREAK_LATITUDE = 80;
+const POLAR_BREAK_LATITUDE = 85;
 const SAMPLE_STEP = 1;
 
 function buildMeridian(longitude) {

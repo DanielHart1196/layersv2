@@ -309,12 +309,6 @@ ul {
   opacity: 1;
 }
 
-.layer-menu-panel:hover ~ .layer-menu-button,
-.layer-menu-panel:hover ~ .layer-menu-appearance .layer-menu-appearance-button,
-.layer-menu:hover .layer-menu-button {
-  opacity: 1;
-}
-
 .layer-menu-button[aria-label="Close layer menu"] {
   cursor: grab;
 }
@@ -345,10 +339,6 @@ ul {
   transition:
     opacity 120ms ease,
     border-color 180ms ease;
-}
-
-.layer-menu:hover .layer-menu-appearance-button {
-  opacity: 1;
 }
 
 #layerMenuScreenButton {
@@ -737,8 +727,6 @@ ul {
   opacity: 0;
 }
 
-.layer-menu-panel:hover .layer-menu-row-gear,
-.layer-menu:hover .layer-menu-row-gear,
 .layer-menu-panel:focus-within .layer-menu-row-gear,
 .layer-menu:focus-within .layer-menu-row-gear {
   opacity: 1;
@@ -760,15 +748,6 @@ ul {
   min-width: 0;
 }
 
-.layer-menu:not(:hover):not(:focus-within) .layer-menu-row-leading {
-  gap: 0;
-}
-
-.layer-menu:not(:hover):not(:focus-within) .layer-menu-row-leading > .layer-menu-row-toggle,
-.layer-menu:not(:hover):not(:focus-within) .layer-menu-row-leading > .layer-menu-row-label {
-  margin-left: -14px;
-}
-
 .layer-menu-row-grabber {
   display: inline-grid;
   gap: 3px;
@@ -784,25 +763,17 @@ ul {
   transition: opacity 120ms ease;
 }
 
-.layer-menu-panel:hover .layer-menu-row-grabber,
-.layer-menu:hover .layer-menu-row-grabber,
 .layer-menu-panel:focus-within .layer-menu-row-grabber,
 .layer-menu:focus-within .layer-menu-row-grabber {
   opacity: 1;
   pointer-events: auto;
 }
 
-.layer-menu-panel:hover .layer-menu-row-leading,
-.layer-menu:hover .layer-menu-row-leading,
 .layer-menu-panel:focus-within .layer-menu-row-leading,
 .layer-menu:focus-within .layer-menu-row-leading {
   gap: 10px;
 }
 
-.layer-menu-panel:hover .layer-menu-row-leading > .layer-menu-row-toggle,
-.layer-menu-panel:hover .layer-menu-row-leading > .layer-menu-row-label,
-.layer-menu:hover .layer-menu-row-leading > .layer-menu-row-toggle,
-.layer-menu:hover .layer-menu-row-leading > .layer-menu-row-label,
 .layer-menu-panel:focus-within .layer-menu-row-leading > .layer-menu-row-toggle,
 .layer-menu-panel:focus-within .layer-menu-row-leading > .layer-menu-row-label,
 .layer-menu:focus-within .layer-menu-row-leading > .layer-menu-row-toggle,
@@ -1239,6 +1210,50 @@ body.is-reordering-rows {
 
   .layer-menu.is-open .layer-menu-row-leading > .layer-menu-row-toggle,
   .layer-menu.is-open .layer-menu-row-leading > .layer-menu-row-label {
+    margin-left: 0;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .layer-menu-panel:hover ~ .layer-menu-button,
+  .layer-menu-panel:hover ~ .layer-menu-appearance .layer-menu-appearance-button,
+  .layer-menu:hover .layer-menu-button {
+    opacity: 1;
+  }
+
+  .layer-menu:hover .layer-menu-appearance-button {
+    opacity: 1;
+  }
+
+  .layer-menu-panel:hover .layer-menu-row-gear,
+  .layer-menu:hover .layer-menu-row-gear {
+    opacity: 1;
+  }
+
+  .layer-menu:not(:hover):not(:focus-within) .layer-menu-row-leading {
+    gap: 0;
+  }
+
+  .layer-menu:not(:hover):not(:focus-within) .layer-menu-row-leading > .layer-menu-row-toggle,
+  .layer-menu:not(:hover):not(:focus-within) .layer-menu-row-leading > .layer-menu-row-label {
+    margin-left: -14px;
+  }
+
+  .layer-menu-panel:hover .layer-menu-row-grabber,
+  .layer-menu:hover .layer-menu-row-grabber {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .layer-menu-panel:hover .layer-menu-row-leading,
+  .layer-menu:hover .layer-menu-row-leading {
+    gap: 10px;
+  }
+
+  .layer-menu-panel:hover .layer-menu-row-leading > .layer-menu-row-toggle,
+  .layer-menu-panel:hover .layer-menu-row-leading > .layer-menu-row-label,
+  .layer-menu:hover .layer-menu-row-leading > .layer-menu-row-toggle,
+  .layer-menu:hover .layer-menu-row-leading > .layer-menu-row-label {
     margin-left: 0;
   }
 }

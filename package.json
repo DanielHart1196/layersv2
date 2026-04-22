@@ -28,6 +28,10 @@
     "build:osm-outline:victoria:pmtiles": "node ./scripts/build-osm-outline-victoria-pmtiles.mjs"
   },
   "dependencies": {
+    "@deck.gl/core": "^9.3.1",
+    "@deck.gl/layers": "^9.3.1",
+    "@deck.gl/mapbox": "^9.3.1",
+    "@loaders.gl/gis": "^4.4.1",
     "@supabase/supabase-js": "^2.101.1",
     "@tmcw/togeojson": "^7.1.2",
     "geojson-vt": "^4.0.2",

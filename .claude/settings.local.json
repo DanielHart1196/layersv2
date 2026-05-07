@@ -5,7 +5,8 @@
       "Bash(npm show:*)",
       "Bash(npm install:*)",
       "WebFetch(domain:luma.gl)",
-      "WebFetch(domain:deck.gl)"
+      "WebFetch(domain:deck.gl)",
+      "WebFetch(domain:medium.com)"
     ]
   }
 }

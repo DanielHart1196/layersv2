@@ -1,8 +1,9 @@
 import Papa from "papaparse";
 import { gpx, kml } from "@tmcw/togeojson";
 import { detectColumns } from "./csv-mapper.js";
+import { inspectPmtilesFile } from "./pmtiles-metadata.js";
 
-export const SUPPORTED_EXTENSIONS = [".csv", ".xlsx", ".geojson", ".json", ".gpx", ".kml", ".zip"];
+export const SUPPORTED_EXTENSIONS = [".csv", ".xlsx", ".geojson", ".json", ".gpx", ".kml", ".zip", ".pmtiles"];
 
 export function getFileType(file) {
   const name = file.name.toLowerCase();
@@ -11,6 +12,7 @@ export function getFileType(file) {
   if (name.endsWith(".gpx"))                      return "gpx";
   if (name.endsWith(".kml"))                      return "kml";
   if (name.endsWith(".zip"))                      return "shapefile-zip";
+  if (name.endsWith(".pmtiles"))                  return "pmtiles";
   if (name.endsWith(".geojson") || name.endsWith(".json")) return "geojson";
   return null;
 }
@@ -74,6 +76,11 @@ export async function parseFile(file) {
       ? geojson.flatMap((collection) => collection?.features ?? [])
       : geojson?.features ?? [];
     return { type: "shapefile-zip", features: normaliseFeatures(features) };
+  }
+
+  if (type === "pmtiles") {
+    const pmtiles = await inspectPmtilesFile(file);
+    return { type: "pmtiles", features: [], pmtiles };
   }
 
   if (type === "geojson") {

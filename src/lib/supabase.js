@@ -14,4 +14,4 @@ function requireSupabase() {
   throw new Error("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
 }
 
-export { supabase, requireSupabase };
+export { supabase, requireSupabase, supabaseAnonKey, supabaseUrl };

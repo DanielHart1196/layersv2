@@ -17,128 +17,7 @@ import { createPmtilesManifest } from "../sources/pmtiles/source-manifest.js";
 import { loadLayerFromSupabase } from "../sources/supabase/layer-loader.js";
 import { getRowRuntimeTargetId, getRowStateKey } from "../core/layer-definitions.js";
 
-const FILTER_DEBUG_VERSION = "filter-debug-2026-04-19-v3";
-const FILTER_DEBUG_MAX_EVENTS = 10;
 const supabaseLayerDataCache = new Map();
-
-function formatDebugValue(value) {
-  if (value == null) {
-    return "null";
-  }
-
-  if (typeof value === "string") {
-    return value;
-  }
-
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function getDebugStackSnippet() {
-  try {
-    const rawStack = new Error().stack ?? "";
-    return rawStack
-      .split("\n")
-      .slice(2, 5)
-      .map((line) => line.trim())
-      .join(" | ");
-  } catch {
-    return "";
-  }
-}
-
-function createFilterDebugOverlay() {
-  const wrapper = document.createElement("div");
-  wrapper.id = "filterDebugOverlayWrap";
-  wrapper.style.position = "fixed";
-  wrapper.style.top = "12px";
-  wrapper.style.left = "12px";
-  wrapper.style.zIndex = "30000";
-  wrapper.style.display = "flex";
-  wrapper.style.flexDirection = "column";
-  wrapper.style.alignItems = "flex-start";
-  wrapper.style.gap = "6px";
-
-  const toggleButton = document.createElement("button");
-  toggleButton.type = "button";
-  toggleButton.id = "filterDebugOverlayToggle";
-  toggleButton.textContent = "x";
-  toggleButton.setAttribute("aria-label", "Minimize debug overlay");
-  toggleButton.style.width = "24px";
-  toggleButton.style.height = "24px";
-  toggleButton.style.padding = "0";
-  toggleButton.style.border = "0";
-  toggleButton.style.borderRadius = "6px";
-  toggleButton.style.background = "rgba(0, 0, 0, 0.9)";
-  toggleButton.style.color = "#d7f7d9";
-  toggleButton.style.font = "12px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-  toggleButton.style.cursor = "pointer";
-  toggleButton.style.pointerEvents = "auto";
-
-  const overlay = document.createElement("pre");
-  overlay.id = "filterDebugOverlay";
-  overlay.setAttribute("aria-live", "polite");
-  overlay.style.maxWidth = "280px";
-  overlay.style.maxHeight = "38vh";
-  overlay.style.overflow = "hidden";
-  overlay.style.margin = "0";
-  overlay.style.padding = "8px 10px";
-  overlay.style.borderRadius = "8px";
-  overlay.style.background = "rgba(0, 0, 0, 0.82)";
-  overlay.style.color = "#d7f7d9";
-  overlay.style.font = "10px/1.25 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-  overlay.style.whiteSpace = "pre-wrap";
-  overlay.style.pointerEvents = "none";
-  overlay.style.boxShadow = "0 6px 24px rgba(0,0,0,0.28)";
-  overlay.textContent = `${FILTER_DEBUG_VERSION}\ninitializing…`;
-
-  let minimized = true;
-  const syncMinimizedState = () => {
-    overlay.style.display = minimized ? "none" : "block";
-    toggleButton.textContent = minimized ? "+" : "x";
-    toggleButton.setAttribute("aria-label", minimized ? "Restore debug overlay" : "Minimize debug overlay");
-  };
-  toggleButton.addEventListener("click", () => {
-    minimized = !minimized;
-    syncMinimizedState();
-  });
-  syncMinimizedState();
-
-  wrapper.append(toggleButton, overlay);
-  document.body.append(wrapper);
-  return overlay;
-}
-
-function renderFilterDebugOverlay(overlay, debugEvents = []) {
-  if (!overlay) {
-    return;
-  }
-  const lines = [FILTER_DEBUG_VERSION];
-  if (!debugEvents.length) {
-    lines.push("no filter events yet");
-    overlay.textContent = lines.join("\n");
-    return;
-  }
-
-  debugEvents.forEach((event, index) => {
-    lines.push("");
-    lines.push(`#${index + 1} ${event.kind}`);
-    if (event.requestId != null) lines.push(`req ${event.requestId}`);
-    if (event.parentId) lines.push(`parent ${event.parentId}`);
-    if (event.rowId) lines.push(`row ${event.rowId}`);
-    if (event.field != null || event.value != null) {
-      lines.push(`match ${event.field ?? "?"}=${formatDebugValue(event.value ?? "")}`);
-    }
-    if (event.existingCount != null) lines.push(`existing ${event.existingCount}`);
-    if (event.note) lines.push(event.note);
-    if (event.stack) lines.push(event.stack);
-  });
-
-  overlay.textContent = lines.join("\n");
-}
 
 async function bootstrapApplication() {
   const layerModel = createLayerModel();
@@ -161,18 +40,6 @@ async function bootstrapApplication() {
   });
 
   let mapStartupError = null;
-  const filterDebugOverlay = createFilterDebugOverlay();
-  let filterDebugEvents = [];
-  let filterDebugRequestId = 0;
-  const pushFilterDebugEvent = (event) => {
-    filterDebugEvents = [event, ...filterDebugEvents].slice(0, FILTER_DEBUG_MAX_EVENTS);
-    renderFilterDebugOverlay(filterDebugOverlay, filterDebugEvents);
-  };
-  window.addEventListener("layerv2:filter-debug", (event) => {
-    if (event?.detail) {
-      pushFilterDebugEvent(event.detail);
-    }
-  });
   try {
     screenRuntime.mount(document.getElementById("mapStage"));
   } catch (error) {
@@ -186,7 +53,6 @@ async function bootstrapApplication() {
   if (!mapStartupError) {
     screenRuntime.whenStyleReady(() => {
       void reattachPersistedSupabaseLayers(layerModel, screenRuntime);
-      renderFilterDebugOverlay(filterDebugOverlay, filterDebugEvents);
     });
   }
 
@@ -243,26 +109,7 @@ async function bootstrapApplication() {
         && (row.filter?.op ?? "==") === "=="
         && String(row.filter?.value ?? "") === String(value ?? "")
       ));
-      pushFilterDebugEvent({
-        kind: "ui-create-request",
-        requestId: ++filterDebugRequestId,
-        parentId: parentRow.id,
-        field: String(columnName),
-        value,
-        existingCount: layerModel.getChildRows(parentRow.id).filter((row) => row?.type === "layer" && row.kind === "filter").length,
-        stack: getDebugStackSnippet(),
-      });
-      const requestId = filterDebugRequestId;
       if (existingFilterRow) {
-        pushFilterDebugEvent({
-          kind: "duplicate-filter-request",
-          requestId,
-          parentId: parentRow.id,
-          rowId: existingFilterRow.id,
-          field: String(columnName),
-          value,
-          stack: getDebugStackSnippet(),
-        });
         return;
       }
 
@@ -283,15 +130,6 @@ async function bootstrapApplication() {
       syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow);
       screenRuntime.reapplyRowSubtreeOrder?.(parentRow.id);
       rerenderLayerMenu();
-      pushFilterDebugEvent({
-        kind: "bootstrap-created-filter",
-        requestId,
-        parentId: parentRow.id,
-        rowId: nextRow.id,
-        field: String(columnName),
-        value,
-        stack: getDebugStackSnippet(),
-      });
     },
   });
   const rerenderLayerMenu = renderLayerMenuRows({
@@ -353,13 +191,6 @@ async function bootstrapApplication() {
         }
       }
       rerenderLayerMenu();
-      pushFilterDebugEvent({
-        kind: "remove-filter",
-        parentId: row?.filter?.parentLayerId ?? parentId,
-        rowId,
-        field: row?.filter?.field ?? null,
-        value: row?.filter?.value ?? null,
-      });
     },
     onDataAction: (row) => {
       if (!row?.layerRef || !SUPABASE_UUID.test(row.layerRef)) {
@@ -372,7 +203,6 @@ async function bootstrapApplication() {
       });
     },
   });
-  renderFilterDebugOverlay(filterDebugOverlay, filterDebugEvents);
   const layerMenuControls = enableLayerMenuControls({
     wrapper: document.getElementById("layerMenu"),
     button: document.getElementById("layerMenuButton"),
@@ -723,7 +553,7 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
     }
     throw err;
   }
-  const { layer, geojson, tilesUrl } = layerResult;
+  const { layer, geojson, tilesUrl, sourceLayerId } = layerResult;
   supabaseLayerDataCache.set(layerRef, layerResult);
   const added = layerModel.addDataRow(resolvedParentId, {
     name,
@@ -743,6 +573,7 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
       options: {
         geometryTypes: added.geometryTypes ?? geometryTypes,
         geometryType: added.geometryType ?? geometryType ?? layer.geometry_type ?? null,
+        sourceLayerId,
       },
     });
   }
@@ -759,7 +590,7 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
 
 async function reloadSupabaseLayer(layerId, layerModel, screenRuntime) {
   const layerResult = await loadLayerFromSupabase(layerId);
-  const { layer, geojson, tilesUrl } = layerResult;
+  const { layer, geojson, tilesUrl, sourceLayerId } = layerResult;
   supabaseLayerDataCache.set(layerId, layerResult);
   screenRuntime.detachDynamicLayer(layerId);
   if (geojson || tilesUrl) {
@@ -771,6 +602,7 @@ async function reloadSupabaseLayer(layerId, layerModel, screenRuntime) {
       options: {
         geometryTypes: Array.isArray(layer.geometry_types) ? layer.geometry_types : [],
         geometryType: layer.geometry_type ?? null,
+        sourceLayerId,
       },
     });
   }

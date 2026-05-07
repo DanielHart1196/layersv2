@@ -1,26 +1,20 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <link rel="stylesheet" href="cesium/Widgets/widgets.css">
-    <script src="cesium/Cesium.js"></script>
-
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Layers</title>
-    
+
     <!-- Load MapLibre from CDN - faster initial load -->
     <script src="https://unpkg.com/maplibre-gl@5.21.1/dist/maplibre-gl.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.21.1/dist/maplibre-gl.css">
-    
-    
+
+
     <!-- Preconnect to CDN -->
     <link rel="preconnect" href="https://unpkg.com" crossorigin>
-    
-    <script type="module" crossorigin src="./assets/main-CEL1mi7v.js"></script>
-    <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-B5Qt9EMX.js">
-    <link rel="modulepreload" crossorigin href="./assets/geojson-layer-CsYTIFwc.js">
-    <link rel="modulepreload" crossorigin href="./assets/mapbox-overlay-DBMfUfrc.js">
-    <link rel="stylesheet" crossorigin href="./assets/main-BA7m5D4G.css">
+
+    <script type="module" crossorigin src="./assets/main-dQivKYSj.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/main-CqHbJ0A0.css">
   </head>
   <body>
     <main class="app-shell">
@@ -54,25 +48,15 @@
             class="layer-menu-appearance-button layer-menu-earth-button"
             id="layerMenuEarthButton"
             type="button"
-            aria-label="Show globe styling rows"
-            aria-expanded="false"
-            aria-controls="layerMenuPanel"
-          >
-            <span class="layer-menu-earth-icon" aria-hidden="true"></span>
-          </button>
-          <button
-            class="layer-menu-appearance-button"
-            id="layerMenuScreenButton"
-            type="button"
-            aria-label="Show screen background row"
+            aria-label="Show earth styling rows"
             aria-expanded="false"
             aria-controls="layerMenuPanel"
           ></button>
           <button
             class="layer-menu-appearance-button"
-            id="layerMenuAppearanceButton"
+            id="layerMenuScreenButton"
             type="button"
-            aria-label="Show settings background row"
+            aria-label="Show screen background row"
             aria-expanded="false"
             aria-controls="layerMenuPanel"
           ></button>
@@ -99,6 +83,6 @@
           <div class="layer-menu-panel-footer" id="layerMenuPanelFooter"></div>
         </div>
       </div>
-    </main>
+    </main>
   </body>
 </html>

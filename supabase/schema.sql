@@ -88,6 +88,11 @@ create table datasets (
   field_schema      jsonb       not null default '[]',
   render_format     text        check (render_format in ('geojson', 'pmtiles')),
   artifact_url      text,
+  source_layer      text,
+  minzoom           int,
+  maxzoom           int,
+  bounds            jsonb,
+  artifact_metadata jsonb       not null default '{}',
   feature_count     int         not null default 0,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()

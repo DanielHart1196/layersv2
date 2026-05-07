@@ -1,5 +1,6 @@
 import { requireSupabase } from "../lib/supabase.js";
 import { inferGeometryFamilies, inferGeometryFamily } from "./geometry-family.js";
+import { uploadStorageObject } from "./storage-upload.js";
 
 const BATCH_SIZE = 500;
 
@@ -85,6 +86,20 @@ function inferGeometryType(features = []) {
 
 function inferGeometryTypes(features = []) {
   return inferGeometryFamilies(features);
+}
+
+function normalizePmtilesMetadata(pmtilesMetadata) {
+  if (!pmtilesMetadata || typeof pmtilesMetadata !== "object") return null;
+  const sourceLayer = String(pmtilesMetadata.sourceLayer ?? "").trim();
+  const geometryTypes = Array.isArray(pmtilesMetadata.geometryTypes) ? pmtilesMetadata.geometryTypes : [];
+  if (!sourceLayer || !geometryTypes.length) return null;
+  return {
+    ...pmtilesMetadata,
+    sourceLayer,
+    geometryTypes,
+    geometryType: pmtilesMetadata.geometryType ?? collapseGeometryTypes(geometryTypes),
+    fieldSchema: normalizeFieldSchema(pmtilesMetadata.fieldSchema),
+  };
 }
 
 function collapseGeometryTypes(geometryTypes = []) {
@@ -232,31 +247,58 @@ function buildPmtilesDiagnosticsLabel(diagnostics) {
 
 async function uploadDatasetArtifact(
   supabase,
-  { layerId, datasetId, layerName, rawFile, artifactFormat, geojsonText, pmtilesBuffer, pmtilesDiagnostics, onProgress, progressOffset },
+  { layerId, datasetId, layerName, rawFile, artifactFormat, geojsonText, pmtilesBuffer, pmtilesDiagnostics, pmtilesMetadata, onProgress, progressOffset },
 ) {
   const { geojsonStoragePath, pmtilesStoragePath } = buildStorageInfo({ layerId, datasetId, rawFile, datasetName: layerName });
   const patch = { render_format: artifactFormat };
 
   if (artifactFormat === "pmtiles") {
     onProgress?.(progressOffset, `Storing PMTiles...${buildPmtilesDiagnosticsLabel(pmtilesDiagnostics)}`);
-    const { error: tilesError } = await supabase.storage
-      .from("layer-files")
-      .upload(pmtilesStoragePath, pmtilesBuffer, { contentType: "application/x-protobuf" });
-
-    if (tilesError) {
-      throw new Error(`Failed to store tiles: ${tilesError.message}`);
+    const uploadBody = pmtilesBuffer ?? rawFile;
+    try {
+      await uploadStorageObject(supabase, {
+        bucket: "layer-files",
+        path: pmtilesStoragePath,
+        body: uploadBody,
+        contentType: "application/vnd.pmtiles",
+        onProgress: (uploaded, total) => {
+          if (!total) return;
+          const pct = progressOffset + Math.round((uploaded / total) * 8);
+          onProgress?.(pct, `Storing PMTiles... ${formatBytes(uploaded)} / ${formatBytes(total)}`);
+        },
+      });
+    } catch (error) {
+      throw new Error(`Failed to store tiles: ${error.message}`);
     }
 
     const { data: tilesUrl } = supabase.storage.from("layer-files").getPublicUrl(pmtilesStoragePath);
     patch.artifact_url = tilesUrl.publicUrl;
+    if (pmtilesMetadata?.sourceLayer) {
+      patch.source_layer = pmtilesMetadata.sourceLayer;
+    }
+    if (Number.isFinite(pmtilesMetadata?.minzoom)) {
+      patch.minzoom = pmtilesMetadata.minzoom;
+    }
+    if (Number.isFinite(pmtilesMetadata?.maxzoom)) {
+      patch.maxzoom = pmtilesMetadata.maxzoom;
+    }
+    if (Array.isArray(pmtilesMetadata?.bounds)) {
+      patch.bounds = pmtilesMetadata.bounds;
+    }
+    if (pmtilesMetadata?.metadata && typeof pmtilesMetadata.metadata === "object") {
+      patch.artifact_metadata = pmtilesMetadata.metadata;
+    }
   } else {
     onProgress?.(progressOffset, "Storing GeoJSON...");
-    const { error: geojsonError } = await supabase.storage
-      .from("layer-files")
-      .upload(geojsonStoragePath, new Blob([geojsonText], { type: "application/geo+json" }), { contentType: "application/geo+json" });
-
-    if (geojsonError) {
-      throw new Error(`Failed to store GeoJSON: ${geojsonError.message}`);
+    try {
+      await uploadStorageObject(supabase, {
+        bucket: "layer-files",
+        path: geojsonStoragePath,
+        body: new Blob([geojsonText], { type: "application/geo+json" }),
+        contentType: "application/geo+json",
+      });
+    } catch (error) {
+      throw new Error(`Failed to store GeoJSON: ${error.message}`);
     }
 
     const { data: geojsonUrl } = supabase.storage.from("layer-files").getPublicUrl(geojsonStoragePath);
@@ -383,11 +425,14 @@ export async function createLayerWithDataset({
   fieldSchema = [],
   rawFile,
   usePmtiles,
+  pmtilesMetadata = null,
   onProgress,
 }) {
   const supabase = requireSupabase();
-  const geometryTypes = inferGeometryTypes(features);
-  const geometryType = inferGeometryType(features);
+  const normalizedPmtilesMetadata = normalizePmtilesMetadata(pmtilesMetadata);
+  const geometryTypes = normalizedPmtilesMetadata?.geometryTypes ?? inferGeometryTypes(features);
+  const geometryType = normalizedPmtilesMetadata?.geometryType ?? inferGeometryType(features);
+  const resolvedFieldSchema = fieldSchema.length ? fieldSchema : normalizedPmtilesMetadata?.fieldSchema ?? [];
   const resolvedDatasetName = String(datasetName || rawFile?.name || name || "Dataset").replace(/\.[^.]+$/, "").trim() || "Dataset";
   const artifactFormat = usePmtiles ? "pmtiles" : "geojson";
   const geojson = buildFeatureCollection(features);
@@ -398,7 +443,7 @@ export async function createLayerWithDataset({
 
   try {
     let pmtilesBuffer = null;
-    if (usePmtiles) {
+    if (usePmtiles && !normalizedPmtilesMetadata) {
       onProgress?.(0, "Generating PMTiles...");
       const generated = await generatePmtilesInWorker(geojson, (pct) => {
         onProgress?.(Math.round(pct * 0.4), "Generating PMTiles...");
@@ -433,7 +478,7 @@ export async function createLayerWithDataset({
       licenseUrl,
       attribution,
       geometryType,
-      fieldSchema,
+      fieldSchema: resolvedFieldSchema,
     });
 
     await uploadDatasetArtifact(supabase, {
@@ -445,15 +490,20 @@ export async function createLayerWithDataset({
       geojsonText,
       pmtilesBuffer,
       pmtilesDiagnostics,
+      pmtilesMetadata: normalizedPmtilesMetadata,
       onProgress,
       progressOffset: usePmtiles ? 52 : 8,
     });
 
-    await insertFeatureBatches(supabase, datasetId, features, {
-      onProgress,
-      progressStart: usePmtiles ? 62 : 12,
-      progressEnd: 100,
-    });
+    if (features.length) {
+      await insertFeatureBatches(supabase, datasetId, features, {
+        onProgress,
+        progressStart: usePmtiles ? 62 : 12,
+        progressEnd: 100,
+      });
+    } else {
+      onProgress?.(100, "Layer added.");
+    }
 
     return { layerId, datasetId };
   } catch (error) {
@@ -475,11 +525,14 @@ export async function addDatasetToLayer({
   fieldSchema = [],
   rawFile,
   usePmtiles,
+  pmtilesMetadata = null,
   onProgress,
 }) {
   const supabase = requireSupabase();
-  const geometryTypes = inferGeometryTypes(features);
-  const geometryType = inferGeometryType(features);
+  const normalizedPmtilesMetadata = normalizePmtilesMetadata(pmtilesMetadata);
+  const geometryTypes = normalizedPmtilesMetadata?.geometryTypes ?? inferGeometryTypes(features);
+  const geometryType = normalizedPmtilesMetadata?.geometryType ?? inferGeometryType(features);
+  const resolvedFieldSchema = fieldSchema.length ? fieldSchema : normalizedPmtilesMetadata?.fieldSchema ?? [];
   const datasetName = String(name || rawFile?.name || "Dataset").replace(/\.[^.]+$/, "").trim() || "Dataset";
   const artifactFormat = usePmtiles ? "pmtiles" : "geojson";
   const geojson = buildFeatureCollection(features);
@@ -501,7 +554,7 @@ export async function addDatasetToLayer({
     layerName = layer?.name ?? layerName;
 
     let pmtilesBuffer = null;
-    if (usePmtiles) {
+    if (usePmtiles && !normalizedPmtilesMetadata) {
       onProgress?.(0, "Generating PMTiles...");
       const generated = await generatePmtilesInWorker(geojson, (pct) => {
         onProgress?.(Math.round(pct * 0.4), "Generating PMTiles...");
@@ -519,7 +572,7 @@ export async function addDatasetToLayer({
       licenseUrl,
       attribution,
       geometryType,
-      fieldSchema,
+      fieldSchema: resolvedFieldSchema,
     });
 
     await uploadDatasetArtifact(supabase, {
@@ -531,15 +584,20 @@ export async function addDatasetToLayer({
       geojsonText,
       pmtilesBuffer,
       pmtilesDiagnostics,
+      pmtilesMetadata: normalizedPmtilesMetadata,
       onProgress,
       progressOffset: usePmtiles ? 52 : 8,
     });
 
-    await insertFeatureBatches(supabase, datasetId, features, {
-      onProgress,
-      progressStart: usePmtiles ? 62 : 12,
-      progressEnd: 100,
-    });
+    if (features.length) {
+      await insertFeatureBatches(supabase, datasetId, features, {
+        onProgress,
+        progressStart: usePmtiles ? 62 : 12,
+        progressEnd: 100,
+      });
+    } else {
+      onProgress?.(100, "Dataset added.");
+    }
 
     await updateLayerSummary(supabase, layerId, geometryTypes, geometryType);
     return { datasetId };

@@ -44,7 +44,7 @@ export const LOCAL_LAYERS = [
       url: "/data/world-atlas/countries-dissolved-land.geojson",
     },
     fill: { color: "#6EAA6E", opacity: 100 },
-    line: { color: "#d9e4da", opacity: 100, weight: 1 },
+    line: { color: "#000000", opacity: 100, weight: 1 },
   },
 
   {

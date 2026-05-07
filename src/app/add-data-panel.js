@@ -120,14 +120,6 @@ function renderLicenseMetadataFields(state) {
         </select>
       </label>
       <label class="upload-field-label upload-field-label-tight">
-        <span>License</span>
-        <input class="clp-field-input" type="text" value="${escapeHtml(state.license)}" id="clpLicense" placeholder="CC BY" />
-      </label>
-      <label class="upload-field-label upload-field-label-tight">
-        <span>License link</span>
-        <input class="clp-field-input" type="text" value="${escapeHtml(state.licenseUrl)}" id="clpLicenseUrl" placeholder="https://..." />
-      </label>
-      <label class="upload-field-label upload-field-label-tight">
         <span>Attribution</span>
         <input class="clp-field-input" type="text" value="${escapeHtml(state.attribution)}" id="clpAttribution" placeholder="Source / credit" />
       </label>
@@ -145,12 +137,6 @@ function bindLicenseMetadataFields(root, state, requestRender = null) {
     state.license = preset.license ?? "";
     state.licenseUrl = preset.licenseUrl ?? "";
     requestRender?.();
-  });
-  root.querySelector("#clpLicense")?.addEventListener("input", (event) => {
-    state.license = event.target.value;
-  });
-  root.querySelector("#clpLicenseUrl")?.addEventListener("input", (event) => {
-    state.licenseUrl = event.target.value;
   });
   root.querySelector("#clpAttribution")?.addEventListener("input", (event) => {
     state.attribution = event.target.value;
@@ -310,6 +296,28 @@ function buildPreviewFromParsed(parsed) {
       columnCount: headers.length,
       features,
       fieldSchema: inferFieldSchemaFromFeatures(features),
+    };
+  }
+
+  if (parsed?.type === "pmtiles") {
+    const pmtiles = parsed.pmtiles ?? {};
+    const fieldSchema = Array.isArray(pmtiles.fieldSchema) ? pmtiles.fieldSchema : [];
+    const rows = [{
+      source_layer: pmtiles.sourceLayer ?? "",
+      geometry: Array.isArray(pmtiles.geometryTypes) ? pmtiles.geometryTypes.join(" + ") : "",
+      zooms: `${pmtiles.minzoom ?? ""}-${pmtiles.maxzoom ?? ""}`,
+      columns: fieldSchema.length ? fieldSchema.length.toLocaleString() : "0",
+    }];
+    return {
+      kind: "pmtiles",
+      headers: ["source_layer", "geometry", "zooms", "columns"],
+      allRows: rows,
+      rows: [],
+      rowCount: rows.length,
+      columnCount: 4,
+      features: [],
+      fieldSchema,
+      pmtiles,
     };
   }
 
@@ -631,6 +639,7 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
       <div class="clp-existing-list" role="listbox" aria-label="Existing layers">
         ${state.existingLayers.map((layer) => {
           const selected = state.selectedExistingLayerId === layer.id;
+          const layerName = layer.label ?? layer.name ?? "Untitled layer";
           return `
             <button
               class="clp-existing-item${selected ? " is-selected" : ""}"
@@ -639,7 +648,7 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
               role="option"
               aria-selected="${selected ? "true" : "false"}"
             >
-              <span class="clp-existing-item-name">${escapeHtml(layer.label ?? layer.name ?? "Untitled layer")}</span>
+              <span class="clp-existing-item-name" title="${escapeHtml(layerName)}">${escapeHtml(layerName)}</span>
               <span class="clp-existing-item-meta">${escapeHtml(formatGeometryTypes(layer.geometryTypes, layer.geometryType ?? "mixed"))}</span>
             </button>
           `;
@@ -831,7 +840,7 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
       state.file = file;
       state.parsed = parsed;
       rebuildPreview({});
-      state.usePmtiles = false;
+      state.usePmtiles = parsed.type === "pmtiles";
       state.error = "";
       if (state.mode === ADD_DATA_MODE_EXISTING) {
         applySelectedDatasetMetadata();
@@ -847,8 +856,16 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
   }
 
   async function submitData() {
-    if (!state.preview?.features?.length) {
+    const isPmtilesUpload = state.parsed?.type === "pmtiles";
+    if (!isPmtilesUpload && !state.preview?.features?.length) {
       state.error = "This file did not produce any usable features yet.";
+      state.step = "preview";
+      render();
+      return;
+    }
+
+    if (isPmtilesUpload && state.mode === ADD_DATA_MODE_EXISTING) {
+      state.error = "PMTiles files must be added as a new dataset, not appended to an existing dataset.";
       state.step = "preview";
       render();
       return;
@@ -883,7 +900,8 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
         features: state.preview.features,
         fieldSchema: state.preview.fieldSchema,
         rawFile: state.file,
-        usePmtiles: state.usePmtiles,
+        usePmtiles: isPmtilesUpload || state.usePmtiles,
+        pmtilesMetadata: isPmtilesUpload ? state.preview.pmtiles : null,
         onProgress,
       };
 
@@ -1755,7 +1773,15 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
     const complexity = summarizeFeatureComplexity(state.preview?.features ?? []);
     const summaryText = state.preview?.kind === "tabular"
       ? `${rowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns`
+      : state.preview?.kind === "pmtiles"
+        ? `${state.preview.pmtiles?.sourceLayer ?? "PMTiles"} | ${(state.preview.pmtiles?.geometryTypes ?? []).join(" + ")} | z${state.preview.pmtiles?.minzoom ?? ""}-${state.preview.pmtiles?.maxzoom ?? ""}`
       : `${rowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns | ${complexity.featureCount.toLocaleString()} features | ${complexity.vertexCount.toLocaleString()} vertices`;
+    const pmtilesControl = state.preview?.kind === "pmtiles"
+      ? `<span class="upload-field-label upload-field-label-inline clp-preview-pmtiles">PMTiles upload</span>`
+      : `<label class="upload-field-label upload-field-label-inline clp-preview-pmtiles">
+            <input type="checkbox" id="clpUsePmtiles" ${state.usePmtiles ? "checked" : ""} />
+            Generate PMTiles
+          </label>`;
     const { head, body } = buildPreviewTableMarkup({
       headers,
       rows,
@@ -1785,10 +1811,7 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
           </table>
         </div>
         <div class="clp-preview-controls">
-          <label class="upload-field-label upload-field-label-inline clp-preview-pmtiles">
-            <input type="checkbox" id="clpUsePmtiles" ${state.usePmtiles ? "checked" : ""} />
-            Generate PMTiles
-          </label>
+          ${pmtilesControl}
           <div class="clp-preview-pagination">
             <span class="clp-preview-page-range">${escapeHtml(`${pageStart}-${pageEnd}`)}</span>
             <button class="clp-undo-icon clp-preview-page-btn" id="clpPreviewPrev" type="button" aria-label="Previous preview rows" ${canGoPrev ? "" : "disabled"}><span aria-hidden="true">&#8249;</span></button>
@@ -1911,7 +1934,15 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
     const complexity = summarizeFeatureComplexity(state.preview?.features ?? []);
     const summaryText = state.preview?.kind === "tabular"
       ? `${rowCount.toLocaleString()} rows · ${columnCount.toLocaleString()} columns`
+      : state.preview?.kind === "pmtiles"
+        ? `${state.preview.pmtiles?.sourceLayer ?? "PMTiles"} · ${(state.preview.pmtiles?.geometryTypes ?? []).join(" + ")} · z${state.preview.pmtiles?.minzoom ?? ""}-${state.preview.pmtiles?.maxzoom ?? ""}`
       : `${rowCount.toLocaleString()} rows · ${columnCount.toLocaleString()} columns · ${complexity.featureCount.toLocaleString()} features · ${complexity.vertexCount.toLocaleString()} vertices`;
+    const pmtilesControl = state.preview?.kind === "pmtiles"
+      ? `<span class="upload-field-label upload-field-label-inline clp-preview-pmtiles">PMTiles upload</span>`
+      : `<label class="upload-field-label upload-field-label-inline clp-preview-pmtiles">
+            <input type="checkbox" id="clpUsePmtiles" ${state.usePmtiles ? "checked" : ""} />
+            Generate PMTiles
+          </label>`;
     const widthStyle = (header) => {
       const width = columnWidths?.[header];
       return Number.isFinite(width)
@@ -1970,10 +2001,7 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
           </table>
         </div>
         <div class="clp-preview-controls">
-          <label class="upload-field-label upload-field-label-inline clp-preview-pmtiles">
-            <input type="checkbox" id="clpUsePmtiles" ${state.usePmtiles ? "checked" : ""} />
-            Generate PMTiles
-          </label>
+          ${pmtilesControl}
           <div class="clp-preview-pagination">
             <span class="clp-preview-page-range">${escapeHtml(`${pageStart}-${pageEnd}`)}</span>
             <button class="clp-undo-icon clp-preview-page-btn" id="clpPreviewPrev" type="button" aria-label="Previous preview rows" ${canGoPrev ? "" : "disabled"}><span aria-hidden="true">‹</span></button>

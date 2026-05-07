@@ -12,6 +12,7 @@
     "build:natural-earth:land": "node ./scripts/build-natural-earth-land-geojson.mjs",
     "build:olympics:latest": "node ./scripts/build-olympics-latest-geojson.mjs",
     "build:transport:rail:sa": "node ./scripts/build-transport-rail-sa-geojson.mjs",
+    "build:states:pmtiles": "node ./scripts/build-states-pmtiles.mjs",
     "build:land:50m:pmtiles": "node ./scripts/build-land-50m-pmtiles.mjs",
     "build:africa:pmtiles": "node ./scripts/build-africa-pmtiles.mjs",
     "build:osm-land": "node ./scripts/build-osm-land-runtime.mjs",
@@ -35,7 +36,6 @@
     "@loaders.gl/gis": "^4.4.1",
     "@supabase/supabase-js": "^2.101.1",
     "@tmcw/togeojson": "^7.1.2",
-    "cesium": "^1.140.0",
     "geojson-vt": "^4.0.2",
     "maplibre-gl": "^5.21.1",
     "papaparse": "^5.5.3",
@@ -43,12 +43,12 @@
     "polygon-clipping": "^0.15.7",
     "shpjs": "^6.2.0",
     "topojson-client": "^3.1.0",
+    "tus-js-client": "^4.3.1",
     "vt-pbf": "^3.1.3",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "vite": "^7.1.12",
-    "vite-plugin-cesium": "^1.2.23",
     "world-atlas": "^2.0.2"
   }
 }

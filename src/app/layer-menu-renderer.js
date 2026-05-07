@@ -1,6 +1,4 @@
 import {
-  DECK_EARTH_ROW_ID,
-  DECK_EARTH_TARGET_IDS,
   getRowRuntimeTargetId,
   getRowStateKey,
 } from "../core/layer-definitions.js";
@@ -25,8 +23,8 @@ const SETTINGS_BACKGROUND_PRESETS = ["#000000", "#FFFFFF", "#d94b4b", "#e58a2b",
 const SETTINGS_BACKGROUND_STORAGE_KEY = "layerv2.colors.settingsBackground";
 const SCREEN_BACKGROUND_STORAGE_KEY = "layerv2.colors.screenBackground";
 const DEFAULT_SETTINGS_BACKGROUND = {
-  color: "#FFFFFF",
-  opacity: 0,
+  color: "#000000",
+  opacity: 85,
 };
 const DEFAULT_SCREEN_BACKGROUND = {
   color: "#000000",
@@ -34,6 +32,14 @@ const DEFAULT_SCREEN_BACKGROUND = {
 };
 const LAYER_MENU_VIEWPORT_MARGIN = 12;
 const OCEAN_LEGEND_RADIUS_PX = 9.2;
+const EARTH_GLOBE_PATHS = Object.freeze([
+  "M17.72 18.32 L17.47 18.28 L17.46 18.47 L17.68 18.81 L17.74 19.08 L17.97 19.42 L18.21 19.43 L18.28 19.45 L18.55 19.18 L18.68 19.28 L18.72 18.96 L18.85 18.82 L18.82 18.35 L18.6 18.32 L18.3 18.4 L18.09 18.46 L17.72 18.32 Z",
+  "M17.02 7.51 L17.04 7.36 L17.01 7.13 L16.87 6.93 L16.85 6.76 L16.76 6.71 L16.73 6.46 L16.62 6.27 L16.48 6.42 L16.47 6.53 L16.4 6.75 L16.31 6.96 L16.37 7.1 L16.3 7.18 L16.25 7.48 L16.29 7.71 L16.26 7.82 L16.32 8.02 L16.2 8.34 L16.15 8.56 L16.07 8.73 L16 8.95 L15.75 9.08 L15.38 8.95 L15.33 8.83 L15.13 8.72 L15.02 8.72 L14.74 8.49 L14.55 8.35 L14.26 8.22 L13.95 8 L13.93 7.89 L14.06 7.69 L14.17 7.49 L14.13 7.33 L14.26 7.32 L14.4 7.15 L14.51 6.94 L14.33 6.74 L14.24 6.82 L14.1 6.78 L13.88 6.9 L13.64 6.78 L13.53 6.82 L13.21 6.71 L13.01 6.55 L12.76 6.45 L12.55 6.51 L12.83 6.64 L12.84 6.85 L12.52 6.92 L12.32 6.87 L12.09 7.01 L11.93 7.24 L11.99 7.34 L11.81 7.45 L11.63 7.77 L11.71 7.99 L11.47 7.95 L11.23 7.95 L11.02 7.71 L10.74 7.53 L10.56 7.58 L10.39 7.64 L10.38 7.74 L10.21 7.69 L10.21 7.8 L10.02 7.87 L9.92 8.03 L9.72 8.23 L9.67 8.53 L9.5 8.44 L9.38 8.64 L9.52 8.83 L9.36 8.91 L9.2 8.56 L8.93 8.9 L8.92 9.12 L8.9 9.28 L8.68 9.48 L8.58 9.7 L8.37 9.87 L7.97 9.99 L7.76 9.98 L7.66 10.02 L7.6 10.11 L7.37 10.15 L7.07 10.3 L6.97 10.25 L6.79 10.28 L6.5 10.43 L6.32 10.6 L6.01 10.73 L5.85 11.01 L5.82 10.7 L5.66 10.99 L5.7 11.22 L5.65 11.42 L5.57 11.52 L5.53 11.75 L5.62 11.87 L5.66 12 L5.84 12.31 L5.85 12.52 L5.74 12.36 L5.55 12.25 L5.68 12.62 L5.51 12.45 L5.56 12.62 L5.78 12.93 L5.83 13.25 L6 13.41 L6.01 13.52 L6.16 13.78 L6.14 14.01 L6.2 14.24 L6.41 14.64 L6.45 14.88 L6.4 15.16 L6.42 15.3 L6.35 15.39 L6.16 15.45 L6.15 15.68 L6.36 15.75 L6.76 16.01 L7.02 16.01 L7.3 16.03 L7.48 15.9 L7.67 15.79 L7.78 15.8 L8.01 15.59 L8.27 15.57 L8.54 15.53 L8.88 15.6 L9.12 15.57 L9.44 15.56 L9.58 15.39 L9.66 15.18 L9.99 15.09 L10.39 14.89 L10.75 14.91 L11.19 14.78 L11.68 14.64 L12.36 14.6 L12.73 14.79 L13 14.8 L13.49 15.05 L13.41 15.14 L13.61 15.29 L13.85 15.58 L13.84 15.79 L14.14 15.96 L14.28 15.64 L14.52 15.5 L14.83 15.16 L14.86 15.46 L14.72 15.65 L14.66 15.88 L14.46 16.1 L14.8 16.03 L14.98 15.75 L15.08 16.05 L14.95 16.24 L15.32 16.29 L15.5 16.46 L15.59 16.66 L15.66 16.96 L15.91 17.21 L16.28 17.32 L16.5 17.35 L16.71 17.42 L17.04 17.52 L17.38 17.23 L17.58 17.16 L17.52 17.37 L17.76 17.44 L18.07 17.61 L18.3 17.44 L18.48 17.29 L18.83 17.12 L19.26 17.11 L19.48 16.97 L19.46 16.84 L19.5 16.57 L19.6 16.27 L19.75 16.07 L19.86 15.72 L19.99 15.53 L20.13 15.22 L20.41 15.02 L20.58 14.66 L20.65 14.37 L20.65 14.14 L20.75 13.78 L20.81 13.6 L20.84 13.24 L20.65 12.9 L20.68 12.66 L20.67 12.43 L20.56 12.11 L20.27 11.78 L20.09 11.63 L19.82 11.38 L19.75 10.96 L19.66 11.02 L19.51 10.85 L19.35 10.94 L19.21 10.5 L18.99 10.25 L19.04 10.16 L18.78 9.98 L18.51 9.79 L18.1 9.58 L17.98 9.31 L18.01 9.1 L17.91 8.76 L17.81 8.71 L17.76 8.51 L17.68 8.17 L17.71 7.99 L17.53 7.84 L17.41 7.67 L17.16 7.82 L17.02 7.51 Z",
+]);
+const EARTH_GRATICULE_PATHS = Object.freeze([
+  "M13 2.4C11 5.2 10.1 9 10.1 13C10.1 17 11 20.8 13 23.6",
+  "M2.4 13C5.2 11.5 8.8 10.8 13 10.8C17.2 10.8 20.8 11.5 23.6 13",
+]);
 
 function normalizeHexColor(value) {
   const normalized = String(value ?? "").trim().replace(/^#*/, "");
@@ -188,11 +194,6 @@ function applyScreenBackground(state, screenButton) {
   const fillColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
   mapStage.style.backgroundColor = fillColor;
   screenButton?.style.setProperty("--swatch-color", normalizeHexColor(state?.color) ?? DEFAULT_SCREEN_BACKGROUND.color);
-}
-
-function applyDeckEarthButtonState(layerModel, earthButton) {
-  const oceanFill = layerModel.getState()?.[DECK_EARTH_TARGET_IDS.ocean]?.fillColor ?? "#2C6F92";
-  earthButton?.style.setProperty("--swatch-color", normalizeHexColor(oceanFill) ?? "#2C6F92");
 }
 
 function createColorPressRuntime() {
@@ -418,22 +419,24 @@ function createRowHeader(labelText, valueText = null, className, options = {}) {
   leading.className = "layer-menu-row-leading";
   header.append(leading);
 
+  let grabber = null;
   if (options.grabber) {
-    const grabber = document.createElement("button");
+    grabber = document.createElement("button");
     grabber.type = "button";
     grabber.className = "layer-menu-row-grabber";
     grabber.setAttribute("aria-label", "Reorder row");
     grabber.innerHTML = "<span></span><span></span>";
-    leading.append(grabber);
   }
 
   const label = options.labelButton ? document.createElement("button") : document.createElement("span");
   label.className = options.labelButton ? "layer-menu-row-toggle" : "layer-menu-row-label";
+  label.title = labelText;
   if (options.labelButton) {
     label.type = "button";
     const labelTextNode = document.createElement("span");
     labelTextNode.className = "layer-menu-row-label";
     labelTextNode.textContent = labelText;
+    labelTextNode.title = labelText;
     label.append(labelTextNode);
   } else {
     label.textContent = labelText;
@@ -448,7 +451,10 @@ function createRowHeader(labelText, valueText = null, className, options = {}) {
     } else {
       chevron.setAttribute("aria-hidden", "true");
     }
-    chevron.textContent = "›";
+    if (options.chevronLabel) {
+      chevron.setAttribute("aria-label", options.chevronLabel);
+    }
+    chevron.textContent = options.chevronText ?? "›";
     if (options.chevronExpanded) {
       chevron.classList.add("is-expanded");
     }
@@ -460,6 +466,10 @@ function createRowHeader(labelText, valueText = null, className, options = {}) {
     valueLabel.className = "layer-menu-row-value";
     valueLabel.textContent = valueText;
     header.append(valueLabel);
+  }
+
+  if (grabber) {
+    header.append(grabber);
   }
 
   return {
@@ -506,6 +516,48 @@ function getLayerLegendChildState(childRows, runtimeTargetId, layerModel, appear
   };
 }
 
+function getEarthLegendStyleState(rowId, runtimeTargetId, layerModel, appearanceState) {
+  const row = layerModel.getRowById(rowId);
+  if (!row || row.runtimeTargetId !== runtimeTargetId) {
+    return null;
+  }
+
+  return {
+    row,
+    value: getDisplayRowValue(row, layerModel, appearanceState),
+    visible: layerModel.isRowVisible(row.id),
+  };
+}
+
+function getEarthLegendRenderOrder(layerModel) {
+  const menuOrder = [];
+  layerModel.getChildRows("earth").forEach((row) => {
+    if (row?.id === "ocean") {
+      menuOrder.push("ocean.fill");
+      return;
+    }
+
+    if (row?.id === "graticules") {
+      menuOrder.push("graticules.line");
+      return;
+    }
+
+    if (row?.id === "land") {
+      layerModel.getChildRows("land").forEach((childRow) => {
+        if (childRow?.runtimeTargetId === "land::fill") {
+          menuOrder.push("land.fill");
+        } else if (childRow?.runtimeTargetId === "land::line") {
+          menuOrder.push("land.line");
+        }
+      });
+    }
+  });
+
+  return menuOrder.length
+    ? menuOrder.reverse()
+    : ["ocean.fill", "land.fill", "land.line", "graticules.line"];
+}
+
 function getLayerLegendSpec(definition, state, layerModel, appearanceState) {
   const geometryType = normalizeLegendGeometryType(definition?.geometryType);
   const geometryTypes = normalizeLegendGeometryTypes(definition?.geometryTypes, definition?.geometryType);
@@ -517,6 +569,28 @@ function getLayerLegendSpec(definition, state, layerModel, appearanceState) {
   const childRows = layerModel.getChildRows(definition.id);
   if (!runtimeLayerId || !childRows.length) {
     return null;
+  }
+
+  if (definition.id === "earth") {
+    const oceanFill = getEarthLegendStyleState("ocean-fill", "ocean::fill", layerModel, appearanceState);
+    const landFill = getEarthLegendStyleState("land-fill", "land::fill", layerModel, appearanceState);
+    const landLine = getEarthLegendStyleState("land-line", "land::line", layerModel, appearanceState);
+    const graticulesLine = getEarthLegendStyleState("graticules-line", "graticules::line", layerModel, appearanceState);
+
+    return {
+      kind: "globe",
+      oceanColor: oceanFill?.value?.color ?? "#2C6F92",
+      oceanOpacity: oceanFill?.visible ? oceanFill.value.opacity : 0,
+      landColor: landFill?.value?.color ?? "#6EAA6E",
+      landOpacity: landFill?.visible ? landFill.value.opacity : 0,
+      landLineColor: landLine?.value?.color ?? "#000000",
+      landLineOpacity: landLine?.visible ? landLine.value.opacity : 0,
+      landLineWeight: landLine?.visible ? landLine.value.weight : 0,
+      graticulesColor: graticulesLine?.value?.color ?? "#8FA9BC",
+      graticulesOpacity: graticulesLine?.visible ? graticulesLine.value.opacity : 0,
+      graticulesWeight: graticulesLine?.visible ? graticulesLine.value.weight : 0,
+      renderOrder: getEarthLegendRenderOrder(layerModel),
+    };
   }
 
   if (definition.id === "ocean") {
@@ -658,6 +732,99 @@ function createLayerLegendSwatch(spec) {
   const swatch = document.createElement("span");
   swatch.className = `layer-menu-row-legend layer-menu-row-legend-${spec.kind}`;
   swatch.setAttribute("aria-hidden", "true");
+
+  if (spec.kind === "globe") {
+    const svg = createSvgElement("svg");
+    svg.classList.add("layer-menu-row-legend-svg", "layer-menu-row-globe-svg");
+    svg.setAttribute("viewBox", "0 0 26 26");
+    svg.setAttribute("width", "30");
+    svg.setAttribute("height", "30");
+    svg.setAttribute("focusable", "false");
+    svg.setAttribute("aria-hidden", "true");
+    const clipId = `layer-menu-earth-globe-clip-${Math.random().toString(36).slice(2, 8)}`;
+
+    const defs = createSvgElement("defs");
+    const clipPath = createSvgElement("clipPath");
+    clipPath.setAttribute("id", clipId);
+    const clipCircle = createSvgElement("circle");
+    clipCircle.setAttribute("cx", "13");
+    clipCircle.setAttribute("cy", "13");
+    clipCircle.setAttribute("r", "11");
+    clipPath.append(clipCircle);
+    defs.append(clipPath);
+    svg.append(defs);
+
+    const contentGroup = createSvgElement("g");
+    contentGroup.setAttribute("clip-path", `url(#${clipId})`);
+    svg.append(contentGroup);
+
+    const renderOrder = Array.isArray(spec.renderOrder) && spec.renderOrder.length
+      ? spec.renderOrder
+      : ["ocean.fill", "land.fill", "land.line", "graticules.line"];
+    renderOrder.forEach((layerId) => {
+      if (layerId === "ocean.fill") {
+        const globe = createSvgElement("circle");
+        globe.setAttribute("cx", "13");
+        globe.setAttribute("cy", "13");
+        globe.setAttribute("r", "11");
+        globe.setAttribute("fill", normalizeHexColor(spec.oceanColor) ?? "#2C6F92");
+        globe.setAttribute("fill-opacity", String(Math.max(0, Math.min(1, (Number(spec.oceanOpacity) || 0) / 100))));
+        contentGroup.append(globe);
+        return;
+      }
+
+      if (layerId === "graticules.line") {
+        EARTH_GRATICULE_PATHS.forEach((pathData) => {
+          const path = createSvgElement("path");
+          path.setAttribute("d", pathData);
+          path.setAttribute("fill", "none");
+          path.setAttribute("stroke", normalizeHexColor(spec.graticulesColor) ?? "#8FA9BC");
+          path.setAttribute("stroke-opacity", String(Math.max(0, Math.min(1, (Number(spec.graticulesOpacity) || 0) / 100))));
+          path.setAttribute("stroke-width", String(Math.max(0, Math.min(1.6, Number(spec.graticulesWeight) || 0))));
+          path.setAttribute("stroke-linecap", "round");
+          contentGroup.append(path);
+        });
+        return;
+      }
+
+      if (layerId === "land.fill") {
+        EARTH_GLOBE_PATHS.forEach((pathData) => {
+          const path = createSvgElement("path");
+          path.setAttribute("d", pathData);
+          path.setAttribute("fill", normalizeHexColor(spec.landColor) ?? "#6EAA6E");
+          path.setAttribute("fill-opacity", String(Math.max(0, Math.min(1, (Number(spec.landOpacity) || 0) / 100))));
+          contentGroup.append(path);
+        });
+        return;
+      }
+
+      if (layerId === "land.line") {
+        EARTH_GLOBE_PATHS.forEach((pathData) => {
+          const path = createSvgElement("path");
+          path.setAttribute("d", pathData);
+          path.setAttribute("fill", "none");
+          path.setAttribute("stroke", normalizeHexColor(spec.landLineColor) ?? "#000000");
+          path.setAttribute("stroke-opacity", String(Math.max(0, Math.min(1, (Number(spec.landLineOpacity) || 0) / 100))));
+          path.setAttribute("stroke-width", String(Math.max(0, Math.min(1.8, Number(spec.landLineWeight) || 0))));
+          path.setAttribute("stroke-linejoin", "round");
+          path.setAttribute("stroke-linecap", "round");
+          contentGroup.append(path);
+        });
+      }
+    });
+
+    const outline = createSvgElement("circle");
+    outline.setAttribute("cx", "13");
+    outline.setAttribute("cy", "13");
+    outline.setAttribute("r", "11");
+    outline.setAttribute("fill", "none");
+    outline.setAttribute("stroke", "#000000");
+    outline.setAttribute("stroke-width", "1");
+    svg.append(outline);
+    swatch.append(svg);
+    return swatch;
+  }
+
   const svg = createSvgElement("svg");
   svg.classList.add("layer-menu-row-legend-svg");
   svg.setAttribute("viewBox", "0 0 42 18");
@@ -871,9 +1038,10 @@ function updateLayerLegendSwatch(rowElement, legendSpec, { state = null, expandS
     return;
   }
 
-  const chevron = header.querySelector(".layer-menu-row-chevron, .layer-menu-row-chevron-button");
-  if (chevron) {
-    header.insertBefore(nextLegend, chevron);
+  const leading = header.querySelector(".layer-menu-row-leading");
+  const label = leading?.querySelector(".layer-menu-row-toggle, .layer-menu-row-label");
+  if (leading && label) {
+    leading.insertBefore(nextLegend, label);
     return;
   }
 
@@ -900,7 +1068,9 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
     labelButton: hasVisibility || !isExpandable,
     chevron: isExpandable,
     chevronButton: isExpandable,
-    chevronExpanded: Boolean(state?.expanded),
+    chevronExpanded: !isEarthParent && Boolean(state?.expanded),
+    chevronText: isEarthParent ? "×" : "›",
+    chevronLabel: isEarthParent ? "Close earth rows" : null,
   });
   if (definition?.layerRef) {
     const gearButton = document.createElement("button");
@@ -919,11 +1089,9 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
     if (inheritedHidden || state?.visible === false) {
       legend.classList.add("is-hidden");
     }
-    const gearButton = header.querySelector(".layer-menu-row-gear");
-    if (gearButton) {
-      header.insertBefore(legend, chevron ?? null);
-    } else if (chevron) {
-      header.insertBefore(legend, chevron);
+    const leading = header.querySelector(".layer-menu-row-leading");
+    if (leading) {
+      leading.insertBefore(legend, label);
     } else {
       header.append(legend);
     }
@@ -938,7 +1106,7 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
 
   if (isExpandable) {
     row.classList.add("is-expandable");
-    row.setAttribute("aria-expanded", String(Boolean(state?.expanded)));
+    row.setAttribute("aria-expanded", String(isEarthParent || Boolean(state?.expanded)));
     row.dataset.expandKey = expandStateKey;
   } else if (hasStyleChildren) {
     row.dataset.expandKey = expandStateKey;
@@ -960,6 +1128,10 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
 
   chevron?.addEventListener("click", (event) => {
     event.stopPropagation();
+    if (isEarthParent) {
+      document.getElementById("layerMenuEarthButton")?.click();
+      return;
+    }
     onToggleExpanded(expandStateKey);
   });
 
@@ -974,6 +1146,10 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
         || event.target?.closest?.(".layer-menu-row-toggle")
         || event.target?.closest?.(".layer-menu-row-chevron-button")
       ) {
+        return;
+      }
+      if (isEarthParent) {
+        document.getElementById("layerMenuEarthButton")?.click();
         return;
       }
       onToggleExpanded(expandStateKey);
@@ -1609,6 +1785,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       header.className = "layer-menu-row-header";
       const leading = document.createElement("div");
       leading.className = "layer-menu-row-leading";
+      let grabber = null;
 
       if (parentId) {
         el.dataset.rowId = row.id;
@@ -1616,12 +1793,11 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
         if (reorderApi.dragState?.parentId === parentId && reorderApi.dragState?.rowId === row.id) {
           el.classList.add("is-dragging");
         }
-        const grabber = document.createElement("button");
+        grabber = document.createElement("button");
         grabber.type = "button";
         grabber.className = "layer-menu-row-grabber";
         grabber.setAttribute("aria-label", "Reorder row");
         grabber.innerHTML = "<span></span><span></span>";
-        leading.append(grabber);
         setupPointerReorderGrabber(grabber, parentId, row.id, reorderApi);
       }
 
@@ -1641,6 +1817,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       });
       leading.append(visBtn);
       header.append(leading);
+      if (grabber) header.append(grabber);
       if (isDynamic) header.append(makeRemoveButton(row, parentId, onRemoveRow));
       el.append(header);
       fragment.append(el);
@@ -1699,7 +1876,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       const nextInheritedHidden = inheritedHidden || (state[rowStateKey]?.visible === false);
       const isEarthParent = row.id === "earth";
       const visibleChildRows = isEarthParent
-        ? (state[rowStateKey]?.expanded ? orderedChildRows : [])
+        ? orderedChildRows
         : orderedChildRows.filter((childRow) => !isStyleChildRow(childRow) || state[rowStateKey]?.expanded);
       if (visibleChildRows.length) {
         fragment.append(buildRows(visibleChildRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden, onAddRow, onRemoveRow, onDataAction));
@@ -1777,13 +1954,11 @@ function renderLayerMenuRows({
   function render(nextUiState = null) {
     const appearanceState = layerModel.getAppearanceState();
     const appearanceButton = document.getElementById("layerMenuAppearanceButton");
-    const earthButton = document.getElementById("layerMenuEarthButton");
     const screenButton = document.getElementById("layerMenuScreenButton");
     const scrollRegion = document.getElementById("layerMenuPanelScroll") ?? panel;
     const footerRegion = document.getElementById("layerMenuPanelFooter");
     applySettingsBackground(panel, appearanceButton, appearanceState.settings);
     applyScreenBackground(appearanceState.screen, screenButton);
-    applyDeckEarthButtonState(layerModel, earthButton);
 
     if (nextUiState?.rowId) {
       transientColorRowState.set(nextUiState.rowId, nextUiState);
@@ -1886,7 +2061,6 @@ function renderLayerMenuRows({
       }
 
       onRowInput(row, nextValue);
-      applyDeckEarthButtonState(layerModel, earthButton);
 
       const parentRowId = row?.id ? layerModel.getState()?.[row.id]?.parentRowId : null;
       if (!parentRowId) {
@@ -1910,7 +2084,44 @@ function renderLayerMenuRows({
           toggleEnabled: parentRow.id !== "earth" && layerModel.getChildRows(parentRow.id).some(isStyleChildRow),
         },
       );
+
+      if (parentRowId !== "earth") {
+        const earthRow = layerModel.getRowById("earth");
+        const earthState = layerModel.getState()?.earth ?? null;
+        const earthRowElement = scrollRegion.querySelector('.layer-menu-row-layer[data-row-id="earth"]');
+        updateLayerLegendSwatch(
+          earthRowElement,
+          getLayerLegendSpec(earthRow, earthState, layerModel, layerModel.getAppearanceState()),
+          {
+            state: earthState,
+            expandStateKey: "earth",
+            onToggleExpanded,
+            toggleEnabled: false,
+          },
+        );
+      }
     };
+
+    if (panel.dataset.earthRowOpen === "true") {
+      const earthRow = layerModel.getRowById("earth");
+      scrollRegion.append(
+        buildRows(
+          earthRow ? [earthRow] : [],
+          layerModel,
+          onToggleExpanded,
+          onToggleVisibility,
+          reorderApi,
+          onPanelRowInput,
+          appearanceState,
+          0,
+          layerModel.getRootParentId(),
+          false,
+          null,
+          null,
+          onDataAction ?? null,
+        ),
+      );
+    }
 
     if (panel.dataset.screenRowOpen === "true") {
       scrollRegion.append(
@@ -1924,26 +2135,6 @@ function renderLayerMenuRows({
           appearanceState,
           0,
           null,
-          false,
-          null,
-          null,
-          onDataAction ?? null,
-        ),
-      );
-    }
-
-    if (panel.dataset.earthRowOpen === "true") {
-      scrollRegion.append(
-        buildRows(
-          layerModel.getChildRows(DECK_EARTH_ROW_ID),
-          layerModel,
-          onToggleExpanded,
-          onToggleVisibility,
-          reorderApi,
-          onPanelRowInput,
-          appearanceState,
-          0,
-          DECK_EARTH_ROW_ID,
           false,
           null,
           null,
@@ -1974,7 +2165,7 @@ function renderLayerMenuRows({
 
     scrollRegion.append(
       buildRows(
-        reorderApi.getOrderedRows(layerModel.getRootParentId()),
+        reorderApi.getOrderedRows(layerModel.getRootParentId()).filter((row) => row?.id !== "earth"),
         layerModel,
         onToggleExpanded,
         onToggleVisibility,

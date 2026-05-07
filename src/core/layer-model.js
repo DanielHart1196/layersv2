@@ -24,35 +24,6 @@ function createLayerModel() {
   const staticParentAdditions = new Map(); // parentId → [rows] for rows added to static parents
   const rowDefinitionsById = new Map();
 
-  function emitFilterDebugEvent(payload) {
-    try {
-      if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
-        return;
-      }
-      window.dispatchEvent(new CustomEvent("layerv2:filter-debug", {
-        detail: {
-          ts: Date.now(),
-          ...payload,
-        },
-      }));
-    } catch {
-      // Ignore debug event failures.
-    }
-  }
-
-  function getDebugStackSnippet() {
-    try {
-      const rawStack = new Error().stack ?? "";
-      return rawStack
-        .split("\n")
-        .slice(2, 5)
-        .map((line) => line.trim())
-        .join(" | ");
-    } catch {
-      return "";
-    }
-  }
-
   function indexRowDefinitions(rows = []) {
     rows.forEach((row) => {
       rowDefinitionsById.set(row.id, row);
@@ -346,16 +317,6 @@ function createLayerModel() {
             layerState[row.id].parentRowId = parentId;
           }
           initializeDynamicRowState(row.rows, row.runtimeLayerId ?? row.layerRef ?? row.layerId ?? row.id, row.id);
-          if (row.kind === "filter" && row.filter) {
-            emitFilterDebugEvent({
-              kind: "hydrate-filter",
-              rowId: row.id,
-              parentId,
-              field: row.filter.field,
-              value: row.filter.value,
-              stack: getDebugStackSnippet(),
-            });
-          }
         });
         staticParentAdditions.set(parentId, rows);
       });
@@ -427,7 +388,7 @@ function createLayerModel() {
 
   function loadLegacyAppearanceDefaults() {
     return {
-      settings: readLegacyAppearanceState(LEGACY_SETTINGS_BACKGROUND_STORAGE_KEY, { color: "#FFFFFF", opacity: 0 }),
+      settings: readLegacyAppearanceState(LEGACY_SETTINGS_BACKGROUND_STORAGE_KEY, { color: "#000000", opacity: 85 }),
       screen: readLegacyAppearanceState(LEGACY_SCREEN_BACKGROUND_STORAGE_KEY, { color: "#000000", opacity: 100 }),
     };
   }
@@ -858,14 +819,6 @@ function createLayerModel() {
         value: config.value ?? "",
         parentLayerId: mapLayerId,
       };
-      emitFilterDebugEvent({
-        kind: "model-add-filter",
-        rowId: uid,
-        parentId: layerId,
-        field: newRow.filter.field,
-        value: newRow.filter.value,
-        stack: getDebugStackSnippet(),
-      });
     } else if (rowType === "sort") {
       newRow = createSortRow({
         id: uid,

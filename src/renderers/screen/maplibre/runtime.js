@@ -143,9 +143,6 @@ function createMaplibreScreenRuntime({
     loadDynamicLayer({ layerId, geojson, tilesUrl, style, options = {} }) {
       mapInstance?.attachDynamicLayer?.(layerId, geojson, tilesUrl, style, options);
     },
-    getDynamicLayerDebug(layerId) {
-      return mapInstance?.getDynamicLayerDebug?.(layerId) ?? null;
-    },
     setDynamicLayerFeatureFilter(layerId, featureFilter) {
       return mapInstance?.setDynamicLayerFeatureFilter?.(layerId, featureFilter) ?? false;
     },

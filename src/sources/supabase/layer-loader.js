@@ -1,5 +1,8 @@
 import { requireSupabase } from "../../lib/supabase.js";
 
+const LOCAL_BORDERS_PMTILES_URL = "/data/world-atlas/ne_10m_admin_0_boundary_lines_land.pmtiles";
+const DEFAULT_PMTILES_SOURCE_LAYER = "layer";
+
 function normalizeGeometryTypes(geometryTypes = [], geometryType = "mixed") {
   const source = Array.isArray(geometryTypes) && geometryTypes.length
     ? geometryTypes
@@ -20,12 +23,74 @@ function isMissingLayerError(error) {
     || message.includes("no rows");
 }
 
+function isBordersLayer(layer) {
+  return String(layer?.name ?? "").trim().toLowerCase() === "borders";
+}
+
+function humanizeFieldLabel(key) {
+  return String(key ?? "")
+    .replace(/[_\-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function normalizeFieldType(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (
+    normalized.includes("number")
+    || normalized.includes("numeric")
+    || normalized.includes("integer")
+    || normalized.includes("float")
+    || normalized.includes("double")
+    || normalized === "int"
+    || normalized === "uint"
+  ) {
+    return "number";
+  }
+  if (normalized.includes("bool")) return "boolean";
+  if (normalized.includes("date") || normalized.includes("time")) return "date";
+  return "text";
+}
+
+function buildFieldSchemaFromArtifactMetadata(dataset) {
+  const metadata = dataset?.artifact_metadata;
+  if (!metadata || typeof metadata !== "object") return [];
+  if (Array.isArray(metadata.field_schema)) {
+    return metadata.field_schema.filter((field) => field?.key);
+  }
+
+  const sourceLayer = String(dataset?.source_layer ?? DEFAULT_PMTILES_SOURCE_LAYER);
+  const vectorLayers = Array.isArray(metadata.vector_layers) ? metadata.vector_layers : [];
+  const layer = vectorLayers.find((candidate) => String(candidate?.id ?? "") === sourceLayer) ?? vectorLayers[0];
+  if (!layer?.fields || typeof layer.fields !== "object" || Array.isArray(layer.fields)) {
+    return [];
+  }
+
+  return Object.entries(layer.fields)
+    .map(([key, type]) => ({
+      key: String(key ?? "").trim(),
+      label: humanizeFieldLabel(key),
+      type: normalizeFieldType(type),
+      required: false,
+      visible: true,
+      sortable: true,
+      filterable: true,
+    }))
+    .filter((field) => field.key);
+}
+
+function getDatasetFieldSchema(dataset) {
+  const schema = Array.isArray(dataset?.field_schema) ? dataset.field_schema.filter((field) => field?.key) : [];
+  return schema.length ? schema : buildFieldSchemaFromArtifactMetadata(dataset);
+}
+
 function mergeSchemaFields(datasetRows) {
   const fields = [];
   const seenKeys = new Set();
 
   datasetRows.forEach((dataset) => {
-    const schema = Array.isArray(dataset?.field_schema) ? dataset.field_schema : [];
+    const schema = getDatasetFieldSchema(dataset);
     schema.forEach((field) => {
       const key = String(field?.key ?? "");
       if (!key || seenKeys.has(key) || field?.visible === false) {
@@ -108,7 +173,7 @@ async function loadLayerDatasets(layerId) {
   const supabase = requireSupabase();
   const { data, error } = await supabase
     .from("datasets")
-    .select("id, layer_id, name, license, license_url, attribution, geometry_type, geometry_types, field_schema, render_format, artifact_url, feature_count, created_at")
+    .select("id, layer_id, name, license, license_url, attribution, geometry_type, geometry_types, field_schema, render_format, artifact_url, source_layer, minzoom, maxzoom, bounds, artifact_metadata, feature_count, created_at")
     .eq("layer_id", layerId)
     .order("created_at", { ascending: true });
 
@@ -301,9 +366,10 @@ export function getLayerTablePreviewFromLoadedData(loadedLayer, { limit = 50, of
     return null;
   }
 
+  const fallbackDatasetId = datasets.length === 1 ? datasets[0]?.id ?? "" : "";
   const rows = features.map((feature, index) => ({
     id: feature?.id ?? feature?.properties?.id ?? `cached-${index}`,
-    dataset_id: feature?.properties?.dataset_id ?? feature?.properties?._dataset_id ?? "",
+    dataset_id: feature?.properties?.dataset_id ?? feature?.properties?._dataset_id ?? fallbackDatasetId,
     properties: feature?.properties && typeof feature.properties === "object" ? feature.properties : {},
     valid_from: feature?.properties?.valid_from ?? "",
     valid_to: feature?.properties?.valid_to ?? "",
@@ -339,17 +405,35 @@ export async function loadLayerFromSupabase(layerId) {
   }
 
   const datasets = await loadLayerDatasets(layerId);
+  if (isBordersLayer(layer)) {
+    return {
+      layer: {
+        ...layer,
+        geometry_types: ["line"],
+        geometry_type: "line",
+        geometryTypes: ["line"],
+      },
+      datasets,
+      geojson: null,
+      tilesUrl: LOCAL_BORDERS_PMTILES_URL,
+      sourceLayerId: DEFAULT_PMTILES_SOURCE_LAYER,
+    };
+  }
+
   if (datasets.length === 1) {
     const [dataset] = datasets;
     if (dataset?.render_format === "pmtiles" && dataset?.artifact_url) {
       return {
         layer: {
           ...layer,
-          geometryTypes: normalizeGeometryTypes(layer.geometry_types, layer.geometry_type ?? "mixed"),
+          geometry_types: dataset.geometry_types ?? layer.geometry_types,
+          geometry_type: dataset.geometry_type ?? layer.geometry_type,
+          geometryTypes: normalizeGeometryTypes(dataset.geometry_types, dataset.geometry_type ?? layer.geometry_type ?? "mixed"),
         },
         datasets,
         geojson: null,
         tilesUrl: dataset.artifact_url,
+        sourceLayerId: dataset.source_layer ?? DEFAULT_PMTILES_SOURCE_LAYER,
       };
     }
 

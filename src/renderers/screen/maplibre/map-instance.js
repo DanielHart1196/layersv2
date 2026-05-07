@@ -99,6 +99,7 @@ const DEFAULT_OUTLINE_LINE_COLOR = "#d9e4da";
 const LEGACY_POLAR_OVERLAY_ENABLED = false;
 const FRESH_INTERLEAVED_OVERLAY_ENABLED = true;
 const FRESH_INTERLEAVED_LAYER_ID = "fresh-interleaved-polar-rotation-test";
+const MAPLIBRE_GLOBE_ROTATION_TEST_LAYER_ID = "maplibre-globe-rotation-test";
 const FRESH_INTERLEAVED_LAND_FILL_LAYER_ID = "fresh-interleaved-land-fill";
 const FRESH_INTERLEAVED_LAND_LINE_LAYER_ID = "fresh-interleaved-land-line";
 const FRESH_INTERLEAVED_OCEAN_LAYER_ID = "fresh-interleaved-ocean";
@@ -200,9 +201,9 @@ function createPolarDebugOverlay(container) {
 
 function createFreshInterleavedDebugOverlay(container) {
   const overlay = document.createElement("div");
-  overlay.className = "polar-debug fresh-interleaved-debug";
+  overlay.className = "polar-debug fresh-interleaved-debug is-collapsed";
   overlay.innerHTML = `
-    <button class="polar-debug-toggle" type="button" aria-expanded="true" aria-label="Collapse fresh interleaved debug">Fresh</button>
+    <button class="polar-debug-toggle" type="button" aria-expanded="false" aria-label="Expand fresh interleaved debug">Fresh</button>
     <div class="polar-debug-body"></div>
   `;
   const toggle = overlay.querySelector(".polar-debug-toggle");
@@ -407,6 +408,194 @@ async function loadFreshInterleavedJson(url) {
   return response.json();
 }
 
+function compileCustomShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const message = gl.getShaderInfoLog(shader);
+    gl.deleteShader(shader);
+    throw new Error(message || "Failed to compile custom globe shader.");
+  }
+  return shader;
+}
+
+function linkCustomProgram(gl, vertexSource, fragmentSource) {
+  const vertexShader = compileCustomShader(gl, gl.VERTEX_SHADER, vertexSource);
+  const fragmentShader = compileCustomShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+  const program = gl.createProgram();
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const message = gl.getProgramInfoLog(program);
+    gl.deleteProgram(program);
+    throw new Error(message || "Failed to link custom globe shader program.");
+  }
+  return program;
+}
+
+function lngLatToMercatorUnit(lng, lat) {
+  const clampedLat = Math.max(-89.999999, Math.min(89.999999, Number(lat) || 0));
+  const latitudeRadians = clampedLat * Math.PI / 180;
+  return [
+    ((Number(lng) || 0) + 180) / 360,
+    (1 - Math.log(Math.tan(latitudeRadians) + (1 / Math.cos(latitudeRadians))) / Math.PI) / 2,
+  ];
+}
+
+function createCustomGlobeRotationVertices() {
+  const vertices = [];
+
+  const pushVertex = (lng, lat, color) => {
+    const isNorthPole = lat >= 90;
+    const isSouthPole = lat <= -90;
+    const [x, y] = isNorthPole
+      ? lngLatToMercatorUnit(lng, 89.999999)
+      : isSouthPole
+        ? lngLatToMercatorUnit(lng, -89.999999)
+        : lngLatToMercatorUnit(lng, lat);
+    vertices.push(
+      x,
+      y,
+      x,
+      isNorthPole ? -40000 : isSouthPole ? 40000 : y,
+      color[0],
+      color[1],
+      color[2],
+      color[3],
+    );
+  };
+
+  const pushLine = (coordinates, color) => {
+    for (let index = 0; index < coordinates.length - 1; index += 1) {
+      pushVertex(coordinates[index][0], coordinates[index][1], color);
+      pushVertex(coordinates[index + 1][0], coordinates[index + 1][1], color);
+    }
+  };
+
+  const pink = [1, 0.19, 0.63, 1];
+  const yellow = [1, 0.85, 0.3, 1];
+  pushLine([[0, 84], [0, 88], [0, 90]], pink);
+  pushLine([[180, -84], [180, -88], [180, -90]], pink);
+  pushLine(Array.from({ length: 73 }, (_, index) => [index * 5 - 180, 88]), yellow);
+  pushLine(Array.from({ length: 73 }, (_, index) => [index * 5 - 180, -88]), yellow);
+
+  return new Float32Array(vertices);
+}
+
+function setCustomProjectionUniforms(gl, program, projectionData) {
+  gl.uniformMatrix4fv(gl.getUniformLocation(program, "u_projection_matrix"), false, projectionData.mainMatrix);
+  gl.uniformMatrix4fv(gl.getUniformLocation(program, "u_projection_fallback_matrix"), false, projectionData.fallbackMatrix);
+  gl.uniform4fv(gl.getUniformLocation(program, "u_projection_tile_mercator_coords"), projectionData.tileMercatorCoords);
+  gl.uniform4fv(gl.getUniformLocation(program, "u_projection_clipping_plane"), projectionData.clippingPlane);
+  gl.uniform1f(gl.getUniformLocation(program, "u_projection_transition"), projectionData.projectionTransition);
+}
+
+function createMaplibreGlobeRotationTestLayer() {
+  return {
+    id: MAPLIBRE_GLOBE_ROTATION_TEST_LAYER_ID,
+    type: "custom",
+    renderingMode: "3d",
+    map: null,
+    program: null,
+    variantName: null,
+    vertexBuffer: null,
+    vertexCount: 0,
+    locations: null,
+    onAdd(map, gl) {
+      this.map = map;
+      const vertices = createCustomGlobeRotationVertices();
+      this.vertexCount = vertices.length / 8;
+      this.vertexBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+    },
+    onRemove(map, gl) {
+      if (this.vertexBuffer) {
+        gl.deleteBuffer(this.vertexBuffer);
+      }
+      if (this.program) {
+        gl.deleteProgram(this.program);
+      }
+      this.vertexBuffer = null;
+      this.program = null;
+      this.map = null;
+    },
+    ensureProgram(gl, shaderData) {
+      if (this.program && this.variantName === shaderData.variantName) {
+        return;
+      }
+      if (this.program) {
+        gl.deleteProgram(this.program);
+      }
+      const vertexSource = `#version 300 es
+${shaderData.vertexShaderPrelude}
+${shaderData.define}
+in vec2 a_pos;
+in vec2 a_raw_pos;
+in vec4 a_color;
+out vec4 v_color;
+void main() {
+  gl_Position = projectTile(a_pos, a_raw_pos);
+  v_color = a_color;
+}`;
+      const fragmentSource = `#version 300 es
+precision highp float;
+in vec4 v_color;
+out vec4 fragColor;
+void main() {
+  fragColor = v_color;
+}`;
+      this.program = linkCustomProgram(gl, vertexSource, fragmentSource);
+      this.variantName = shaderData.variantName;
+      this.locations = {
+        pos: gl.getAttribLocation(this.program, "a_pos"),
+        rawPos: gl.getAttribLocation(this.program, "a_raw_pos"),
+        color: gl.getAttribLocation(this.program, "a_color"),
+      };
+    },
+    render(gl, { shaderData, defaultProjectionData }) {
+      try {
+        this.ensureProgram(gl, shaderData);
+      } catch (error) {
+        console.warn("[maplibre-globe-test] Failed to compile custom globe layer.", error);
+        return;
+      }
+
+      if (!this.program || !this.vertexBuffer || !this.locations) {
+        return;
+      }
+
+      const stride = 8 * 4;
+      gl.useProgram(this.program);
+      setCustomProjectionUniforms(gl, this.program, defaultProjectionData);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+      gl.enableVertexAttribArray(this.locations.pos);
+      gl.vertexAttribPointer(this.locations.pos, 2, gl.FLOAT, false, stride, 0);
+      gl.enableVertexAttribArray(this.locations.rawPos);
+      gl.vertexAttribPointer(this.locations.rawPos, 2, gl.FLOAT, false, stride, 2 * 4);
+      gl.enableVertexAttribArray(this.locations.color);
+      gl.vertexAttribPointer(this.locations.color, 4, gl.FLOAT, false, stride, 4 * 4);
+      gl.disable(gl.CULL_FACE);
+      gl.lineWidth(3);
+      gl.drawArrays(gl.LINES, 0, this.vertexCount);
+      gl.disableVertexAttribArray(this.locations.pos);
+      gl.disableVertexAttribArray(this.locations.rawPos);
+      gl.disableVertexAttribArray(this.locations.color);
+    },
+  };
+}
+
+function ensureMaplibreGlobeRotationTestLayer(map) {
+  if (!map || map.getLayer(MAPLIBRE_GLOBE_ROTATION_TEST_LAYER_ID)) {
+    return;
+  }
+  map.addLayer(createMaplibreGlobeRotationTestLayer());
+}
+
 function isFreshDeckTargetVisible(layerState, runtimeTargetId) {
   if (getLayerStyleValue(layerState, runtimeTargetId, "visible", true) === false) {
     return false;
@@ -553,63 +742,7 @@ function buildFreshInterleavedTestLayers(state) {
     return [];
   }
 
-  return [
-    ...buildFreshInterleavedEarthLayers(state),
-    new GeoJsonLayer({
-      id: FRESH_INTERLEAVED_LAYER_ID,
-      beforeId: state.beforeId ?? undefined,
-      data: {
-        type: "FeatureCollection",
-        features: [
-          {
-            type: "Feature",
-            properties: { kind: "north-meridian" },
-            geometry: {
-              type: "LineString",
-              coordinates: [[0, 84], [0, 88], [0, 90]],
-            },
-          },
-          {
-            type: "Feature",
-            properties: { kind: "south-meridian" },
-            geometry: {
-              type: "LineString",
-              coordinates: [[180, -84], [180, -88], [180, -90]],
-            },
-          },
-          {
-            type: "Feature",
-            properties: { kind: "north-ring" },
-            geometry: {
-              type: "LineString",
-              coordinates: Array.from({ length: 73 }, (_, index) => [index * 5 - 180, 88]),
-            },
-          },
-          {
-            type: "Feature",
-            properties: { kind: "south-ring" },
-            geometry: {
-              type: "LineString",
-              coordinates: Array.from({ length: 73 }, (_, index) => [index * 5 - 180, -88]),
-            },
-          },
-        ],
-      },
-      filled: false,
-      stroked: true,
-      pickable: false,
-      getLineColor: (feature) => (String(feature?.properties?.kind ?? "").includes("ring")
-        ? [255, 216, 77, 255]
-        : [255, 48, 160, 255]),
-      getLineWidth: 3,
-      lineWidthUnits: "pixels",
-      lineWidthMinPixels: 2,
-      parameters: {
-        depthWriteEnabled: false,
-        depthCompare: "always",
-      },
-    }),
-  ];
+  return buildFreshInterleavedEarthLayers(state);
 }
 
 function updateFreshInterleavedOverlay(state) {
@@ -726,6 +859,7 @@ function updateFreshInterleavedDebugOverlay(overlay, map, state) {
     ["token", "fresh-int-v1"],
     ["enabled", String(FRESH_INTERLEAVED_OVERLAY_ENABLED)],
     ["added", String(Boolean(state.overlay?._map))],
+    ["custom test", String(Boolean(map.getLayer(MAPLIBRE_GLOBE_ROTATION_TEST_LAYER_ID)))],
     ["shared canvas", String(sharedCanvas)],
     ["layers", getDeckLayerIds(state.overlay).join(",") || "none"],
     ["beforeId", state.beforeId ?? "top"],
@@ -3470,6 +3604,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     map.easeTo({ bearing: 0 });
   });
   map.on("load", () => {
+    ensureMaplibreGlobeRotationTestLayer(map);
     updateCompassOverlay(map, compassOverlay);
     updateSouthPolarInterleavedGeojsonOverlay(southPolarCapOverlay);
     updateSouthPolarCapOverlay(southPolarCapOverlay);
@@ -3499,6 +3634,9 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         });
 
         applyFullLayerOrder(map, layerState, getOrderedChildRowIds);
+        if (map.getLayer(MAPLIBRE_GLOBE_ROTATION_TEST_LAYER_ID)) {
+          map.moveLayer(MAPLIBRE_GLOBE_ROTATION_TEST_LAYER_ID);
+        }
         updateFreshInterleavedOverlay(freshInterleavedOverlay);
         updateFreshInterleavedDebug();
       } catch (error) {
@@ -3523,6 +3661,9 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         );
 
         applyFullLayerOrder(map, layerState, getOrderedChildRowIds);
+        if (map.getLayer(MAPLIBRE_GLOBE_ROTATION_TEST_LAYER_ID)) {
+          map.moveLayer(MAPLIBRE_GLOBE_ROTATION_TEST_LAYER_ID);
+        }
         updateFreshInterleavedOverlay(freshInterleavedOverlay);
         updateFreshInterleavedDebug();
       } catch (error) {

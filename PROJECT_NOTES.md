@@ -36,6 +36,10 @@
 
 ## Earth Reset Lessons
 - Interleaved deck Earth with MapLibre globe was not reliable enough in this project, even though high-level library support exists on paper.
+- Deck `MapboxOverlay({ interleaved: true })` can share MapLibre's WebGL context, but it still uses deck's own globe camera/projection math; in this project it did not rotate exactly with MapLibre globe.
+- A simple MapLibre custom full-world layer using `getProjectionDataForCustomLayer(...)` and `projectTile(...)` also did not rotate exactly with MapLibre's built-in globe layers.
+- For polar geometry that must rotate exactly with MapLibre globe, the likely viable path is MapLibre's tiled globe projection model: tile-local projection data, sufficient subdivision, pole-extension behavior, and MapLibre-style clipping/order semantics.
+- Do not treat "same GL context" or a single full-world custom layer as proof of exact globe alignment; test rotation against MapLibre native land/graticules before calling a polar renderer viable.
 - A working overlay baseline is more valuable than a theoretically cleaner interleaved architecture that flickers or disappears.
 - Large Earth/base geometry should be proven first in a clean page before being integrated into a bigger app shell.
 - When diagnosing map/render issues, isolate the renderer in a fresh page before changing menu/state architecture.

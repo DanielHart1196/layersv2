@@ -37,14 +37,14 @@ export const LOCAL_LAYERS = [
     group: "earth",
     deferred: false,
     defaultVisible: true,
-    inInitialStyle: true, // fast 110m outline → swaps to full dissolved land after load
+    inInitialStyle: true,
     source: {
       kind: "geojson",
       initialUrl: "/data/world-atlas/ne_110m_land.geojson",
       url: "/data/world-atlas/countries-dissolved-land.geojson",
     },
     fill: { color: "#6EAA6E", opacity: 100 },
-    line: { color: "#000000", opacity: 100, weight: 1 },
+    line: { color: "#000000", opacity: 100, weight: 1, deferInitial: true },
   },
 
   {

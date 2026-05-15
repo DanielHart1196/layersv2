@@ -1,6 +1,6 @@
-# Atlas Product
+# Layers
 
-New product foundation for the atlas app.
+New product foundation for the Layers app.
 
 ## Intent
 - Keep `layers/` as the restored reference prototype.

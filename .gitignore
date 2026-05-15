@@ -46,6 +46,7 @@ temp/
 .tmp-tippecanoe-work/
 .tmp-go-pmtiles/
 .tmp-go-pmtiles.tar.gz
+.source-data/
 
 # Large data files — serve via R2/CDN, not committed to git.
 # Upload these locally for dev; add to R2 for production.

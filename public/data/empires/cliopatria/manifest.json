@@ -1,0 +1,91 @@
+{
+  "source": {
+    "name": "Cliopatria",
+    "license": "CC BY 4.0",
+    "url": "https://github.com/Seshat-Global-History-Databank/cliopatria",
+    "downloadedFrom": "https://github.com/Seshat-Global-History-Databank/cliopatria/archive/refs/heads/main.zip"
+  },
+  "generatedAt": "2026-05-12T22:47:28.022Z",
+  "empires": [
+    {
+      "id": "roman-empire",
+      "label": "Roman Empire",
+      "sourceName": "Roman Empire",
+      "file": "/data/empires/cliopatria/roman-empire.geojson",
+      "featureCount": 55,
+      "fromYear": -31,
+      "toYear": 394,
+      "maxAreaKm2": 5260232.555101374
+    },
+    {
+      "id": "mongol-empire",
+      "label": "Mongol Empire",
+      "sourceName": "Mongol Empire",
+      "file": "/data/empires/cliopatria/mongol-empire.geojson",
+      "featureCount": 12,
+      "fromYear": 1206,
+      "toYear": 1293,
+      "maxAreaKm2": 27426507.176071454
+    },
+    {
+      "id": "spanish-empire",
+      "label": "Spanish Empire",
+      "sourceName": "(Spanish Empire)",
+      "file": "/data/empires/cliopatria/spanish-empire.geojson",
+      "featureCount": 107,
+      "fromYear": 1516,
+      "toYear": 1931,
+      "maxAreaKm2": 11798234.860526757
+    },
+    {
+      "id": "british-empire",
+      "label": "British Empire",
+      "sourceName": "(British Empire)",
+      "file": "/data/empires/cliopatria/british-empire.geojson",
+      "featureCount": 122,
+      "fromYear": 1706,
+      "toYear": 1999,
+      "maxAreaKm2": 36815173.87138544
+    },
+    {
+      "id": "ottoman-empire",
+      "label": "Ottoman Empire",
+      "sourceName": "Ottoman Empire",
+      "file": "/data/empires/cliopatria/ottoman-empire.geojson",
+      "featureCount": 136,
+      "fromYear": 1305,
+      "toYear": 1923,
+      "maxAreaKm2": 4254101.60570385
+    },
+    {
+      "id": "qing-dynasty",
+      "label": "Qing Dynasty",
+      "sourceName": "Qing Dynasty",
+      "file": "/data/empires/cliopatria/qing-dynasty.geojson",
+      "featureCount": 67,
+      "fromYear": 1645,
+      "toYear": 1911,
+      "maxAreaKm2": 12509589.915527558
+    },
+    {
+      "id": "russian-empire",
+      "label": "Russian Empire",
+      "sourceName": "Russian Empire",
+      "file": "/data/empires/cliopatria/russian-empire.geojson",
+      "featureCount": 64,
+      "fromYear": 1721,
+      "toYear": 1916,
+      "maxAreaKm2": 22894019.698210504
+    },
+    {
+      "id": "byzantine-empire",
+      "label": "Byzantine Empire",
+      "sourceName": "Byzantine Empire",
+      "file": "/data/empires/cliopatria/byzantine-empire.geojson",
+      "featureCount": 99,
+      "fromYear": 633,
+      "toYear": 1474,
+      "maxAreaKm2": 2335386.6300853174
+    }
+  ]
+}

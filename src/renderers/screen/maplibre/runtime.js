@@ -55,9 +55,11 @@ function createMaplibreScreenRuntime({
   const readyPmtilesSources = (pmtilesManifest ?? []).filter((source) => isRealPmtilesUrl(source.url));
 
   function getStatus() {
+    const zoom = mapInstance?.getZoom?.();
     return {
       renderer: "maplibre-screen-adapter",
       targetProjection: viewState?.projectionId ?? "globe",
+      zoom: Number.isFinite(zoom) ? zoom : null,
       sourceCount: pmtilesManifest.length,
       readyPmtilesSourceCount: readyPmtilesSources.length,
       sourceRoles: roles,
@@ -140,8 +142,13 @@ function createMaplibreScreenRuntime({
     setLayerStyleValue(layerId, key, value) {
       mapInstance?.setLayerStyleValue?.(layerId, key, value);
     },
-    loadDynamicLayer({ layerId, geojson, tilesUrl, style, options = {} }) {
-      mapInstance?.attachDynamicLayer?.(layerId, geojson, tilesUrl, style, options);
+    loadDynamicLayer({ layerId, rowId = null, parentRowId = undefined, childRows = [], geojson, tilesUrl, style, options = {} }) {
+      mapInstance?.attachDynamicLayer?.(layerId, geojson, tilesUrl, style, {
+        ...options,
+        rowId,
+        parentRowId,
+        childRows,
+      });
     },
     setDynamicLayerFeatureFilter(layerId, featureFilter) {
       return mapInstance?.setDynamicLayerFeatureFilter?.(layerId, featureFilter) ?? false;

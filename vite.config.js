@@ -25,10 +25,6 @@ export default defineConfig({
     include: [
       "maplibre-gl",
       "shpjs",
-      "@deck.gl/core",
-      "@deck.gl/layers",
-      "@deck.gl/mapbox",
-      "@deck.gl/geo-layers",
     ],
     force: true,
   },

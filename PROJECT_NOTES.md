@@ -1,50 +1,88 @@
-# Atlas Product Notes
+# Layers Product Notes
 
 ## Scope
-- Path: `/data/data/com.termux/files/home/layers/atlas-product`
-- This file is the local architecture note set for the MapLibre Atlas app.
+- Path: `/data/data/com.termux/files/home/layersv2`
+- This file is the local architecture note set for the MapLibre Layers app.
 - Keep this file active and current, not archival.
 
 ## Current Reset Direction
-- If Atlas Earth is rebuilt cleanly, start from the proven `earth-lab` shape, not from the current main-app Earth runtime.
-- Treat the current main-app Earth experiments as learning material, not as architecture to preserve.
-- Favor a fresh runtime with explicit simplicity over a "bridge" migration that carries hidden Earth exceptions forward.
-- The goal of the reset is to preserve what worked:
-  - MapLibre as the map shell
-  - deck as the Earth renderer
-  - local persistence for Earth styling state
+- Layers uses one main MapLibre globe runtime.
+- Do not keep lab pages, deck overlays, custom globe test layers, or separate polar overlay systems in the production path.
+- Preserve:
+  - MapLibre as the screen renderer
+  - local/shared row state for Earth styling
   - a compact top control surface for Earth/background/settings
-- The goal of the reset is to drop what did not earn its keep:
-  - interleaved Earth rendering
-  - legacy Earth rows/controllers that are only kept alive for compatibility
-  - separate polar overlay machinery
+  - explicit runtime ordering through shared row state
+- Drop:
+  - deck-backed Earth experiments
+  - interleaved overlay experiments
+  - custom full-world globe test layers
+  - legacy polar overlay machinery
   - implicit ordering exceptions spread across renderer code
   - any "shared" abstraction that only looks unified in UI while staying bespoke in runtime
 
-## Earth Reset Baseline
-- The current proven Earth baseline is:
-  - MapLibre globe as the base map shell
-  - one non-interleaved `MapboxOverlay` deck overlay for Earth
-  - deck `SolidPolygonLayer` for ocean
-  - deck `GeoJsonLayer` for land fill
-  - deck `GeoJsonLayer` for land outline
-  - deck `GeoJsonLayer` for graticules
-- `earth-lab` is the reference for this baseline because it proved simpler and more stable than the interleaved/main-app experiments.
-- Prefer one Earth overlay path only.
-- Do not keep a second hidden/legacy Earth renderer active "just in case."
-- If Earth needs polar coverage, solve that inside the one Earth overlay path rather than reintroducing a separate polar overlay system.
+## Earth Baseline
+- The current Earth baseline is MapLibre-native:
+  - `atlas-water` background
+  - low-detail local GeoJSON land fill in the initial style
+  - graticules in the initial style
+  - optional/deferred land outline after first render
+- Prefer one Earth rendering path only.
+- If MapLibre globe has a visual artifact, diagnose the active MapLibre source/layer path first before adding another renderer.
 
-## Earth Reset Lessons
-- Interleaved deck Earth with MapLibre globe was not reliable enough in this project, even though high-level library support exists on paper.
-- Deck `MapboxOverlay({ interleaved: true })` can share MapLibre's WebGL context, but it still uses deck's own globe camera/projection math; in this project it did not rotate exactly with MapLibre globe.
-- A simple MapLibre custom full-world layer using `getProjectionDataForCustomLayer(...)` and `projectTile(...)` also did not rotate exactly with MapLibre's built-in globe layers.
-- For polar geometry that must rotate exactly with MapLibre globe, the likely viable path is MapLibre's tiled globe projection model: tile-local projection data, sufficient subdivision, pole-extension behavior, and MapLibre-style clipping/order semantics.
-- Do not treat "same GL context" or a single full-world custom layer as proof of exact globe alignment; test rotation against MapLibre native land/graticules before calling a polar renderer viable.
-- A working overlay baseline is more valuable than a theoretically cleaner interleaved architecture that flickers or disappears.
-- Large Earth/base geometry should be proven first in a clean page before being integrated into a bigger app shell.
-- When diagnosing map/render issues, isolate the renderer in a fresh page before changing menu/state architecture.
+## Earth Rendering Lessons
+- Interleaved deck Earth, non-interleaved deck Earth, custom full-world globe layers, and separate polar overlays were not kept as production architecture.
+- Do not treat "same GL context" or a full-world custom layer as proof of exact globe alignment; test against MapLibre-native land/graticules before calling an alternate renderer viable.
+- Large Earth/base geometry should be proven through the same MapLibre path the app ships, not through a lab page with different renderer semantics.
 - Do not trust "supported" as equivalent to "production-safe in this exact runtime."
-- If a simple lab page works and the app shell does not, prefer rebuilding from the lab page rather than repeatedly adapting the broken shell.
+
+## Startup Performance Findings
+- Recent startup "performance" changes made the app feel worse because they optimized for avoiding one early block rather than preserving the product load contract.
+- Product load contract:
+  - The menu must bind immediately.
+  - The MapLibre globe shell must become interactive as soon as possible.
+  - Core Earth visual context must appear as one coherent base: water, low-detail land, and graticules.
+  - Dynamic/user datasets must not compete with core Earth startup.
+- Do not defer graticules behind dynamic/Supabase layer restore. Graticules are part of Earth, not optional dynamic content.
+- Do not put Earth's core visual pieces into a generic deferred queue whose ordering can be changed by unrelated background work.
+- The recovery target:
+  - `src/config/local-layers.js` keeps land and graticules in the initial Earth path.
+  - `src/renderers/screen/maplibre/map-instance.js` should contain only the main MapLibre globe path plus ordinary dynamic layer support.
+  - `src/app/bootstrap.js` should keep dynamic/Supabase restore explicitly after map startup and avoid loading hidden/heavy GeoJSON during first paint.
+- Online guidance supports a different split:
+  - Mapbox's GL JS performance model frames render/source/layer update time as a function of source count, layer count, and vertex count; reduce those for heavy datasets rather than reordering core base-map semantics.
+  - Mapbox recommends vector tileset sources over large GeoJSON where possible because tiles load only visible features and simplify geometry.
+  - Large GeoJSON sources are converted to vector tiles on the client; this means raw GeoJSON is not free just because it is loaded later.
+  - For large GeoJSON, use source/layer zoom bounds, prune unused properties, reduce coordinate precision, tune buffer/tolerance, split sources, or tile server-side.
+  - MapLibre custom globe layers are valid for simple WebGL content, but a single custom layer should not be treated as a production Earth renderer until alignment, clipping, ordering, and style behavior match native layers.
+- Source references checked:
+  - Mapbox GL JS performance model and vector tile recommendation: https://docs.mapbox.com/help/troubleshooting/mapbox-gl-js-performance/
+  - Mapbox large GeoJSON recommendations: https://docs.mapbox.com/help/ja/troubleshooting/working-with-large-geojson-data/
+  - MapLibre custom globe layer API/example: https://maplibre.org/maplibre-gl-js/docs/examples/add-a-simple-custom-layer-on-a-globe/
+  - MapLibre custom render method projection input: https://maplibre.org/maplibre-gl-js/docs/API/type-aliases/CustomRenderMethodInput/
+
+## Startup Recovery Plan
+- First recovery step should be behavior restoration, not another rendering experiment.
+- Restore a simple Earth-first boot order:
+  - Bind menu/UI.
+  - Construct MapLibre.
+  - Initial style includes water background, low-detail land fill, and graticules.
+  - Land outline may follow shortly, but it should not block or reorder graticules.
+  - Dynamic/Supabase restore begins only after Earth base is complete.
+- Keep experimental rendering paths out of the production runtime before further tuning:
+  - no startup-quiet scheduler for Earth loading
+  - no deck overlay startup code
+  - no custom polar land
+  - no temporary orange startup/debug UI
+- Preferred immediate code direction:
+  - Put `graticules` back into the initial Earth path, either as direct GeoJSON if the file is acceptable or as a simpler non-prewarmed layer that still attaches before dynamic layers.
+  - Keep low-detail land small and packaged locally.
+  - Keep high-detail land, heavy borders, empires, and persisted dynamic GeoJSON out of startup.
+  - Do not auto-load hidden dynamic layers.
+  - For visible persisted layers, prefer PMTiles or other tiled artifacts; skip or prompt for large raw GeoJSON.
+- Longer-term direction:
+  - Treat PMTiles/vector delivery as the solution for heavy datasets, not as an excuse to delay Earth basics.
+  - Measure startup with explicit milestones: menu bound, MapLibre constructed, first render, Earth base complete, dynamic restore start, dynamic restore complete.
 
 ## Earth UI Direction
 - Earth is a product-level base control, not just another ordinary user dataset row.
@@ -53,9 +91,8 @@
 - The Earth control may open a dedicated Earth styling panel instead of appearing as a normal row in the main layer list.
 - Earth can be bespoke in presentation while still reusing proven row-style UI patterns internally where they help.
 
-## Earthlab UI Notes
-- `earthlab` is the current reference surface for simple Earth-only control behavior.
-- In Earthlab, `Land` should be a parent row with child rows for:
+## Earth UI Notes
+- If Earth controls are shown as rows, `Land` should be a parent row with child rows for:
   - `Fill`
   - `Line`
 - Child Earth rows, not only parent rows, should be allowed to own visibility, styling, and order state when they map to real render units.
@@ -78,21 +115,21 @@
 - Persist Earth styling state locally from the beginning.
 - Earth persistence should be easy to read, easy to reset, and not entangled with old Earth compatibility state.
 
-## Earthlab Ordering Notes
-- In Earthlab, menu order, persisted order, and deck render order should all come from the same shared Earth order state.
-- In Earthlab, the top item in the Earth menu should be the topmost rendered Earth layer. Do not invert that relationship.
+## Earth Ordering Notes
+- Menu order, persisted order, and MapLibre render order should all come from the same shared Earth order state.
+- The top item in the Earth menu should be the topmost rendered Earth layer. Do not invert that relationship.
 - `Land` child order should map directly to `land.fill` and `land.line` render order, not through a parent-only special case.
 - Persisted order restore should reorder the DOM on startup, but routine style sync should not re-append rows if order has not changed.
 - Do not perform DOM row reordering during slider/color input refresh paths; that breaks focus and drag continuity for controls.
 
-## Earthlab Reorder Interaction
-- Earthlab row reordering should follow the proven main-project model:
+## Earth Reorder Interaction
+- Earth row reordering should follow the proven main-project model:
   - drag starts after a movement threshold
   - once dragging starts, collapse the open row
   - reorder one adjacent slot at a time
   - move up when the pointer goes above the dragged row's top
   - move down when the pointer goes below the dragged row's bottom
-- Avoid hover-target insertion math for Earthlab rows unless there is a clear demonstrated need; the adjacent-step model is easier to reason about and matched user expectations better here.
+- Avoid hover-target insertion math for Earth rows unless there is a clear demonstrated need; the adjacent-step model is easier to reason about and matched user expectations better here.
 - While dragging, preview order updates should happen live as the row crosses its own top/bottom thresholds, not only on release.
 
 ## Rebuild Rules
@@ -104,7 +141,7 @@
 - Keep the rebuild notes opinionated enough that future work can say "no" to baggage quickly.
 
 ## Product Model
-- Atlas/Layers is an open geodata canvas, not only a layer editor.
+- Layers is an open geodata canvas, not only a layer editor.
 - Datasets are public building blocks intended to be reusable by everyone.
 - The main shareable artifact is usually a view:
   - a row tree
@@ -187,14 +224,14 @@
 ## Working Rules
 - Prefer small, self-contained changes.
 - Keep behavior-preserving extraction separate from behavior-changing work.
-- If a request conflicts with the current Atlas architecture, call that out before coding.
+- If a request conflicts with the current Layers architecture, call that out before coding.
 - If a new repeated pitfall or architecture rule becomes clear, add it here.
 - When browser caching is plausible, verify the browser is running the intended code before trusting a diagnosis.
 - During diagnosis/debugging turns, do not make code changes unless the user explicitly asks to implement a fix; analysis, inspection, and explanation are not implicit permission to patch.
 - Temporary on-screen debug overlays should keep a persistent minimize/restore control in the top-left corner so the overlay can be hidden without removing the instrumentation.
 
 ## Shared Row Model
-- Atlas layer panel behavior should come from one shared row system.
+- Layers layer panel behavior should come from one shared row system.
 - A layer should be modeled as a shared parent row plus its child rows, not as a separate controller concept.
 - Dataset linkage should not require every linked dataset to appear as a standalone visible layer row in the main tree.
 - Data management can live in a dedicated data flow/panel while still resolving through the same underlying shared row/state model where needed.
@@ -261,6 +298,7 @@
 - Ordering should be definition-driven.
 - Menu order, persisted order, and render order should all come from shared order state.
 - Parent rows and child rows should use the same ordering semantics by default.
+- MapLibre runtime row/subtree reorder should reapply the canonical full shared order, not a local-only move, so restored dynamic rows, child style rows, and backend layer order stay aligned.
 - `Earth` is the deliberate exception:
   - it stays pinned first in the panel
   - it still renders as the visual base underneath the other top-level groups
@@ -273,25 +311,22 @@
 - Current visibility-persistence finding:
   - uploaded Supabase-backed top-level rows are persisting `visible` state in localStorage for both the local row id and the UUID-backed runtime layer state
   - the current inconsistency appears to be in restore or later runtime application, not in whether the toggle was saved at all
-  - this is not yet fully explained; avoid assuming the persistence bug is solved until the post-boot runtime path is traced end-to-end
+  - row ancestry and child runtime-target registration are part of the restore path for dynamic/Supabase-backed rows; if they are missing, child rows can look shared in the menu while ordering/visibility applies through incomplete runtime state
+  - avoid assuming the persistence bug is solved until the post-boot runtime path is traced end-to-end
 
 ## Runtime Layer Model
 - Shared row/menu structure and MapLibre runtime order should stay aligned.
 - Avoid root-only or parent-only reorder algorithms.
 - If a runtime ordering exception is required, encode it as a narrow data-driven exception inside the shared ordering system.
 - Runtime rendering should resolve primarily by visual layer, not by treating each dataset as an independent top-level runtime layer.
-- A runtime target may have more than one renderer backend attached:
-  - MapLibre
-  - deck
-  - or both
-- Shared row targets must drive all attached renderer backends through the same runtime contract for:
+- Runtime targets currently resolve through the MapLibre screen backend.
+- Shared row targets must drive the runtime contract for:
   - style updates
   - visibility inheritance
   - ordering
   - live drag/reorder updates
-- Deck-backed rendering should not be wired as a bespoke per-layer overlay path once a target can be expressed through the shared runtime-target system.
-- Polar rendering should be modeled as a backend capability of a normal runtime target, not as a separate menu/controller concept.
-- Built-in layers may opt into explicit polar backend rules first, but Supabase-backed targets should use the same backend contract even before dataset polar metadata is populated.
+- Dynamic/Supabase-backed runtime attachment must pass the model row id, parent row id, and child row definitions into the screen runtime so MapLibre can register runtime target ancestry for restored rows, filter rows, and default style children.
+- Do not add a second renderer backend unless MapLibre has a demonstrated product blocker and the new backend passes the same row/state/order contract.
 - Default runtime behavior for a layer with many linked datasets should be:
   - load all datasets linked to the layer
   - combine or co-resolve them under one visual layer contract
@@ -303,7 +338,7 @@
   - if one restored layer still comes back on incorrectly, the likely cause is a later runtime step overriding visibility rather than localStorage failing to save it
 
 ## MapLibre Role
-- MapLibre is the screen runtime shell for Atlas.
+- MapLibre is the screen runtime shell for Layers.
 - It is a strong fit for:
   - interactive globe/screen rendering
   - tiled vector fills and lines used as runtime display layers
@@ -327,6 +362,7 @@
 - Heavy global screen layers are often more reliable as tiled vector delivery than as raw direct GeoJSON.
 - The local `atlasvt://` path is a valid transitional tiling path.
 - Long-term production direction is still stable hosted tiles under our control.
+- For shipped/static local layers, prefer `src/config/local-layers.js` as the registry source. Avoid adding new one-off registry blocks in `map-instance.js`; existing Olympics/Empires special cases should move toward the shared local-layer/row model when touched.
 
 ## PMTiles Findings
 - Semi-transparent tiled polygon fills can show square seam artifacts aligned to the tile grid.
@@ -356,19 +392,19 @@
   - `data/sources/olympicsgonuts/1996+`
 - Available years:
   - `1996` through `2024`
-- Runtime Atlas pattern:
+- Runtime Layers pattern:
   - one parent `Olympics` layer
   - shared child rows for `Year`, `Radius`, and medal filters
   - one source with filtered child layers
 - Symbol sizes like Olympics point radius are screen-pixel values and should stay visually fixed in web mode.
 
 ## Transport
-- Transport should use the same shared parent/child row model as every other Atlas layer.
+- Transport should use the same shared parent/child row model as every other Layers layer.
 - First shipped transport slice is `Rail (SA)`:
   - direct GeoJSON
   - fat line styling
   - honest regional scope
-- Prefer public downloadable datasets over authenticated service endpoints for shipped Atlas layers.
+- Prefer public downloadable datasets over authenticated service endpoints for shipped Layers layers.
 
 ## Git Notes
 - Primary branch: `master`

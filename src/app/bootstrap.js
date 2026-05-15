@@ -1,7 +1,4 @@
 import { createLayerModel } from "../core/layer-model.js";
-import { mountAddDataPanel } from "./add-data-panel.js";
-import { mountCreateLayerPanel } from "./create-layer-panel.js";
-import { mountDataTablePanel } from "./data-table-panel.js";
 import { getProjectionRegistry } from "../core/projection/projection-registry.js";
 import { createStyleModel } from "../core/style-model.js";
 import { createViewModel } from "../core/view-model.js";
@@ -10,11 +7,9 @@ import { enableLayerMenuControls } from "./layer-menu-controls.js";
 import { renderLayerMenuRows } from "./layer-menu-renderer.js";
 import { enableRefreshControls } from "./refresh-controls.js";
 import { createPrintRendererAdapter } from "../renderers/print/print-renderer.js";
-import { createMaplibreScreenRuntime } from "../renderers/screen/maplibre/runtime.js";
 import { createScreenRendererAdapter } from "../renderers/screen/screen-renderer.js";
 import { createEditableRuntimeStore } from "../sources/editable/runtime-store.js";
 import { createPmtilesManifest } from "../sources/pmtiles/source-manifest.js";
-import { loadLayerFromSupabase } from "../sources/supabase/layer-loader.js";
 import { getRowRuntimeTargetId, getRowStateKey } from "../core/layer-definitions.js";
 
 const supabaseLayerDataCache = new Map();
@@ -25,119 +20,141 @@ async function bootstrapApplication() {
   const viewModel = createViewModel();
   const pmtilesManifest = createPmtilesManifest();
   const editableStore = createEditableRuntimeStore();
-  await editableStore.initialize();
   const screenRenderer = createScreenRendererAdapter();
   const printRenderer = createPrintRendererAdapter();
   const projections = getProjectionRegistry();
   const viewState = viewModel.getState();
-  const initialLayerState = layerModel.getState();
-  const screenRuntime = createMaplibreScreenRuntime({
-    pmtilesManifest,
-    viewState,
-    initialLayerState,
-    getRuntimeVectors: () => editableStore.getCollections(),
-    getOrderedChildRowIds: (parentId) => layerModel.getOrderedChildRowIds(parentId),
-  });
-
+  const screenRuntime = createDeferredScreenRuntime();
   let mapStartupError = null;
-  try {
-    screenRuntime.mount(document.getElementById("mapStage"));
-  } catch (error) {
-    mapStartupError = error;
-    console.error("Map startup failed.", error);
-    document.body.dataset.mapStartup = "failed";
-  }
+  const debugOverlay = createStartupDebugOverlay({
+    getStartupError: () => mapStartupError,
+    getScreenRuntimeStatus: () => screenRuntime.getStatus(),
+  });
+  debugOverlay.update("bootstrap-start");
 
-  // Re-attach any Supabase layers that were persisted from a previous session.
-  // Fire-and-forget — failures are logged but don't block the rest of bootstrap.
-  if (!mapStartupError) {
-    screenRuntime.whenStyleReady(() => {
-      void reattachPersistedSupabaseLayers(layerModel, screenRuntime);
+  let rerenderLayerMenu = () => {};
+  const getLayerDatasets = async (layerId) => {
+    const cached = supabaseLayerDataCache.get(layerId);
+    if (Array.isArray(cached?.datasets) && cached.datasets.length) {
+      return cached.datasets;
+    }
+    const { getLayerDatasets: loadDatasets } = await import("../sources/supabase/layer-loader.js");
+    return loadDatasets(layerId);
+  };
+  const createFilterFromTableSelection = async ({ layerId, columnName, value }) => {
+    const parentRow = findLayerRowByLayerRef(layerModel, layerId);
+    if (!parentRow) {
+      throw new Error("Could not find the parent layer for this filter.");
+    }
+
+    const existingFilterRow = layerModel.getChildRows(parentRow.id).find((row) => (
+      row?.type === "layer"
+      && row.kind === "filter"
+      && row.filter?.field === String(columnName)
+      && (row.filter?.op ?? "==") === "=="
+      && String(row.filter?.value ?? "") === String(value ?? "")
+    ));
+    if (existingFilterRow) {
+      return;
+    }
+
+    const nextRow = layerModel.addRowToLayer(parentRow.id, "filter", {
+      name: `${columnName} = ${value === "" ? "Empty value" : value}`,
+      field: columnName,
+      value,
+      op: "==",
+      geometryTypes: parentRow.geometryTypes ?? [],
+      geometryType: parentRow.geometryType ?? "mixed",
     });
-  }
+    if (!nextRow) {
+      throw new Error("Failed to create filter row.");
+    }
 
-  let dataTablePanel = null;
-  const addDataPanel = mountAddDataPanel({
-    getAppearanceState: () => layerModel.getAppearanceState(),
-    async getLayerDatasets(layerId) {
-      const cached = supabaseLayerDataCache.get(layerId);
-      if (Array.isArray(cached?.datasets) && cached.datasets.length) {
-        return cached.datasets;
-      }
-      const { getLayerDatasets } = await import("../sources/supabase/layer-loader.js");
-      return getLayerDatasets(layerId);
-    },
-    async onDataAdded({ layerId, datasetId }) {
-      await dataTablePanel?.reloadLayerData?.({ layerId, datasetId });
-    },
-  });
-  dataTablePanel = mountDataTablePanel({
-    getAppearanceState: () => layerModel.getAppearanceState(),
-    async getLayerDatasets(layerId) {
-      const cached = supabaseLayerDataCache.get(layerId);
-      if (Array.isArray(cached?.datasets) && cached.datasets.length) {
-        return cached.datasets;
-      }
-      const { getLayerDatasets } = await import("../sources/supabase/layer-loader.js");
-      return getLayerDatasets(layerId);
-    },
-    async loadTablePreview(layerId, { limit, offset, datasetId }) {
-      const cached = supabaseLayerDataCache.get(layerId);
-      const {
-        getLayerTablePreview,
-        getLayerTablePreviewFromLoadedData,
-      } = await import("../sources/supabase/layer-loader.js");
-      const cachedPreview = getLayerTablePreviewFromLoadedData(cached, { limit, offset, datasetId });
-      if (cachedPreview) {
-        return cachedPreview;
-      }
-      return getLayerTablePreview(layerId, { limit, offset, datasetId });
-    },
-    onAddDataRequested(args) {
-      addDataPanel.open(args);
-    },
-    async onCreateFilterRequested({ layerId, columnName, value }) {
-      const parentRow = findLayerRowByLayerRef(layerModel, layerId);
-      if (!parentRow) {
-        throw new Error("Could not find the parent layer for this filter.");
-      }
+    attachDynamicFilterRow(layerModel, screenRuntime, nextRow);
+    applyPersistedRowVisibility(layerModel, screenRuntime, nextRow);
+    syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow);
+    screenRuntime.reapplyFullOrder?.();
+    rerenderLayerMenu();
+  };
 
-      const existingFilterRow = layerModel.getChildRows(parentRow.id).find((row) => (
-        row?.type === "layer"
-        && row.kind === "filter"
-        && row.filter?.field === String(columnName)
-        && (row.filter?.op ?? "==") === "=="
-        && String(row.filter?.value ?? "") === String(value ?? "")
-      ));
-      if (existingFilterRow) {
-        return;
-      }
+  let addDataPanelPromise = null;
+  let dataTablePanelPromise = null;
+  let createLayerPanelPromise = null;
+  const getAddDataPanel = () => {
+    if (!addDataPanelPromise) {
+      addDataPanelPromise = import("./add-data-panel.js").then(({ mountAddDataPanel }) => mountAddDataPanel({
+        getAppearanceState: () => layerModel.getAppearanceState(),
+        getLayerDatasets,
+        async onDataAdded({ layerId, datasetId }) {
+          const dataTablePanel = await getDataTablePanel();
+          await dataTablePanel?.reloadLayerData?.({ layerId, datasetId });
+        },
+      }));
+    }
+    return addDataPanelPromise;
+  };
+  const getDataTablePanel = () => {
+    if (!dataTablePanelPromise) {
+      dataTablePanelPromise = import("./data-table-panel.js").then(({ mountDataTablePanel }) => mountDataTablePanel({
+        getAppearanceState: () => layerModel.getAppearanceState(),
+        getLayerDatasets,
+        async loadTablePreview(layerId, { limit, offset, datasetId }) {
+          const cached = supabaseLayerDataCache.get(layerId);
+          const {
+            getLayerTablePreview,
+            getLayerTablePreviewFromLoadedData,
+          } = await import("../sources/supabase/layer-loader.js");
+          const cachedPreview = getLayerTablePreviewFromLoadedData(cached, { limit, offset, datasetId });
+          if (cachedPreview) {
+            return cachedPreview;
+          }
+          return getLayerTablePreview(layerId, { limit, offset, datasetId });
+        },
+        onAddDataRequested(args) {
+          void getAddDataPanel()
+            .then((addDataPanel) => addDataPanel.open(args))
+            .catch((error) => console.error("Failed to open add data panel.", error));
+        },
+        onCreateFilterRequested: createFilterFromTableSelection,
+      }));
+    }
+    return dataTablePanelPromise;
+  };
+  const getCreateLayerPanel = () => {
+    if (!createLayerPanelPromise) {
+      createLayerPanelPromise = import("./create-layer-panel.js").then(({ mountCreateLayerPanel }) => mountCreateLayerPanel({
+        getAppearanceState: () => layerModel.getAppearanceState(),
+        onLayerCreated: async ({ layerId, name, parentId, geometryTypes = [], geometryType }) => {
+          try {
+            const result = await addDataRowAndAttach({
+              parentId: parentId ?? layerModel.getRootParentId(),
+              name,
+              layerRef: layerId,
+              geometryTypes,
+              geometryType,
+              layerModel,
+              screenRuntime,
+            });
+            if (result) rerenderLayerMenu();
+            return result;
+          } catch (err) {
+            console.error("Failed to load uploaded layer onto map.", err);
+            throw err;
+          }
+        },
+      }));
+    }
+    return createLayerPanelPromise;
+  };
 
-      const nextRow = layerModel.addRowToLayer(parentRow.id, "filter", {
-        name: `${columnName} = ${value === "" ? "Empty value" : value}`,
-        field: columnName,
-        value,
-        op: "==",
-        geometryTypes: parentRow.geometryTypes ?? [],
-        geometryType: parentRow.geometryType ?? "mixed",
-      });
-      if (!nextRow) {
-        throw new Error("Failed to create filter row.");
-      }
-
-      attachDynamicFilterRow(layerModel, screenRuntime, nextRow);
-      applyPersistedRowVisibility(layerModel, screenRuntime, nextRow);
-      syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow);
-      screenRuntime.reapplyRowSubtreeOrder?.(parentRow.id);
-      rerenderLayerMenu();
-    },
-  });
-  const rerenderLayerMenu = renderLayerMenuRows({
+  rerenderLayerMenu = renderLayerMenuRows({
     panel: document.getElementById("layerMenuPanel"),
     layerModel,
     onAddRow: ({ kind, parentId }) => {
       if (kind === "open-add-panel") {
-        createLayerPanel.open({ parentId });
+        void getCreateLayerPanel()
+          .then((createLayerPanel) => createLayerPanel.open({ parentId }))
+          .catch((error) => console.error("Failed to open create layer panel.", error));
       }
     },
     onRowInput: (row, nextValue) => {
@@ -150,6 +167,15 @@ async function bootstrapApplication() {
         const targetRow = findRowByRuntimeTargetId(layerModel, row.target.layerId);
         if (targetRow) {
           applyRowVisibilityTree(layerModel, screenRuntime, targetRow);
+          if (
+            nextValue !== false
+            && targetRow.layerRef
+            && SUPABASE_UUID.test(targetRow.layerRef)
+            && !supabaseLayerDataCache.has(targetRow.layerRef)
+          ) {
+            void reloadSupabaseLayer(targetRow.layerRef, layerModel, screenRuntime)
+              .catch((error) => console.warn("Failed to load toggled layer.", error));
+          }
           return;
         }
       }
@@ -197,7 +223,21 @@ async function bootstrapApplication() {
         return;
       }
 
-      dataTablePanel.open({
+      void getDataTablePanel()
+        .then((dataTablePanel) => {
+          dataTablePanel.open({
+            layerId: row.layerRef,
+            layerName: row.label ?? row.name ?? "Dataset",
+          });
+        })
+        .catch((error) => console.error("Failed to open data table panel.", error));
+    },
+    onFilterAction: (row) => {
+      if (!row?.layerRef || !SUPABASE_UUID.test(row.layerRef)) {
+        return;
+      }
+
+      console.info("[layers] Filter builder is not implemented yet.", {
         layerId: row.layerRef,
         layerName: row.label ?? row.name ?? "Dataset",
       });
@@ -225,27 +265,6 @@ async function bootstrapApplication() {
     clearCacheReloadButton: document.getElementById("clearCacheReloadButton"),
     onBeforeMenuOpen: () => layerMenuControls?.close?.(),
   });
-  const createLayerPanel = mountCreateLayerPanel({
-    getAppearanceState: () => layerModel.getAppearanceState(),
-    onLayerCreated: async ({ layerId, name, parentId, geometryTypes = [], geometryType }) => {
-      try {
-        const result = await addDataRowAndAttach({
-          parentId: parentId ?? layerModel.getRootParentId(),
-          name,
-          layerRef: layerId,
-          geometryTypes,
-          geometryType,
-          layerModel,
-          screenRuntime,
-        });
-        if (result) rerenderLayerMenu();
-        return result;
-      } catch (err) {
-        console.error("Failed to load uploaded layer onto map.", err);
-        throw err;
-      }
-    },
-  });
 
   window.LayerV2 = {
     layers: layerModel.getDefinitions(),
@@ -266,10 +285,261 @@ async function bootstrapApplication() {
     shareUrl: createShareStateUrl(viewState),
     rerenderLayerMenu,
   };
+  debugOverlay.update("window-layer-v2-ready");
+
+  const startMapRuntime = async () => {
+    debugOverlay.update("map-start-requested");
+    try {
+      await waitForMaplibreGlobal();
+      debugOverlay.update("maplibre-global-ready");
+      const { createMaplibreScreenRuntime } = await import("../renderers/screen/maplibre/runtime.js");
+      debugOverlay.update("runtime-module-loaded");
+      const runtime = createMaplibreScreenRuntime({
+        pmtilesManifest,
+        viewState,
+        initialLayerState: layerModel.getState(),
+        getRuntimeVectors: () => editableStore.getCollections(),
+        getOrderedChildRowIds: (parentId) => layerModel.getOrderedChildRowIds(parentId),
+      });
+      runtime.mount(document.getElementById("mapStage"));
+      debugOverlay.update("runtime-mounted");
+      screenRuntime.setRuntime(runtime);
+      if (window.LayerV2) {
+        window.LayerV2.screenRuntime = runtime.getStatus();
+        window.LayerV2.mapStartupError = null;
+      }
+      debugOverlay.update("runtime-live");
+      runtime.whenStyleReady(() => {
+        debugOverlay.update("style-ready");
+        window.setTimeout(() => {
+          void reattachPersistedSupabaseLayers(layerModel, screenRuntime);
+        }, 0);
+      });
+    } catch (error) {
+      mapStartupError = error;
+      screenRuntime.setStartupError(error);
+      console.error("Map startup failed.", error);
+      document.body.dataset.mapStartup = "failed";
+      if (window.LayerV2) {
+        window.LayerV2.mapStartupError = String(error?.message ?? error);
+        window.LayerV2.screenRuntime = screenRuntime.getStatus();
+      }
+      debugOverlay.update("map-start-failed");
+    }
+  };
+
+  void startMapRuntime();
+
+  void editableStore.initialize()
+    .then(() => {
+      if (window.LayerV2?.sources) {
+        window.LayerV2.sources.editable = editableStore.getCollections();
+      }
+      debugOverlay.update("editable-store-ready");
+    })
+    .catch((error) => {
+      console.warn("Failed to initialize editable store.", error);
+      debugOverlay.update("editable-store-failed");
+    });
 
   return {
     editableStore,
     screenRuntime,
+  };
+}
+
+function createStartupDebugOverlay({
+  getStartupError = () => null,
+  getScreenRuntimeStatus = () => null,
+} = {}) {
+  const token = "map-debug-2026-05-15-a";
+  const overlay = document.createElement("section");
+  overlay.className = "startup-debug is-collapsed";
+  overlay.setAttribute("aria-label", "Map startup debug");
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "startup-debug-toggle";
+  button.setAttribute("aria-expanded", "false");
+  button.textContent = "Debug";
+
+  const body = document.createElement("div");
+  body.className = "startup-debug-body";
+  overlay.append(button, body);
+  document.body.append(overlay);
+
+  let collapsed = true;
+  let lastPhase = "init";
+  let renderCount = 0;
+  let intervalId = null;
+
+  const fmtRect = (rect) => `${Math.round(rect.width)}x${Math.round(rect.height)}@${Math.round(rect.left)},${Math.round(rect.top)}`;
+  const bool = (value) => (value ? "yes" : "no");
+
+  function readState() {
+    const stage = document.getElementById("mapStage");
+    const stageRect = stage?.getBoundingClientRect?.();
+    const canvas = stage?.querySelector?.("canvas");
+    const canvasRect = canvas?.getBoundingClientRect?.();
+    const status = getScreenRuntimeStatus?.() ?? null;
+    const startupError = getStartupError?.() ?? window.LayerV2?.mapStartupError ?? null;
+    const errorText = startupError ? String(startupError?.message ?? startupError) : "none";
+    const topElement = document.elementFromPoint?.(16, 16);
+
+    return [
+      ["token", token],
+      ["phase", lastPhase],
+      ["maplibre", bool(Boolean(window.maplibregl))],
+      ["startup", document.body.dataset.mapStartup ?? status?.startupMode ?? "none"],
+      ["live", bool(Boolean(status?.liveMap))],
+      ["zoom", Number.isFinite(status?.zoom) ? status.zoom.toFixed(2) : "none"],
+      ["error", errorText.slice(0, 92)],
+      ["stage", stageRect ? fmtRect(stageRect) : "missing"],
+      ["canvas", canvasRect ? fmtRect(canvasRect) : "missing"],
+      ["canvases", String(stage?.querySelectorAll?.("canvas")?.length ?? 0)],
+      ["top-left", topElement?.id || topElement?.className || topElement?.tagName || "unknown"],
+    ];
+  }
+
+  function render() {
+    renderCount += 1;
+    body.innerHTML = readState().map(([label, value]) => `
+      <div class="startup-debug-row">
+        <span>${label}</span>
+        <strong>${value}</strong>
+      </div>
+    `).join("");
+    if (renderCount > 60 && intervalId != null) {
+      window.clearInterval(intervalId);
+      intervalId = null;
+    }
+  }
+
+  button.addEventListener("click", () => {
+    collapsed = !collapsed;
+    overlay.classList.toggle("is-collapsed", collapsed);
+    button.setAttribute("aria-expanded", String(!collapsed));
+  });
+
+  intervalId = window.setInterval(render, 500);
+  render();
+
+  return {
+    update(phase) {
+      lastPhase = phase;
+      render();
+    },
+  };
+}
+
+function waitForMaplibreGlobal({ timeoutMs = 8000 } = {}) {
+  if (window.maplibregl) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const startedAt = performance.now();
+    const check = () => {
+      if (window.maplibregl) {
+        resolve();
+        return;
+      }
+      if (performance.now() - startedAt >= timeoutMs) {
+        reject(new Error("MapLibre failed to load before map startup timeout."));
+        return;
+      }
+      window.setTimeout(check, 25);
+    };
+    check();
+  });
+}
+
+function createDeferredScreenRuntime() {
+  let runtime = null;
+  let startupError = null;
+  const queuedCalls = [];
+
+  const withRuntime = (callback) => {
+    if (runtime) {
+      callback(runtime);
+      return;
+    }
+    if (!startupError) {
+      queuedCalls.push(callback);
+    }
+  };
+
+  const flushQueuedCalls = () => {
+    if (!runtime) {
+      return;
+    }
+    queuedCalls.splice(0).forEach((callback) => {
+      try {
+        callback(runtime);
+      } catch (error) {
+        console.warn("Deferred screen runtime call failed.", error);
+      }
+    });
+  };
+
+  return {
+    setRuntime(nextRuntime) {
+      runtime = nextRuntime;
+      startupError = null;
+      flushQueuedCalls();
+    },
+    setStartupError(error) {
+      startupError = error;
+      queuedCalls.splice(0);
+    },
+    destroy() {
+      if (runtime) {
+        runtime.destroy?.();
+      } else {
+        queuedCalls.splice(0);
+      }
+    },
+    getStatus() {
+      if (runtime) {
+        return runtime.getStatus?.() ?? { renderer: "maplibre-screen-adapter" };
+      }
+      return {
+        renderer: "maplibre-screen-adapter",
+        startupMode: startupError ? "startup-failed" : "loading-map-runtime",
+        liveMap: false,
+      };
+    },
+    mount(container) {
+      withRuntime((target) => target.mount?.(container));
+    },
+    renderStage(container) {
+      withRuntime((target) => target.renderStage?.(container));
+    },
+    whenStyleReady(callback) {
+      withRuntime((target) => target.whenStyleReady?.(callback));
+    },
+    reorderLayerGroup(parentId, orderedLayerIds) {
+      withRuntime((target) => target.reorderLayerGroup?.(parentId, orderedLayerIds));
+    },
+    reapplyFullOrder() {
+      withRuntime((target) => target.reapplyFullOrder?.());
+    },
+    reapplyRowSubtreeOrder(rowId) {
+      withRuntime((target) => target.reapplyRowSubtreeOrder?.(rowId));
+    },
+    setLayerStyleValue(layerId, key, value) {
+      withRuntime((target) => target.setLayerStyleValue?.(layerId, key, value));
+    },
+    loadDynamicLayer(args) {
+      withRuntime((target) => target.loadDynamicLayer?.(args));
+    },
+    setDynamicLayerFeatureFilter(layerId, featureFilter) {
+      withRuntime((target) => target.setDynamicLayerFeatureFilter?.(layerId, featureFilter));
+      return Boolean(runtime);
+    },
+    detachDynamicLayer(layerId) {
+      withRuntime((target) => target.detachDynamicLayer?.(layerId));
+    },
   };
 }
 
@@ -307,6 +577,11 @@ async function loadLayerFields(layerRef) {
   }
 }
 
+async function loadLayerFromSupabaseLazy(layerId) {
+  const { loadLayerFromSupabase } = await import("../sources/supabase/layer-loader.js");
+  return loadLayerFromSupabase(layerId);
+}
+
 async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
   const supabaseLayers = layerModel.getSupabaseLayers();
   if (!supabaseLayers.length) return;
@@ -314,12 +589,17 @@ async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
   let suppressedAny = false;
   for (const { rowId, layerId } of supabaseLayers) {
     try {
-      const loadedLayer = await loadLayerFromSupabase(layerId);
+      const row = layerModel.getRowById(rowId);
+      const loadedLayer = await loadLayerFromSupabaseLazy(layerId);
       const { layer, geojson, tilesUrl } = loadedLayer;
       supabaseLayerDataCache.set(layerId, loadedLayer);
+      const rowState = layerModel.getState()?.[rowId] ?? {};
       if (geojson || tilesUrl) {
         screenRuntime.loadDynamicLayer({
           layerId,
+          rowId,
+          parentRowId: rowState.parentRowId ?? null,
+          childRows: row?.rows ?? [],
           geojson,
           tilesUrl,
           style: layer.default_style,
@@ -329,7 +609,6 @@ async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
           },
         });
       }
-      const row = layerModel.getRowById(rowId);
       if (row) {
         applyPersistedRowVisibility(layerModel, screenRuntime, row);
         attachDynamicFilterRowsRecursively(layerModel, screenRuntime, row);
@@ -479,17 +758,20 @@ function attachDynamicFilterRow(layerModel, screenRuntime, row) {
     return;
   }
 
+  const rowState = layerModel.getState()?.[row.id] ?? {};
   screenRuntime.loadDynamicLayer?.({
-      layerId: getRowRuntimeTargetId(row),
-      geojson: null,
-      tilesUrl: null,
-      style: null,
-      options: {
-        sourceLayerId: row.filter.parentLayerId,
-        geometryTypes: row.geometryTypes ?? [],
-        geometryType: row.geometryType,
-        featureFilter: buildExactMatchFilterExpression(row.filter.field, row.filter.value),
-      parentRowId: row.filter.parentLayerId,
+    layerId: getRowRuntimeTargetId(row),
+    rowId: row.id,
+    parentRowId: rowState.parentRowId ?? null,
+    childRows: row.rows ?? [],
+    geojson: null,
+    tilesUrl: null,
+    style: null,
+    options: {
+      sourceLayerId: row.filter.parentLayerId,
+      geometryTypes: row.geometryTypes ?? [],
+      geometryType: row.geometryType,
+      featureFilter: buildExactMatchFilterExpression(row.filter.field, row.filter.value),
     },
   });
 }
@@ -546,7 +828,7 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
 
   let layerResult;
   try {
-    layerResult = await loadLayerFromSupabase(layerRef);
+    layerResult = await loadLayerFromSupabaseLazy(layerRef);
   } catch (err) {
     if (err?.code === "LAYER_NOT_FOUND") {
       return null;
@@ -567,6 +849,9 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
   if (geojson || tilesUrl) {
     screenRuntime.loadDynamicLayer({
       layerId: layerRef,
+      rowId: added.id,
+      parentRowId: resolvedParentId === layerModel.getRootParentId() ? null : resolvedParentId,
+      childRows: added.rows ?? [],
       geojson,
       tilesUrl,
       style: layer.default_style,
@@ -589,13 +874,19 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
 }
 
 async function reloadSupabaseLayer(layerId, layerModel, screenRuntime) {
-  const layerResult = await loadLayerFromSupabase(layerId);
+  const layerResult = await loadLayerFromSupabaseLazy(layerId);
   const { layer, geojson, tilesUrl, sourceLayerId } = layerResult;
   supabaseLayerDataCache.set(layerId, layerResult);
   screenRuntime.detachDynamicLayer(layerId);
   if (geojson || tilesUrl) {
+    const targetRow = layerModel.getSupabaseLayers().find((entry) => entry.layerId === layerId);
+    const row = targetRow ? layerModel.getRowById(targetRow.rowId) : null;
+    const rowState = targetRow ? layerModel.getState()?.[targetRow.rowId] ?? {} : {};
     screenRuntime.loadDynamicLayer({
       layerId,
+      rowId: targetRow?.rowId ?? null,
+      parentRowId: rowState.parentRowId ?? null,
+      childRows: row?.rows ?? [],
       geojson,
       tilesUrl,
       style: layer.default_style,

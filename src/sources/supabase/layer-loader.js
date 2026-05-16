@@ -184,6 +184,51 @@ async function loadLayerDatasets(layerId) {
   return Array.isArray(data) ? data : [];
 }
 
+export async function updateDatasetName(datasetId, name) {
+  const supabase = requireSupabase();
+  const nextName = String(name ?? "").trim();
+  if (!datasetId || !nextName) {
+    throw new Error("Dataset name cannot be empty.");
+  }
+
+  const { error } = await supabase
+    .from("datasets")
+    .update({ name: nextName })
+    .eq("id", datasetId);
+
+  if (error) {
+    throw new Error(`Failed to rename dataset: ${error.message}`);
+  }
+
+  return { id: datasetId, name: nextName };
+}
+
+export async function updateDatasetMetadata(datasetId, { license = "", licenseUrl = "", attribution = "" } = {}) {
+  const supabase = requireSupabase();
+  if (!datasetId) {
+    throw new Error("Dataset is required.");
+  }
+
+  const patch = {
+    license: String(license ?? "").trim() || null,
+    license_url: String(licenseUrl ?? "").trim() || null,
+    attribution: String(attribution ?? "").trim() || null,
+  };
+
+  const { data, error } = await supabase
+    .from("datasets")
+    .update(patch)
+    .eq("id", datasetId)
+    .select("id, license, license_url, attribution")
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to update dataset metadata: ${error.message}`);
+  }
+
+  return data;
+}
+
 // Merges a partial style patch into the layer's default_style in Supabase.
 // key/value pairs map directly to default_style fields (color, opacity, radius, weight).
 export async function updateLayerDefaultStyle(layerId, patch) {

@@ -8,6 +8,17 @@ const PREVIEW_RESIZE_HIT_WIDTH = 8;
 const PREVIEW_REORDER_HIT_HEIGHT = 10;
 const PREVIEW_AUTO_SCROLL_EDGE = 28;
 const PREVIEW_AUTO_SCROLL_MAX_SPEED = 18;
+const LICENSE_PRESETS = [
+  { id: "", label: "Select licence", license: "", licenseUrl: "" },
+  { id: "none", label: "None", license: "", licenseUrl: "" },
+  { id: "cc-by-4", label: "CC BY 4.0", license: "CC BY 4.0", licenseUrl: "https://creativecommons.org/licenses/by/4.0/" },
+  { id: "cc-by-sa-4", label: "CC BY-SA 4.0", license: "CC BY-SA 4.0", licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/" },
+  { id: "cc0-1", label: "CC0 1.0 (Public Domain Dedication)", license: "CC0 1.0", licenseUrl: "https://creativecommons.org/publicdomain/zero/1.0/" },
+  { id: "odc-by-1", label: "ODC-By 1.0", license: "ODC-By 1.0", licenseUrl: "https://opendatacommons.org/licenses/by/1-0/" },
+  { id: "odbl-1", label: "ODbL 1.0", license: "ODbL 1.0", licenseUrl: "https://opendatacommons.org/licenses/odbl/1-0/" },
+  { id: "pddl-1", label: "PDDL 1.0 (Public Domain Data)", license: "PDDL 1.0", licenseUrl: "https://opendatacommons.org/licenses/pddl/1-0/" },
+  { id: "custom", label: "Custom", license: null, licenseUrl: null },
+];
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -54,6 +65,17 @@ function formatGeometryTypes(geometryTypes = [], geometryType = "mixed") {
     return geometryTypes.join(" + ");
   }
   return geometryType || "mixed";
+}
+
+function getSelectedLicensePresetId(license, licenseUrl) {
+  const normalizedLicense = String(license ?? "").trim();
+  const normalizedLicenseUrl = String(licenseUrl ?? "").trim();
+  const matchingPreset = LICENSE_PRESETS.find((preset) => (
+    preset.id !== "custom"
+    && preset.license === normalizedLicense
+    && preset.licenseUrl === normalizedLicenseUrl
+  ));
+  return matchingPreset?.id ?? "custom";
 }
 
 function createPanelShell() {
@@ -120,7 +142,7 @@ function renameObjectKey(target, fromKey, toKey) {
   return Object.fromEntries(Object.entries(target).map(([key, value]) => [key === fromKey ? toKey : key, value]));
 }
 
-export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getLayerDatasets, onAddDataRequested, onCreateFilterRequested }) {
+export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getLayerDatasets, onAddDataRequested, onRenameDataset, onUpdateDatasetMetadata }) {
   const panel = createPanelShell();
   document.body.appendChild(panel);
 
@@ -134,6 +156,13 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       datasets: [],
       datasetsLoading: false,
       selectedDatasetId: "",
+      datasetNameDraft: "",
+      datasetRenameSaving: false,
+      licenseEditing: false,
+      licenseDraft: "",
+      licenseUrlDraft: "",
+      attributionDraft: "",
+      metadataSaving: false,
       loading: false,
       isBackgroundLoading: false,
       isFullyLoaded: false,
@@ -154,10 +183,7 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       columnWidths: {},
       headerAliases: {},
       fieldKeyByHeader: {},
-      removedSourceHeaders: {},
       loadRequestId: 0,
-      filterPickerColumn: "",
-      filterPickerValue: "",
       ...overrides,
     };
   }
@@ -196,36 +222,92 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
     return Object.fromEntries((state.headers ?? []).map((header) => [header, row?.[header] ?? ""]));
   }
 
-  function getFilterValuesForColumn(columnName) {
-    const seen = new Set();
-    const values = [];
-    (state.allRows ?? []).forEach((row) => {
-      const rawValue = row?.[columnName];
-      const normalized = rawValue == null ? "" : String(rawValue);
-      if (seen.has(normalized)) {
-        return;
-      }
-      seen.add(normalized);
-      values.push(normalized);
-    });
-
-    return values.sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" }));
-  }
-
-  function closeFilterPicker() {
-    state.filterPickerColumn = "";
-    state.filterPickerValue = "";
-  }
-
-  function openFilterPicker(columnName) {
-    const values = getFilterValuesForColumn(columnName);
-    state.filterPickerColumn = columnName;
-    state.filterPickerValue = values[0] ?? "";
-    render();
-  }
-
   function getSelectedDataset() {
     return (state.datasets ?? []).find((dataset) => dataset?.id === state.selectedDatasetId) ?? null;
+  }
+
+  function syncDatasetNameDraft() {
+    const selectedDataset = getSelectedDataset();
+    state.datasetNameDraft = selectedDataset?.name ?? "";
+  }
+
+  function syncMetadataDraft() {
+    const selectedDataset = getSelectedDataset();
+    state.licenseDraft = String(selectedDataset?.license ?? "");
+    state.licenseUrlDraft = String(selectedDataset?.license_url ?? "");
+    state.attributionDraft = String(selectedDataset?.attribution ?? "");
+  }
+
+  async function commitDatasetRename(rawName) {
+    const selectedDataset = getSelectedDataset();
+    const nextName = String(rawName ?? "").trim();
+    if (!selectedDataset) {
+      return;
+    }
+    if (!nextName) {
+      state.datasetNameDraft = selectedDataset.name ?? "";
+      render();
+      return;
+    }
+    if (nextName === selectedDataset.name) {
+      state.datasetNameDraft = nextName;
+      return;
+    }
+
+    state.datasetRenameSaving = true;
+    state.error = "";
+    render();
+    try {
+      await onRenameDataset?.({ layerId: state.layerId, datasetId: selectedDataset.id, name: nextName });
+      state.datasets = state.datasets.map((dataset) => (
+        dataset?.id === selectedDataset.id ? { ...dataset, name: nextName } : dataset
+      ));
+      state.datasetNameDraft = nextName;
+    } catch (error) {
+      state.error = error?.message ?? "Failed to rename dataset.";
+      state.datasetNameDraft = selectedDataset.name ?? "";
+    } finally {
+      state.datasetRenameSaving = false;
+      render();
+    }
+  }
+
+  async function commitDatasetMetadata() {
+    const selectedDataset = getSelectedDataset();
+    if (!selectedDataset) {
+      state.licenseEditing = false;
+      render();
+      return;
+    }
+
+    state.metadataSaving = true;
+    state.error = "";
+    render();
+    try {
+      const result = await onUpdateDatasetMetadata?.({
+        layerId: state.layerId,
+        datasetId: selectedDataset.id,
+        license: state.licenseDraft,
+        licenseUrl: state.licenseUrlDraft,
+        attribution: state.attributionDraft,
+      });
+      const nextDataset = {
+        ...selectedDataset,
+        license: result?.license ?? (state.licenseDraft.trim() || null),
+        license_url: result?.license_url ?? (state.licenseUrlDraft.trim() || null),
+        attribution: result?.attribution ?? (state.attributionDraft.trim() || null),
+      };
+      state.datasets = state.datasets.map((dataset) => (
+        dataset?.id === selectedDataset.id ? nextDataset : dataset
+      ));
+      syncMetadataDraft();
+      state.licenseEditing = false;
+    } catch (error) {
+      state.error = error?.message ?? "Failed to update dataset metadata.";
+    } finally {
+      state.metadataSaving = false;
+      render();
+    }
   }
 
   function syncPreviewPageRows() {
@@ -269,14 +351,10 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
   }
 
   function appendChunk(fields, rows, totalRowCount) {
-    const removedSourceHeaders = state.removedSourceHeaders ?? {};
     const incomingHeaders = fields.map((field) => field.label ?? field.key).filter(Boolean);
     let headersChanged = false;
 
     incomingHeaders.forEach((sourceHeader) => {
-      if (removedSourceHeaders[sourceHeader]) {
-        return;
-      }
       const displayHeader = getDisplayHeaderForSource(sourceHeader);
       const field = fields.find((candidate) => (candidate?.label ?? candidate?.key) === sourceHeader);
       if (displayHeader && field?.key) {
@@ -297,7 +375,7 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       fields.forEach((field) => {
         const key = field?.key ?? "";
         const sourceHeader = field?.label ?? key;
-        if (!sourceHeader || removedSourceHeaders[sourceHeader]) {
+        if (!sourceHeader) {
           return;
         }
         const displayHeader = getDisplayHeaderForSource(sourceHeader);
@@ -324,32 +402,6 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
     state.headers = headers;
     state.allRows = state.allRows.map((row) => Object.fromEntries(headers.map((header) => [header, row?.[header] ?? ""])));
     syncPreviewPageRows();
-  }
-
-  function removePreviewColumn(columnName) {
-    if (!columnName) return;
-    const headers = state.headers ?? [];
-    if (!headers.includes(columnName)) return;
-    state.headers = headers.filter((header) => header !== columnName);
-    state.allRows = state.allRows.map((row) => {
-      const nextRow = { ...row };
-      delete nextRow[columnName];
-      return nextRow;
-    });
-    const sourceHeader = findSourceHeaderForDisplay(columnName);
-    if (sourceHeader) {
-      state.removedSourceHeaders[sourceHeader] = true;
-      delete state.headerAliases[sourceHeader];
-    }
-    delete state.fieldKeyByHeader[columnName];
-    delete state.columnWidths[columnName];
-    if (state.previewSortColumn === columnName) {
-      state.previewSortColumn = "";
-      state.previewSortDirection = "";
-    }
-    state.columnCount = state.headers.length;
-    syncPreviewPageRows();
-    render();
   }
 
   function renamePreviewColumn(fromColumnName, rawNextColumnName) {
@@ -485,14 +537,13 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       sortColumn: state.previewSortColumn,
       sortDirection: state.previewSortDirection,
       sortDisabled,
-      columnActionText: "Filter",
-      columnActionAriaPrefix: "Filter by",
-      columnActionTitle: "Filter by",
+      showColumnAction: false,
     });
     const selectedDataset = getSelectedDataset();
     const datasetOptions = (state.datasets ?? []).map((dataset) => `
       <option value="${escapeHtml(dataset.id)}"${dataset.id === state.selectedDatasetId ? " selected" : ""}>${escapeHtml(`${dataset.name || "Dataset"} (${formatGeometryTypes(dataset.geometryTypes, dataset.geometry_type)})`)}</option>
     `).join("");
+    const datasetInputDisabled = state.datasetsLoading || state.datasetRenameSaving || !selectedDataset;
     const licenseLabel = String(selectedDataset?.license ?? "").trim();
     const licenseUrl = String(selectedDataset?.license_url ?? "").trim();
     const attributionText = String(selectedDataset?.attribution ?? "").trim();
@@ -501,17 +552,16 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
         ? `<a class="dtv-license-link" href="${escapeHtml(licenseUrl)}" target="_blank" rel="noreferrer">${escapeHtml(licenseLabel)}</a>`
         : `<span class="dtv-license-text">${escapeHtml(licenseLabel)}</span>`)
       : `<span class="dtv-license-text dtv-license-text-muted">No license</span>`;
+    const sourceMarkup = attributionText
+      ? `<span class="dtv-license-text">${escapeHtml(attributionText)}</span>`
+      : `<span class="dtv-license-text dtv-license-text-muted">No source</span>`;
+    const licensePresetId = getSelectedLicensePresetId(state.licenseDraft, state.licenseUrlDraft);
+    const metadataControlsDisabled = state.metadataSaving || !selectedDataset;
     const summaryText = state.loading
       ? "Loading rows..."
       : state.isBackgroundLoading && totalRowCount > rowCount
         ? `Loading ${rowCount.toLocaleString()} of ${totalRowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns`
         : `${rowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns`;
-    const filterColumn = state.filterPickerColumn;
-    const filterValues = filterColumn ? getFilterValuesForColumn(filterColumn) : [];
-    const filterSelectionLabel = state.filterPickerValue === ""
-      ? "Empty value"
-      : state.filterPickerValue;
-
     content.innerHTML = `
       <div class="clp-preview dtv-preview">
         <label class="clp-field">
@@ -522,21 +572,60 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
           <div class="dtv-dataset-picker">
             <label class="clp-field dtv-dataset-field">
               <span class="clp-field-label">Dataset</span>
-              <select class="clp-field-input dtv-dataset-select" ${state.datasetsLoading || !(state.datasets ?? []).length ? "disabled" : ""}>
-                ${datasetOptions || `<option value="">No datasets</option>`}
-              </select>
+              <div class="dtv-dataset-combo">
+                <input
+                  class="clp-field-input dtv-dataset-name-input"
+                  type="text"
+                  value="${escapeHtml(state.datasetNameDraft)}"
+                  placeholder="Dataset name"
+                  ${datasetInputDisabled ? "disabled" : ""}
+                />
+                <button class="dtv-dataset-menu-btn" type="button" aria-label="Choose dataset" title="Choose dataset" ${state.datasetsLoading || !(state.datasets ?? []).length ? "disabled" : ""}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"></path></svg>
+                </button>
+                <select class="dtv-dataset-select" aria-label="Choose dataset" ${state.datasetsLoading || !(state.datasets ?? []).length ? "disabled" : ""}>
+                  ${datasetOptions || `<option value="">No datasets</option>`}
+                </select>
+              </div>
             </label>
             <button class="dtv-add-data-btn" type="button" aria-label="Add data" title="Add data">+</button>
           </div>
           <div class="dtv-license-panel" aria-label="Dataset licensing">
-            <div class="dtv-license-item">
-              <span class="dtv-license-label">License</span>
-              ${licenseMarkup}
-            </div>
-            <div class="dtv-license-item">
-              <span class="dtv-license-label">Attribution</span>
-              <span class="dtv-license-text${attributionText ? "" : " dtv-license-text-muted"}">${escapeHtml(attributionText || "None")}</span>
-            </div>
+            ${state.licenseEditing ? `
+              <div class="dtv-license-editor">
+                <label class="dtv-license-editor-field">
+                  <span class="dtv-license-editor-label">Licence</span>
+                  <select class="clp-field-input dtv-license-preset-select" ${metadataControlsDisabled ? "disabled" : ""}>
+                    ${LICENSE_PRESETS.map((preset) => `
+                      <option value="${escapeHtml(preset.id)}" ${preset.id === licensePresetId ? "selected" : ""}>
+                        ${escapeHtml(preset.label)}
+                      </option>
+                    `).join("")}
+                  </select>
+                </label>
+                <label class="dtv-license-editor-field">
+                  <span class="dtv-license-editor-label">Source</span>
+                  <input class="clp-field-input dtv-attribution-input" type="text" value="${escapeHtml(state.attributionDraft)}" placeholder="Source / credit" ${metadataControlsDisabled ? "disabled" : ""} />
+                </label>
+                <div class="dtv-license-editor-actions">
+                  <button class="dtv-license-icon-btn dtv-license-cancel-btn" type="button" aria-label="Cancel licensing edit" title="Cancel" ${metadataControlsDisabled ? "disabled" : ""}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
+                  </button>
+                  <button class="dtv-license-icon-btn dtv-license-save-btn" type="button" aria-label="Save dataset licensing" title="Save" ${metadataControlsDisabled ? "disabled" : ""}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5 13 4 4L19 7"></path></svg>
+                  </button>
+                </div>
+              </div>
+            ` : `
+              <div class="dtv-license-line">
+                ${licenseMarkup}
+                <span class="dtv-license-separator" aria-hidden="true">-</span>
+                ${sourceMarkup}
+              </div>
+              <button class="dtv-license-edit-btn" type="button" aria-label="Edit dataset licensing" title="Edit dataset licensing">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+              </button>
+            `}
           </div>
         </div>
         <div class="clp-preview-summary-row">
@@ -558,39 +647,64 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
             </div>
           </div>
         ` : `<div class="dtv-empty">${state.loading ? "Loading..." : "No rows to show yet."}</div>`}
-        ${filterColumn ? `
-          <div class="dtv-filter-picker-backdrop">
-            <div class="dtv-filter-picker" role="dialog" aria-modal="true" aria-label="Create filter">
-              <h3 class="upload-step-title">Create filter</h3>
-              <p class="upload-step-sub">
-                ${escapeHtml(filterColumn)}
-                ${state.isFullyLoaded ? "" : " · values from loaded rows so far"}
-              </p>
-              <label class="clp-field">
-                <span class="clp-field-label">Value</span>
-                <select class="clp-field-input dtv-filter-value-select" ${filterValues.length ? "" : "disabled"}>
-                  ${filterValues.length
-                    ? filterValues.map((value) => `
-                      <option value="${escapeHtml(value)}"${value === state.filterPickerValue ? " selected" : ""}>
-                        ${escapeHtml(value === "" ? "Empty value" : value)}
-                      </option>
-                    `).join("")
-                    : `<option value="">No values loaded</option>`}
-                </select>
-              </label>
-              <p class="upload-step-sub">This will add a persistent filter row with its own style rows.</p>
-              <div class="clp-actions">
-                <button class="clp-btn clp-btn-secondary" type="button" id="dtvFilterCancel">Cancel</button>
-                <button class="clp-btn clp-btn-primary" type="button" id="dtvFilterCreate" ${filterValues.length ? "" : "disabled"}>Create filter for ${escapeHtml(filterSelectionLabel)}</button>
-              </div>
-            </div>
-          </div>
-        ` : ""}
       </div>
     `;
 
     content.querySelector(".dtv-name-input")?.addEventListener("input", (event) => {
       state.editableLayerName = event.target.value;
+    });
+    content.querySelector(".dtv-dataset-name-input")?.addEventListener("input", (event) => {
+      state.datasetNameDraft = event.target.value;
+    });
+    content.querySelector(".dtv-dataset-name-input")?.addEventListener("blur", (event) => {
+      void commitDatasetRename(event.target.value);
+    });
+    content.querySelector(".dtv-dataset-name-input")?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.currentTarget.blur();
+      }
+      if (event.key === "Escape") {
+        const selectedDataset = getSelectedDataset();
+        state.datasetNameDraft = selectedDataset?.name ?? "";
+        event.currentTarget.value = state.datasetNameDraft;
+        event.currentTarget.blur();
+      }
+    });
+    content.querySelector(".dtv-license-edit-btn")?.addEventListener("click", () => {
+      syncMetadataDraft();
+      state.licenseEditing = true;
+      render();
+    });
+    content.querySelector(".dtv-license-preset-select")?.addEventListener("change", (event) => {
+      const preset = LICENSE_PRESETS.find((candidate) => candidate.id === (event.target.value ?? ""));
+      if (!preset || preset.id === "custom") {
+        return;
+      }
+      state.licenseDraft = preset.license ?? "";
+      state.licenseUrlDraft = preset.licenseUrl ?? "";
+    });
+    content.querySelector(".dtv-attribution-input")?.addEventListener("input", (event) => {
+      state.attributionDraft = event.target.value;
+    });
+    content.querySelector(".dtv-attribution-input")?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void commitDatasetMetadata();
+      }
+      if (event.key === "Escape") {
+        syncMetadataDraft();
+        state.licenseEditing = false;
+        render();
+      }
+    });
+    content.querySelector(".dtv-license-cancel-btn")?.addEventListener("click", () => {
+      syncMetadataDraft();
+      state.licenseEditing = false;
+      render();
+    });
+    content.querySelector(".dtv-license-save-btn")?.addEventListener("click", () => {
+      void commitDatasetMetadata();
     });
     content.querySelector(".dtv-dataset-select")?.addEventListener("change", (event) => {
       const nextDatasetId = event.target.value ?? "";
@@ -598,6 +712,8 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
         return;
       }
       state.selectedDatasetId = nextDatasetId;
+      syncDatasetNameDraft();
+      syncMetadataDraft();
       state.headers = [];
       state.allRows = [];
       state.rows = [];
@@ -613,7 +729,8 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       state.previewScrollTop = 0;
       state.columnWidths = {};
       state.headerAliases = {};
-      state.removedSourceHeaders = {};
+      state.licenseEditing = false;
+      state.metadataSaving = false;
       render();
       void loadLayer(state.layerId, nextDatasetId);
     });
@@ -634,37 +751,6 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       state.previewPageOffset += PREVIEW_PAGE_SIZE;
       syncPreviewPageRows();
       render();
-    });
-    content.querySelector("#dtvFilterCancel")?.addEventListener("click", () => {
-      closeFilterPicker();
-      render();
-    });
-    content.querySelector(".dtv-filter-picker-backdrop")?.addEventListener("click", (event) => {
-      if (event.target === event.currentTarget) {
-        closeFilterPicker();
-        render();
-      }
-    });
-    content.querySelector(".dtv-filter-value-select")?.addEventListener("change", (event) => {
-      state.filterPickerValue = event.target.value ?? "";
-    });
-    content.querySelector("#dtvFilterCreate")?.addEventListener("click", async () => {
-      try {
-        await onCreateFilterRequested?.({
-          layerId: state.layerId,
-          layerName: state.layerName,
-          columnName: getSourceFieldKeyForDisplay(state.filterPickerColumn),
-          columnLabel: state.filterPickerColumn,
-          value: state.filterPickerValue,
-          datasetId: state.selectedDatasetId,
-        });
-        closeFilterPicker();
-        render();
-      } catch (error) {
-        state.error = error?.message ?? "Failed to create filter.";
-        closeFilterPicker();
-        render();
-      }
     });
     if (headers.length) {
       bindPreviewTableInteractions(content, {
@@ -695,9 +781,6 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
           state.renamingColumn = "";
           state.renameDraft = "";
           render();
-        },
-        onColumnAction: (columnName) => {
-          openFilterPicker(columnName);
         },
         getScrollLeft: () => state.previewScrollLeft,
         setScrollLeft: (scrollLeft) => {
@@ -801,11 +884,17 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       if (!state.selectedDatasetId || !state.datasets.some((dataset) => dataset.id === state.selectedDatasetId)) {
         state.selectedDatasetId = state.datasets[0]?.id ?? "";
       }
+      syncDatasetNameDraft();
+      syncMetadataDraft();
       return state.datasets;
     } catch (error) {
       state.error = error?.message ?? "Failed to load datasets.";
       state.datasets = [];
       state.selectedDatasetId = "";
+      state.datasetNameDraft = "";
+      state.licenseDraft = "";
+      state.licenseUrlDraft = "";
+      state.attributionDraft = "";
       return [];
     } finally {
       state.datasetsLoading = false;
@@ -843,7 +932,6 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       state.columnWidths = {};
       state.headerAliases = {};
       state.fieldKeyByHeader = {};
-      state.removedSourceHeaders = {};
       state.selectedDatasetId = datasetId;
 
       const fields = Array.isArray(result?.fields) ? result.fields : [];
@@ -916,6 +1004,8 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       await loadDatasets(layerId);
       if (datasetId && state.datasets.some((dataset) => dataset.id === datasetId)) {
         state.selectedDatasetId = datasetId;
+        syncDatasetNameDraft();
+        syncMetadataDraft();
       }
       if (state.selectedDatasetId) {
         await loadLayer(layerId, state.selectedDatasetId);

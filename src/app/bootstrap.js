@@ -76,7 +76,39 @@ async function bootstrapApplication() {
     screenRuntime.reapplyFullOrder?.();
     rerenderLayerMenu();
   };
-
+  const renameDataset = async ({ datasetId, name }) => {
+    const { updateDatasetName } = await import("../sources/supabase/layer-loader.js");
+    const result = await updateDatasetName(datasetId, name);
+    supabaseLayerDataCache.forEach((cached) => {
+      if (!Array.isArray(cached?.datasets)) {
+        return;
+      }
+      cached.datasets = cached.datasets.map((dataset) => (
+        dataset?.id === datasetId ? { ...dataset, name: result.name } : dataset
+      ));
+    });
+    return result;
+  };
+  const updateDatasetMetadata = async ({ datasetId, license, licenseUrl, attribution }) => {
+    const { updateDatasetMetadata: saveDatasetMetadata } = await import("../sources/supabase/layer-loader.js");
+    const result = await saveDatasetMetadata(datasetId, { license, licenseUrl, attribution });
+    supabaseLayerDataCache.forEach((cached) => {
+      if (!Array.isArray(cached?.datasets)) {
+        return;
+      }
+      cached.datasets = cached.datasets.map((dataset) => (
+        dataset?.id === datasetId
+          ? {
+            ...dataset,
+            license: result.license,
+            license_url: result.license_url,
+            attribution: result.attribution,
+          }
+          : dataset
+      ));
+    });
+    return result;
+  };
   let addDataPanelPromise = null;
   let dataTablePanelPromise = null;
   let createLayerPanelPromise = null;
@@ -115,7 +147,8 @@ async function bootstrapApplication() {
             .then((addDataPanel) => addDataPanel.open(args))
             .catch((error) => console.error("Failed to open add data panel.", error));
         },
-        onCreateFilterRequested: createFilterFromTableSelection,
+        onRenameDataset: renameDataset,
+        onUpdateDatasetMetadata: updateDatasetMetadata,
       }));
     }
     return dataTablePanelPromise;

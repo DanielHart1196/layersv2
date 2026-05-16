@@ -21,10 +21,10 @@ const LICENSE_PRESETS = [
   { id: "none", label: "None", license: "", licenseUrl: "" },
   { id: "cc-by-4", label: "CC BY 4.0", license: "CC BY 4.0", licenseUrl: "https://creativecommons.org/licenses/by/4.0/" },
   { id: "cc-by-sa-4", label: "CC BY-SA 4.0", license: "CC BY-SA 4.0", licenseUrl: "https://creativecommons.org/licenses/by-sa/4.0/" },
-  { id: "cc0-1", label: "CC0 1.0", license: "CC0 1.0", licenseUrl: "https://creativecommons.org/publicdomain/zero/1.0/" },
+  { id: "cc0-1", label: "CC0 1.0 (Public Domain Dedication)", license: "CC0 1.0", licenseUrl: "https://creativecommons.org/publicdomain/zero/1.0/" },
   { id: "odc-by-1", label: "ODC-By 1.0", license: "ODC-By 1.0", licenseUrl: "https://opendatacommons.org/licenses/by/1-0/" },
   { id: "odbl-1", label: "ODbL 1.0", license: "ODbL 1.0", licenseUrl: "https://opendatacommons.org/licenses/odbl/1-0/" },
-  { id: "pddl-1", label: "PDDL 1.0", license: "PDDL 1.0", licenseUrl: "https://opendatacommons.org/licenses/pddl/1-0/" },
+  { id: "pddl-1", label: "PDDL 1.0 (Public Domain Data)", license: "PDDL 1.0", licenseUrl: "https://opendatacommons.org/licenses/pddl/1-0/" },
   { id: "custom", label: "Custom", license: null, licenseUrl: null },
 ];
 

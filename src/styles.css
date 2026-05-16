@@ -2666,7 +2666,7 @@ body.is-reordering-rows {
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(154, 210, 255, 0.5);
+  color: rgba(255, 255, 255, 0.54);
 }
 
 .dtv-preview {
@@ -2695,52 +2695,102 @@ body.is-reordering-rows {
   width: 100%;
 }
 
+.dtv-dataset-combo {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  min-width: 0;
+}
+
+.dtv-dataset-name-input {
+  min-width: 0;
+  height: 40px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  box-sizing: border-box;
+}
+
+.dtv-dataset-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-left: 0;
+  border-radius: 0 10px 10px 0;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.88);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.dtv-dataset-menu-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .dtv-dataset-select {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 40px;
+  height: 40px;
+  opacity: 0;
+  box-sizing: border-box;
   cursor: pointer;
 }
 
 .dtv-add-data-btn {
+  width: 40px;
   height: 40px;
-  border: 1px solid rgba(154, 210, 255, 0.16);
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.5);
   border-radius: 10px;
-  background: rgba(154, 210, 255, 0.08);
+  background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.88);
   font-size: 22px;
   line-height: 1;
+  box-sizing: border-box;
   cursor: pointer;
 }
 
 .dtv-add-data-btn:hover {
-  background: rgba(154, 210, 255, 0.16);
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .dtv-dataset-select option {
-  background: #122330;
+  background: #181818;
   color: rgba(255, 255, 255, 0.9);
 }
 
 .dtv-license-panel {
-  display: grid;
-  gap: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   min-width: 0;
-  padding: 10px 12px;
+  min-height: 40px;
+  padding: 8px 10px 8px 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.04);
 }
 
-.dtv-license-item {
-  display: grid;
-  gap: 2px;
+.dtv-license-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-}
-
-.dtv-license-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: rgba(154, 210, 255, 0.65);
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .dtv-license-link,
@@ -2749,57 +2799,149 @@ body.is-reordering-rows {
   color: rgba(255, 255, 255, 0.9);
   font-size: 13px;
   line-height: 1.35;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .dtv-license-link:hover {
   color: rgba(255, 255, 255, 1);
 }
 
+.dtv-license-separator {
+  flex: 0 0 auto;
+  color: rgba(255, 255, 255, 0.36);
+  font-size: 13px;
+  line-height: 1;
+}
+
 .dtv-license-text-muted {
   color: rgba(255, 255, 255, 0.45);
 }
 
-.dtv-empty {
-  padding: 24px 16px;
-  border: 1px solid rgba(154, 210, 255, 0.08);
-  border-radius: 10px;
-  color: rgba(154, 210, 255, 0.5);
-  text-align: center;
-}
-
-.dtv-filter-picker-backdrop {
-  position: fixed;
-  inset: 0;
-  display: flex;
+.dtv-license-edit-btn {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
-  background: rgba(0, 0, 0, 0.45);
-  z-index: 1100;
-}
-
-.dtv-filter-picker {
-  width: min(360px, calc(100vw - 40px));
-  padding: 18px;
-  border: 1px solid rgba(154, 210, 255, 0.14);
-  border-radius: 12px;
-  background: rgba(18, 35, 48, 0.96);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
-}
-
-.dtv-filter-value-select {
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.68);
   cursor: pointer;
 }
 
-.dtv-filter-value-select option {
-  background: #122330;
-  color: rgba(255, 255, 255, 0.9);
+.dtv-license-edit-btn:hover {
+  color: rgba(255, 255, 255, 0.94);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dtv-license-edit-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dtv-license-editor {
+  display: grid;
+  grid-template-columns: minmax(118px, 0.8fr) minmax(0, 1.2fr) auto;
+  align-items: end;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+.dtv-license-editor-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dtv-license-editor-label {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.dtv-license-preset-select,
+.dtv-attribution-input {
+  height: 32px;
+  padding: 6px 8px;
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(0, 0, 0, 0.16);
+  font-size: 12px;
+}
+
+.dtv-license-editor-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dtv-license-icon-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.76);
+  cursor: pointer;
+}
+
+.dtv-license-icon-btn:hover {
+  border-color: rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.dtv-license-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.dtv-license-icon-btn svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dtv-empty {
+  padding: 24px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  text-align: center;
 }
 
 @media (max-width: 800px) {
   .dtv-dataset-row {
     grid-template-columns: 1fr;
+  }
+
+  .dtv-license-editor {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .dtv-license-editor-actions {
+    justify-content: flex-end;
   }
 }
 

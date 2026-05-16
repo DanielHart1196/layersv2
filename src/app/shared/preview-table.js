@@ -22,6 +22,7 @@ export function buildPreviewTableMarkup({
   sortColumn = "",
   sortDirection = "",
   sortDisabled = false,
+  showColumnAction = true,
   columnActionText = "&#128465;",
   columnActionAriaPrefix = "Remove",
   columnActionTitle = "",
@@ -60,13 +61,13 @@ export function buildPreviewTableMarkup({
             <span class="clp-col-name">${escapeHtml(header)}</span>
           </button>
         `}
-        <button
+        ${showColumnAction ? `<button
           class="clp-col-remove"
           type="button"
           data-column="${escapeHtml(header)}"
           aria-label="${escapeHtml(`${columnActionAriaPrefix} ${header}`)}"
           ${columnActionTitle ? `title="${escapeHtml(`${columnActionTitle} ${header}`)}"` : ""}
-        >${columnActionText}</button>
+        >${columnActionText}</button>` : ""}
       </span>
     </th>
   `).join("");

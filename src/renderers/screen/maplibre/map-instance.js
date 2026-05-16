@@ -138,7 +138,9 @@ function createCompassOverlay(container) {
   button.setAttribute("aria-label", "Reset map to north");
   button.innerHTML = `
     <span class="map-compass-ring" aria-hidden="true">
-      <span class="map-compass-arrow"></span>
+      <svg class="map-compass-arrow" viewBox="0 0 18 20" focusable="false">
+        <polygon points="9 -0.2 13.5 7 4.5 7"></polygon>
+      </svg>
     </span>
     <span class="map-compass-label" aria-hidden="true">N</span>
   `;
@@ -1409,26 +1411,29 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
   const layerState = structuredClone(initialLayerState);
   const scaleOverlay = createScaleOverlay(container);
   const compassOverlay = createCompassOverlay(container);
-  let scaleHideTimeout = null;
+  let interactionOverlayHideTimeout = null;
 
-  function clearScaleHideTimeout() {
-    if (scaleHideTimeout) {
-      window.clearTimeout(scaleHideTimeout);
-      scaleHideTimeout = null;
+  function clearInteractionOverlayHideTimeout() {
+    if (interactionOverlayHideTimeout) {
+      window.clearTimeout(interactionOverlayHideTimeout);
+      interactionOverlayHideTimeout = null;
     }
   }
 
-  function showScaleOverlay() {
-    clearScaleHideTimeout();
+  function showInteractionOverlays() {
+    clearInteractionOverlayHideTimeout();
     updateScaleOverlay(map, scaleOverlay);
+    updateCompassOverlay(map, compassOverlay);
     scaleOverlay.classList.add("is-visible");
+    compassOverlay.classList.add("is-visible");
   }
 
-  function hideScaleOverlaySoon() {
-    clearScaleHideTimeout();
-    scaleHideTimeout = window.setTimeout(() => {
+  function hideInteractionOverlaysSoon() {
+    clearInteractionOverlayHideTimeout();
+    interactionOverlayHideTimeout = window.setTimeout(() => {
       scaleOverlay.classList.remove("is-visible");
-      scaleHideTimeout = null;
+      compassOverlay.classList.remove("is-visible");
+      interactionOverlayHideTimeout = null;
     }, SCALE_BAR_HIDE_DELAY_MS);
   }
 
@@ -1476,17 +1481,14 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     console.error("[MapLibre]", message, event?.error);
   });
   map.on("movestart", () => {
-    showScaleOverlay();
-    updateCompassOverlay(map, compassOverlay);
+    showInteractionOverlays();
   });
   map.on("move", () => {
-    showScaleOverlay();
-    updateCompassOverlay(map, compassOverlay);
+    showInteractionOverlays();
   });
   map.on("moveend", () => {
-    showScaleOverlay();
-    updateCompassOverlay(map, compassOverlay);
-    hideScaleOverlaySoon();
+    showInteractionOverlays();
+    hideInteractionOverlaysSoon();
   });
   map.on("resize", () => {
     if (scaleOverlay.classList.contains("is-visible")) {
@@ -1741,7 +1743,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
 
   return {
     destroy() {
-      clearScaleHideTimeout();
+      clearInteractionOverlayHideTimeout();
       scaleOverlay.remove();
       compassOverlay.remove();
       map.remove();

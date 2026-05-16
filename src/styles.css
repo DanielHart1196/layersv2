@@ -182,44 +182,44 @@ ul {
 .map-compass {
   position: absolute;
   right: 14px;
-  bottom: 18px;
+  bottom: 30px;
   z-index: 7;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
+  width: 24px;
+  height: 20px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 999px;
-  background: rgba(8, 18, 26, 0.68);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.82),
-    0 10px 24px rgba(0, 0, 0, 0.24);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   color: #ffffff;
   cursor: pointer;
-  opacity: 0.7;
+  opacity: 0;
+  pointer-events: none;
   transition:
-    opacity 160ms ease,
-    border-color 160ms ease,
-    background-color 160ms ease,
     transform 160ms ease;
 }
 
-.map-compass:hover,
-.map-compass:focus-visible,
-.map-compass.is-active {
+.map-compass.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.map-compass.is-visible:hover,
+.map-compass.is-visible:focus-visible,
+.map-compass.is-visible.is-active {
   opacity: 1;
 }
 
-.map-compass:hover,
-.map-compass:focus-visible {
-  border-color: rgba(154, 210, 255, 0.5);
-  background: rgba(13, 29, 40, 0.88);
+.map-compass.is-visible:hover,
+.map-compass.is-visible:focus-visible {
+  background: transparent;
 }
 
 .map-compass:focus-visible {
-  outline: 2px solid rgba(154, 210, 255, 0.42);
+  outline: 2px solid rgba(255, 255, 255, 0.48);
   outline-offset: 2px;
 }
 
@@ -232,49 +232,37 @@ ul {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 999px;
+  width: 18px;
+  height: 20px;
 }
 
 .map-compass-arrow {
-  position: relative;
-  width: 2px;
-  height: 16px;
-  border-radius: 999px;
-  background: linear-gradient(
-    to bottom,
-    rgba(120, 209, 172, 1) 0,
-    rgba(120, 209, 172, 1) 46%,
-    rgba(255, 255, 255, 0.3) 46%,
-    rgba(255, 255, 255, 0.3) 100%
-  );
-  transform-origin: 50% 50%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 18px;
+  height: 20px;
+  overflow: visible;
+  transform-origin: 50% 14px;
   transition: transform 160ms ease;
 }
 
-.map-compass-arrow::before {
-  content: "";
-  position: absolute;
-  top: -4px;
-  left: 50%;
-  width: 0;
-  height: 0;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-bottom: 8px solid var(--accent);
-  transform: translateX(-50%);
+.map-compass-arrow polygon {
+  fill: #ffffff;
+  stroke: rgba(0, 0, 0, 0.92);
+  stroke-linejoin: round;
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
 }
 
 .map-compass-label {
   position: absolute;
-  top: 5px;
+  top: 8px;
   left: 50%;
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 0.52rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0;
   line-height: 1;
   transform: translateX(-50%);
   text-shadow:
@@ -351,10 +339,6 @@ ul {
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.82);
   backdrop-filter: none;
   cursor: pointer;
-  transition:
-    opacity 120ms ease,
-    transform 180ms ease,
-    border-color 180ms ease;
   touch-action: manipulation;
 }
 
@@ -393,9 +377,6 @@ ul {
   cursor: pointer;
   touch-action: manipulation;
   opacity: 0;
-  transition:
-    opacity 120ms ease,
-    border-color 180ms ease;
 }
 
 #layerMenuScreenButton {
@@ -495,7 +476,6 @@ ul {
 .mobile-refresh-button:focus-visible,
 .layer-menu-button:hover,
 .layer-menu-button:focus-visible {
-  transform: translateY(-1px);
   border-color: rgba(255, 255, 255, 0.52);
 }
 
@@ -561,10 +541,6 @@ ul {
     1px 0 rgba(0, 0, 0, 0.9),
     1px 1px rgba(0, 0, 0, 0.9);
   transform-origin: 50% 50%;
-  transition:
-    transform 180ms ease,
-    opacity 140ms ease,
-    top 180ms ease;
 }
 
 .layer-menu-icon span:nth-child(1) {
@@ -667,11 +643,6 @@ ul {
   opacity: 0;
   pointer-events: none;
   overflow: hidden;
-  transition:
-    max-height 120ms ease,
-    padding 120ms ease,
-    border-top-width 120ms ease,
-    opacity 120ms ease;
 }
 
 .layer-menu.is-open .layer-menu-panel-footer {
@@ -696,10 +667,6 @@ ul {
   font-weight: 700;
   text-align: left;
   cursor: pointer;
-  transition:
-    border-top-color 120ms ease,
-    box-shadow 120ms ease,
-    color 120ms ease;
 }
 
 .layer-menu-row:first-child {
@@ -748,11 +715,6 @@ ul {
   opacity: 0;
   overflow: hidden;
   pointer-events: none;
-  transition:
-    max-height 120ms ease,
-    padding 120ms ease,
-    border-top-width 120ms ease,
-    opacity 120ms ease;
 }
 
 .layer-menu.is-open .layer-menu-panel-scroll .layer-menu-row-style {
@@ -849,9 +811,6 @@ ul {
   background: transparent;
   color: rgba(239, 247, 251, 0.92);
   cursor: pointer;
-  transition:
-    color 120ms ease,
-    opacity 120ms ease;
 }
 
 .layer-menu-row-action svg {
@@ -900,7 +859,6 @@ ul {
   touch-action: none;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 120ms ease;
 }
 
 .layer-menu-row-grabber span {
@@ -988,7 +946,6 @@ body.is-reordering-rows {
   opacity: 0.8;
   transform: rotate(0deg);
   transform-origin: 50% 50%;
-  transition: transform 160ms ease;
   text-shadow:
     -1px -1px rgba(0, 0, 0, 0.9),
     -1px 0 rgba(0, 0, 0, 0.9),
@@ -1150,9 +1107,6 @@ body.is-reordering-rows {
     1px -1px rgba(0, 0, 0, 0.9),
     1px 0 rgba(0, 0, 0, 0.9),
     1px 1px rgba(0, 0, 0, 0.9);
-  transition:
-    transform 180ms ease,
-    border-color 180ms ease;
 }
 
 .layer-menu-color-swatch-add.is-open {
@@ -1346,10 +1300,6 @@ body.is-reordering-rows {
     visibility: visible;
     opacity: 1;
     pointer-events: auto;
-    transition:
-      max-height 120ms ease,
-      padding 120ms ease,
-      opacity 120ms ease;
   }
 
   .layer-menu.is-open .layer-menu-panel-scroll .layer-menu-row-style {
@@ -2410,7 +2360,6 @@ body.is-reordering-rows {
   font-size: 11px;
   color: rgba(154, 210, 255, 0.3);
   padding: 5px 12px 5px calc(12px + var(--row-depth, 0) * 16px);
-  transition: color 120ms;
   letter-spacing: 0.02em;
 }
 
@@ -2431,7 +2380,6 @@ body.is-reordering-rows {
     1px -1px rgba(0, 0, 0, 0.9),
     1px 0 rgba(0, 0, 0, 0.9),
     1px 1px rgba(0, 0, 0, 0.9);
-  transition: color 120ms ease;
 }
 
 .layer-menu-add-row:hover {
@@ -2452,7 +2400,6 @@ body.is-reordering-rows {
   font-size: 1rem;
   line-height: 1;
   cursor: pointer;
-  transition: color 120ms;
 }
 
 .layer-menu-row-remove:hover {

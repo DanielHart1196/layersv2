@@ -5,7 +5,6 @@ import { createViewModel } from "../core/view-model.js";
 import { createShareStateUrl } from "../export/qr/state-url.js";
 import { enableLayerMenuControls } from "./layer-menu-controls.js";
 import { renderLayerMenuRows } from "./layer-menu-renderer.js";
-import { enableRefreshControls } from "./refresh-controls.js";
 import { createPrintRendererAdapter } from "../renderers/print/print-renderer.js";
 import { createScreenRendererAdapter } from "../renderers/screen/screen-renderer.js";
 import { createEditableRuntimeStore } from "../sources/editable/runtime-store.js";
@@ -26,11 +25,6 @@ async function bootstrapApplication() {
   const viewState = viewModel.getState();
   const screenRuntime = createDeferredScreenRuntime();
   let mapStartupError = null;
-  const debugOverlay = createStartupDebugOverlay({
-    getStartupError: () => mapStartupError,
-    getScreenRuntimeStatus: () => screenRuntime.getStatus(),
-  });
-  debugOverlay.update("bootstrap-start");
 
   let rerenderLayerMenu = () => {};
   const getLayerDatasets = async (layerId) => {
@@ -280,6 +274,10 @@ async function bootstrapApplication() {
     wrapper: document.getElementById("layerMenu"),
     button: document.getElementById("layerMenuButton"),
     panel: document.getElementById("layerMenuPanel"),
+    reloadMenu: document.getElementById("layerMenuReloadMenu"),
+    reloadButton: document.getElementById("layerMenuReloadButton"),
+    hardReloadButton: document.getElementById("layerMenuHardReloadButton"),
+    clearCacheReloadButton: document.getElementById("layerMenuClearCacheReloadButton"),
     earthButton: document.getElementById("layerMenuEarthButton"),
     appearanceButton: document.getElementById("layerMenuAppearanceButton"),
     screenButton: document.getElementById("layerMenuScreenButton"),
@@ -290,15 +288,6 @@ async function bootstrapApplication() {
       }
     },
   });
-  enableRefreshControls({
-    wrapper: document.getElementById("mobileRefresh"),
-    button: document.getElementById("mobileRefreshButton"),
-    menu: document.getElementById("mobileRefreshMenu"),
-    hardReloadButton: document.getElementById("hardReloadButton"),
-    clearCacheReloadButton: document.getElementById("clearCacheReloadButton"),
-    onBeforeMenuOpen: () => layerMenuControls?.close?.(),
-  });
-
   window.LayerV2 = {
     layers: layerModel.getDefinitions(),
     layerState: layerModel.getState(),
@@ -318,15 +307,11 @@ async function bootstrapApplication() {
     shareUrl: createShareStateUrl(viewState),
     rerenderLayerMenu,
   };
-  debugOverlay.update("window-layer-v2-ready");
 
   const startMapRuntime = async () => {
-    debugOverlay.update("map-start-requested");
     try {
       await waitForMaplibreGlobal();
-      debugOverlay.update("maplibre-global-ready");
       const { createMaplibreScreenRuntime } = await import("../renderers/screen/maplibre/runtime.js");
-      debugOverlay.update("runtime-module-loaded");
       const runtime = createMaplibreScreenRuntime({
         pmtilesManifest,
         viewState,
@@ -335,15 +320,12 @@ async function bootstrapApplication() {
         getOrderedChildRowIds: (parentId) => layerModel.getOrderedChildRowIds(parentId),
       });
       runtime.mount(document.getElementById("mapStage"));
-      debugOverlay.update("runtime-mounted");
       screenRuntime.setRuntime(runtime);
       if (window.LayerV2) {
         window.LayerV2.screenRuntime = runtime.getStatus();
         window.LayerV2.mapStartupError = null;
       }
-      debugOverlay.update("runtime-live");
       runtime.whenStyleReady(() => {
-        debugOverlay.update("style-ready");
         window.setTimeout(() => {
           void reattachPersistedSupabaseLayers(layerModel, screenRuntime);
         }, 0);
@@ -357,7 +339,6 @@ async function bootstrapApplication() {
         window.LayerV2.mapStartupError = String(error?.message ?? error);
         window.LayerV2.screenRuntime = screenRuntime.getStatus();
       }
-      debugOverlay.update("map-start-failed");
     }
   };
 
@@ -368,151 +349,14 @@ async function bootstrapApplication() {
       if (window.LayerV2?.sources) {
         window.LayerV2.sources.editable = editableStore.getCollections();
       }
-      debugOverlay.update("editable-store-ready");
     })
     .catch((error) => {
       console.warn("Failed to initialize editable store.", error);
-      debugOverlay.update("editable-store-failed");
     });
 
   return {
     editableStore,
     screenRuntime,
-  };
-}
-
-function createStartupDebugOverlay({
-  getStartupError = () => null,
-  getScreenRuntimeStatus = () => null,
-} = {}) {
-  const token = "map-debug-2026-05-15-a";
-  const overlay = document.createElement("section");
-  overlay.className = "startup-debug is-collapsed";
-  overlay.setAttribute("aria-label", "Map startup debug");
-
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "startup-debug-toggle";
-  button.setAttribute("aria-expanded", "false");
-  button.textContent = "Debug";
-
-  const body = document.createElement("div");
-  body.className = "startup-debug-body";
-  overlay.append(button, body);
-  document.body.append(overlay);
-
-  let collapsed = true;
-  let lastPhase = "init";
-  let renderCount = 0;
-  let intervalId = null;
-
-  const fmtRect = (rect) => `${Math.round(rect.width)}x${Math.round(rect.height)}@${Math.round(rect.left)},${Math.round(rect.top)}`;
-  const bool = (value) => (value ? "yes" : "no");
-  const compactCss = (value) => String(value || "none").replace(/\s+/g, "");
-  const shortShadow = (value) => {
-    const text = String(value || "none");
-    return text === "none" ? "none" : compactCss(text).slice(0, 42);
-  };
-  const describeMenuElement = (element) => {
-    if (!element) {
-      return "missing";
-    }
-    const style = window.getComputedStyle(element);
-    const rect = element.getBoundingClientRect?.();
-    const rectText = rect ? fmtRect(rect) : "missing";
-    return [
-      compactCss(style.backgroundColor),
-      `b:${style.borderTopWidth}/${compactCss(style.borderTopColor)}`,
-      `r:${style.borderRadius}`,
-      `s:${shortShadow(style.boxShadow)}`,
-      rectText,
-    ].join(" ");
-  };
-  const getElementName = (element) => {
-    if (!element) {
-      return "missing";
-    }
-    if (element.id) {
-      return `#${element.id}`;
-    }
-    if (typeof element.className === "string" && element.className) {
-      return `.${element.className.split(/\s+/).filter(Boolean).slice(0, 2).join(".")}`;
-    }
-    return element.tagName?.toLowerCase?.() ?? "unknown";
-  };
-
-  function readState() {
-    const stage = document.getElementById("mapStage");
-    const stageRect = stage?.getBoundingClientRect?.();
-    const canvas = stage?.querySelector?.("canvas");
-    const canvasRect = canvas?.getBoundingClientRect?.();
-    const status = getScreenRuntimeStatus?.() ?? null;
-    const startupError = getStartupError?.() ?? window.LayerV2?.mapStartupError ?? null;
-    const errorText = startupError ? String(startupError?.message ?? startupError) : "none";
-    const topElement = document.elementFromPoint?.(16, 16);
-    const menuPanel = document.getElementById("layerMenuPanel");
-    const menuScroll = document.getElementById("layerMenuPanelScroll");
-    const menuFooter = document.getElementById("layerMenuPanelFooter");
-    const menuGroup = menuPanel?.querySelector?.(".layer-menu-row-group");
-    const menuRow = menuPanel?.querySelector?.(".layer-menu-row");
-    const menuChild = menuPanel?.querySelector?.(".layer-menu-row-children");
-    const menuRect = menuPanel?.getBoundingClientRect?.();
-    const menuHit = menuRect
-      ? document.elementFromPoint?.(menuRect.left + Math.min(20, menuRect.width / 2), menuRect.top + Math.min(20, menuRect.height / 2))
-      : null;
-
-    return [
-      ["token", token],
-      ["phase", lastPhase],
-      ["maplibre", bool(Boolean(window.maplibregl))],
-      ["startup", document.body.dataset.mapStartup ?? status?.startupMode ?? "none"],
-      ["live", bool(Boolean(status?.liveMap))],
-      ["zoom", Number.isFinite(status?.zoom) ? status.zoom.toFixed(2) : "none"],
-      ["error", errorText.slice(0, 92)],
-      ["stage", stageRect ? fmtRect(stageRect) : "missing"],
-      ["canvas", canvasRect ? fmtRect(canvasRect) : "missing"],
-      ["canvases", String(stage?.querySelectorAll?.("canvas")?.length ?? 0)],
-      ["top-left", topElement?.id || topElement?.className || topElement?.tagName || "unknown"],
-      ["menu-token", "menu-bg-debug-2026-05-16-a"],
-      ["menu-open", bool(Boolean(menuPanel?.classList?.contains("is-open")))],
-      ["menu-hit", getElementName(menuHit)],
-      ["menu-panel", describeMenuElement(menuPanel)],
-      ["menu-scroll", describeMenuElement(menuScroll)],
-      ["menu-footer", describeMenuElement(menuFooter)],
-      ["menu-group", describeMenuElement(menuGroup)],
-      ["menu-row", describeMenuElement(menuRow)],
-      ["menu-child", describeMenuElement(menuChild)],
-    ];
-  }
-
-  function render() {
-    renderCount += 1;
-    body.innerHTML = readState().map(([label, value]) => `
-      <div class="startup-debug-row">
-        <span>${label}</span>
-        <strong>${value}</strong>
-      </div>
-    `).join("");
-    if (renderCount > 60 && intervalId != null) {
-      window.clearInterval(intervalId);
-      intervalId = null;
-    }
-  }
-
-  button.addEventListener("click", () => {
-    collapsed = !collapsed;
-    overlay.classList.toggle("is-collapsed", collapsed);
-    button.setAttribute("aria-expanded", String(!collapsed));
-  });
-
-  intervalId = window.setInterval(render, 500);
-  render();
-
-  return {
-    update(phase) {
-      lastPhase = phase;
-      render();
-    },
   };
 }
 

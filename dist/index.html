@@ -13,8 +13,8 @@
     <!-- Preconnect to CDN -->
     <link rel="preconnect" href="https://unpkg.com" crossorigin>
 
-    <script type="module" crossorigin src="./assets/main-CLlBZEy4.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/main-7bnFM7m1.css">
+    <script type="module" crossorigin src="./assets/main-BsLMHV1Z.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/main-Tch5Gsal.css">
   </head>
   <body>
     <main class="app-shell">
@@ -22,26 +22,6 @@
         <div class="map-stage" id="mapStage">
         </div>
       </section>
-      <div class="mobile-refresh" id="mobileRefresh">
-        <button
-          class="mobile-refresh-button"
-          id="mobileRefreshButton"
-          type="button"
-          aria-label="Refresh page"
-          aria-expanded="false"
-          aria-controls="mobileRefreshMenu"
-        >
-          <span class="mobile-refresh-icon" aria-hidden="true"></span>
-        </button>
-        <div class="mobile-refresh-menu" id="mobileRefreshMenu" role="menu" aria-label="Reload options">
-          <button class="mobile-refresh-menu-item" id="hardReloadButton" type="button" role="menuitem">
-            Hard reload
-          </button>
-          <button class="mobile-refresh-menu-item" id="clearCacheReloadButton" type="button" role="menuitem">
-            Clear cache reload
-          </button>
-        </div>
-      </div>
       <div class="layer-menu" id="layerMenu">
         <div class="layer-menu-appearance" id="layerMenuAppearance">
           <button
@@ -56,7 +36,7 @@
             class="layer-menu-appearance-button"
             id="layerMenuScreenButton"
             type="button"
-            aria-label="Show screen background row"
+            aria-label="Show settings rows"
             aria-expanded="false"
             aria-controls="layerMenuPanel"
           ></button>
@@ -69,12 +49,30 @@
           aria-expanded="false"
           aria-controls="layerMenuPanel"
         >
-          <span class="layer-menu-icon" aria-hidden="true">
-            <span></span>
-            <span></span>
-            <span></span>
-          </span>
+          <svg class="layer-menu-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path class="layer-menu-icon-border" d="M4 8h16"></path>
+            <path class="layer-menu-icon-border" d="M4 16h16"></path>
+            <path class="layer-menu-icon-mark" d="M4 8h16"></path>
+            <path class="layer-menu-icon-mark" d="M4 16h16"></path>
+          </svg>
+          <svg class="layer-menu-button-close-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path class="layer-menu-icon-border" d="M18 6 6 18"></path>
+            <path class="layer-menu-icon-border" d="m6 6 12 12"></path>
+            <path class="layer-menu-icon-mark" d="M18 6 6 18"></path>
+            <path class="layer-menu-icon-mark" d="m6 6 12 12"></path>
+          </svg>
         </button>
+        <div class="layer-menu-reload-menu" id="layerMenuReloadMenu" role="menu" aria-label="Reload options">
+          <button class="layer-menu-reload-menu-item" id="layerMenuReloadButton" type="button" role="menuitem">
+            Reload
+          </button>
+          <button class="layer-menu-reload-menu-item" id="layerMenuHardReloadButton" type="button" role="menuitem">
+            Hard reload
+          </button>
+          <button class="layer-menu-reload-menu-item" id="layerMenuClearCacheReloadButton" type="button" role="menuitem">
+            Clear cache reload
+          </button>
+        </div>
         <div class="layer-menu-panel" id="layerMenuPanel" role="menu" aria-label="Layer groups">
           <div class="layer-menu-panel-scroll" id="layerMenuPanelScroll">
             <button class="layer-menu-row" id="earthRow" type="button" role="menuitem">Earth</button>

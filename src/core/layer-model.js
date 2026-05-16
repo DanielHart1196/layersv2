@@ -146,7 +146,7 @@ function createLayerModel() {
         rowRecord.rowVisible = true;
       }
       if (typeof rowRecord.expanded !== "boolean") {
-        rowRecord.expanded = false;
+        rowRecord.expanded = Boolean(row.defaultExpanded);
       }
       if (typeof row.runtimeTargetId === "string" && typeof rowRecord.runtimeTargetId !== "string") {
         rowRecord.runtimeTargetId = row.runtimeTargetId;
@@ -388,8 +388,8 @@ function createLayerModel() {
 
   function loadLegacyAppearanceDefaults() {
     return {
-      settings: readLegacyAppearanceState(LEGACY_SETTINGS_BACKGROUND_STORAGE_KEY, { color: "#000000", opacity: 85 }),
-      screen: readLegacyAppearanceState(LEGACY_SCREEN_BACKGROUND_STORAGE_KEY, { color: "#000000", opacity: 100 }),
+      settings: readLegacyAppearanceState(LEGACY_SETTINGS_BACKGROUND_STORAGE_KEY, { color: "#f8f8f8", opacity: 100 }),
+      screen: readLegacyAppearanceState(LEGACY_SCREEN_BACKGROUND_STORAGE_KEY, { color: "#f8f8f8", opacity: 100 }),
     };
   }
 
@@ -406,8 +406,8 @@ function createLayerModel() {
     }
     if (!layerState[APPEARANCE_STATE_KEY][kind] || typeof layerState[APPEARANCE_STATE_KEY][kind] !== "object") {
       layerState[APPEARANCE_STATE_KEY][kind] = kind === "screen"
-        ? { color: "#000000", opacity: 100 }
-        : { color: "#FFFFFF", opacity: 0 };
+        ? { color: "#f8f8f8", opacity: 100 }
+        : { color: "#f8f8f8", opacity: 100 };
     }
 
     if (key === "color") {

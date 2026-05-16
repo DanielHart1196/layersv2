@@ -23,11 +23,11 @@ const SETTINGS_BACKGROUND_PRESETS = ["#000000", "#FFFFFF", "#d94b4b", "#e58a2b",
 const SETTINGS_BACKGROUND_STORAGE_KEY = "layerv2.colors.settingsBackground";
 const SCREEN_BACKGROUND_STORAGE_KEY = "layerv2.colors.screenBackground";
 const DEFAULT_SETTINGS_BACKGROUND = {
-  color: "#000000",
-  opacity: 85,
+  color: "#f8f8f8",
+  opacity: 100,
 };
 const DEFAULT_SCREEN_BACKGROUND = {
-  color: "#000000",
+  color: "#f8f8f8",
   opacity: 100,
 };
 const LAYER_MENU_VIEWPORT_MARGIN = 12;
@@ -42,7 +42,16 @@ const EARTH_GRATICULE_PATHS = Object.freeze([
 ]);
 const CHEVRON_DOWN_ICON = `
   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-    <path d="M6 9l6 6 6-6"></path>
+    <path class="layer-menu-icon-border" d="M6 9l6 6 6-6"></path>
+    <path class="layer-menu-icon-mark" d="M6 9l6 6 6-6"></path>
+  </svg>
+`;
+const CLOSE_ICON = `
+  <svg class="layer-menu-close-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path class="layer-menu-icon-border" d="M7 7l10 10"></path>
+    <path class="layer-menu-icon-border" d="M17 7L7 17"></path>
+    <path class="layer-menu-icon-mark" d="M7 7l10 10"></path>
+    <path class="layer-menu-icon-mark" d="M17 7L7 17"></path>
   </svg>
 `;
 
@@ -181,7 +190,7 @@ function applySettingsBackground(panel, appearanceButton, state) {
   const layerMenuButton = document.getElementById("layerMenuButton");
   const refreshButton = document.getElementById("mobileRefreshButton");
   if (layerMenuButton) {
-    layerMenuButton.style.backgroundColor = fillColor;
+    layerMenuButton.style.backgroundColor = "";
   }
   if (refreshButton) {
     refreshButton.style.backgroundColor = fillColor;
@@ -558,7 +567,9 @@ function createRowHeader(labelText, valueText = null, className, options = {}) {
   let chevron = null;
   if (options.chevron) {
     chevron = options.chevronButton ? document.createElement("button") : document.createElement("span");
-    chevron.className = options.chevronButton ? "layer-menu-row-chevron-button" : "layer-menu-row-chevron";
+    chevron.className = options.chevronButton
+      ? "layer-menu-row-icon-button layer-menu-row-chevron-button"
+      : "layer-menu-row-chevron";
     if (options.chevronButton) {
       chevron.type = "button";
     } else {
@@ -567,7 +578,9 @@ function createRowHeader(labelText, valueText = null, className, options = {}) {
     if (options.chevronLabel) {
       chevron.setAttribute("aria-label", options.chevronLabel);
     }
-    if (options.chevronText) {
+    if (options.chevronIconHtml) {
+      chevron.innerHTML = options.chevronIconHtml;
+    } else if (options.chevronText) {
       chevron.textContent = options.chevronText;
     } else {
       chevron.innerHTML = CHEVRON_DOWN_ICON;
@@ -689,6 +702,12 @@ function getLayerLegendSpec(definition, state, layerModel, appearanceState) {
   const childRows = layerModel.getChildRows(definition.id);
   if (!runtimeLayerId || !childRows.length) {
     return null;
+  }
+
+  if (definition.id === "settings") {
+    return {
+      kind: "gear",
+    };
   }
 
   if (definition.id === "earth") {
@@ -941,6 +960,28 @@ function createLayerLegendSwatch(spec) {
     outline.setAttribute("stroke", "#000000");
     outline.setAttribute("stroke-width", "1");
     svg.append(outline);
+    swatch.append(svg);
+    return swatch;
+  }
+
+  if (spec.kind === "gear") {
+    const svg = createSvgElement("svg");
+    svg.classList.add("layer-menu-row-legend-svg", "layer-menu-row-gear-svg");
+    svg.setAttribute("viewBox", "0 0 26 26");
+    svg.setAttribute("width", "28");
+    svg.setAttribute("height", "28");
+    svg.setAttribute("focusable", "false");
+    svg.setAttribute("aria-hidden", "true");
+
+    const gear = createSvgElement("path");
+    gear.setAttribute("d", "M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.340.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872zM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.858z");
+    gear.setAttribute("fill", "#b8b8b8");
+    gear.setAttribute("fill-rule", "evenodd");
+    gear.setAttribute("stroke", "#000000");
+    gear.setAttribute("stroke-width", "0.55");
+    gear.setAttribute("stroke-linejoin", "round");
+    gear.setAttribute("transform", "translate(5 5)");
+    svg.append(gear);
     swatch.append(svg);
     return swatch;
   }
@@ -1200,29 +1241,31 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
   const expandStateKey = definition.layerId ?? definition.id;
   const hasChildren = Array.isArray(definition.rows) && definition.rows.length > 0;
   const isEarthParent = definition.id === "earth";
+  const isSettingsParent = definition.id === "settings";
+  const isTopPanelParent = isEarthParent || isSettingsParent;
   const hasStyleChildren = childRows.some(isStyleChildRow);
-  const hasVisibility = Boolean(definition.layerId);
-  const isExpanded = isEarthParent || Boolean(state?.expanded);
+  const hasVisibility = Boolean(definition.layerId) && !isSettingsParent;
+  const isExpanded = isTopPanelParent || Boolean(state?.expanded);
   const hasLayerActions = Boolean(definition?.layerRef);
-  const isExpandable = isEarthParent
+  const isExpandable = isTopPanelParent
     || hasStyleChildren
     || hasLayerActions
-    || (hasChildren && !isEarthParent);
-  const isReorderable = Boolean(parentId && definition.layerId && definition.id !== "ocean" && definition.id !== "earth" && !isExpanded);
+    || (hasChildren && !isTopPanelParent);
+  const isReorderable = Boolean(parentId && definition.layerId && definition.id !== "ocean" && !isTopPanelParent && !isExpanded);
   const { header, label, chevron, grabber } = createRowHeader(definition.label, null, "layer-menu-row-header layer-menu-row-layer-header", {
     grabber: isReorderable,
     labelButton: hasVisibility || !isExpandable,
     chevron: isExpandable,
     chevronButton: isExpandable,
     chevronExpanded: isExpanded,
-    chevronText: isEarthParent ? "×" : null,
-    chevronLabel: isEarthParent
-      ? "Close earth rows"
+    chevronIconHtml: isTopPanelParent ? CLOSE_ICON : null,
+    chevronLabel: isTopPanelParent
+      ? `Close ${definition.label.toLowerCase()} rows`
       : isExpanded
         ? "Collapse layer"
         : "Expand layer",
   });
-  if (hasLayerActions && isExpanded && !isEarthParent) {
+  if (hasLayerActions && isExpanded && !isTopPanelParent) {
     const actions = document.createElement("div");
     actions.className = "layer-menu-row-actions";
     actions.append(
@@ -1275,8 +1318,8 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
 
   chevron?.addEventListener("click", (event) => {
     event.stopPropagation();
-    if (isEarthParent) {
-      document.getElementById("layerMenuEarthButton")?.click();
+    if (isTopPanelParent) {
+      document.getElementById(isEarthParent ? "layerMenuEarthButton" : "layerMenuScreenButton")?.click();
       return;
     }
     onToggleExpanded(expandStateKey);
@@ -1296,15 +1339,15 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
       ) {
         return;
       }
-      if (isEarthParent) {
-        document.getElementById("layerMenuEarthButton")?.click();
+      if (isTopPanelParent) {
+        document.getElementById(isEarthParent ? "layerMenuEarthButton" : "layerMenuScreenButton")?.click();
         return;
       }
       onToggleExpanded(expandStateKey);
     });
   }
 
-  if (!isEarthParent && hasStyleChildren && legend) {
+  if (!isTopPanelParent && hasStyleChildren && legend) {
     wireLayerLegendToggle(legend, state, expandStateKey, onToggleExpanded, { enabled: true });
   }
 
@@ -1658,11 +1701,15 @@ function createColorRow(row, value, onInput, requestRender, { variant = "row" } 
   return wrapper;
 }
 
-function createStyleRow(row, value, onInput, requestRender, { parentId, reorderApi, isVisible, isExpanded, isExpandable = true, inheritedHidden = false, onToggleVisible, onToggleExpanded } = {}) {
-  const isAppearanceRow = row?.colorTarget?.kind === "settings-background"
+function isAppearanceTargetRow(row) {
+  return row?.colorTarget?.kind === "settings-background"
     || row?.opacityTarget?.kind === "settings-background"
     || row?.colorTarget?.kind === "screen-background"
     || row?.opacityTarget?.kind === "screen-background";
+}
+
+function createStyleRow(row, value, onInput, requestRender, { parentId, reorderApi, isVisible, isExpanded, isExpandable = true, inheritedHidden = false, onToggleVisible, onToggleExpanded } = {}) {
+  const isAppearanceRow = isAppearanceTargetRow(row) && !parentId;
   const wrapper = document.createElement("div");
   wrapper.className = `layer-menu-row layer-menu-row-style`;
   wrapper.classList.toggle("is-hidden", inheritedHidden || !isVisible);
@@ -1952,9 +1999,9 @@ function createAddButton(depth, parentId, onAddRow) {
 function makeRemoveButton(row, parentId, onRemoveRow) {
   const btn = document.createElement("button");
   btn.type = "button";
-  btn.className = "layer-menu-row-remove";
+  btn.className = "layer-menu-row-icon-button layer-menu-row-remove";
   btn.setAttribute("aria-label", "Remove row");
-  btn.textContent = "×";
+  btn.innerHTML = CLOSE_ICON;
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
     onRemoveRow(row.id, parentId, row);
@@ -1976,19 +2023,25 @@ function reapplyRowTargets(row, layerModel, onRowInput) {
   }
 }
 
+function applyRowDepth(element, depth) {
+  element.style.setProperty("--row-depth", String(depth));
+  element.classList.toggle("layer-menu-row-depth-even", depth % 2 === 0);
+  element.classList.toggle("layer-menu-row-depth-odd", depth % 2 !== 0);
+}
+
 function createRowGroup(row, depth, parentId, children = null) {
   const group = document.createElement("div");
   group.className = "layer-menu-row-group";
   group.classList.toggle("is-hidden", row?.classList?.contains("is-hidden"));
   group.dataset.groupRowId = row?.dataset?.rowId ?? "";
   group.dataset.groupParentId = parentId ?? "";
-  group.style.setProperty("--row-depth", String(depth));
+  applyRowDepth(group, depth);
   group.append(row);
 
   if (children?.childNodes?.length) {
     const childContainer = document.createElement("div");
     childContainer.className = "layer-menu-row-children";
-    childContainer.style.setProperty("--row-depth", String(depth + 1));
+    applyRowDepth(childContainer, depth + 1);
     childContainer.append(children);
     group.append(childContainer);
   }
@@ -2015,7 +2068,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       const slider = createSliderRow(row, getDisplayRowValue(row, layerModel, appearanceState), (nextValue) => {
         onRowInput(row, nextValue);
       }, { inheritedHidden });
-      slider.style.setProperty("--row-depth", String(depth));
+      applyRowDepth(slider, depth);
       fragment.append(slider);
       return;
     }
@@ -2024,7 +2077,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       const colorRow = createColorRow(row, getDisplayRowValue(row, layerModel, appearanceState), (nextValue) => {
         onRowInput(row, nextValue);
       }, onToggleExpanded.__requestRender);
-      colorRow.style.setProperty("--row-depth", String(depth));
+      applyRowDepth(colorRow, depth);
       fragment.append(colorRow);
       return;
     }
@@ -2037,7 +2090,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       const el = document.createElement("div");
       el.className = "layer-menu-row layer-menu-row-meta";
       el.classList.toggle("is-hidden", inheritedHidden || !isVisible);
-      el.style.setProperty("--row-depth", String(depth));
+      applyRowDepth(el, depth);
 
       const header = document.createElement("div");
       header.className = "layer-menu-row-header";
@@ -2084,10 +2137,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
 
     if (row.type === "fill" || row.type === "line" || row.type === "point") {
       const isVisible = layerModel.isRowVisible(row.id);
-      const isAppearanceRow = row?.colorTarget?.kind === "settings-background"
-        || row?.opacityTarget?.kind === "settings-background"
-        || row?.colorTarget?.kind === "screen-background"
-        || row?.opacityTarget?.kind === "screen-background";
+      const isAppearanceRow = isAppearanceTargetRow(row) && !parentId;
       const isExpanded = isAppearanceRow || layerModel.isExpanded(row.id);
       const styleRow = createStyleRow(
         row,
@@ -2112,7 +2162,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
           },
         },
       );
-      styleRow.style.setProperty("--row-depth", String(depth));
+      applyRowDepth(styleRow, depth);
       let childFragment = null;
       if (!isAppearanceRow && isExpanded) {
         childFragment = createStyleControlRows(
@@ -2141,13 +2191,14 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       onDataAction,
       onFilterAction,
     );
-    layerRow.style.setProperty("--row-depth", String(depth));
+    applyRowDepth(layerRow, depth);
 
     let childFragment = null;
     if (row.type === "layer" && row.layerId) {
       const nextInheritedHidden = inheritedHidden || (state[rowStateKey]?.visible === false);
       const isEarthParent = row.id === "earth";
-      const visibleChildRows = isEarthParent
+      const isSettingsParent = row.id === "settings";
+      const visibleChildRows = isEarthParent || isSettingsParent
         ? orderedChildRows
         : orderedChildRows.filter((childRow) => !isStyleChildRow(childRow) || state[rowStateKey]?.expanded);
       if (visibleChildRows.length) {
@@ -2158,34 +2209,6 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
   });
 
   return fragment;
-}
-
-function collapseExpandedLayersOnHoverLeave(layerModel) {
-  let changed = false;
-
-  function walkRows(parentId) {
-    const rows = parentId === layerModel.getRootParentId()
-      ? layerModel.getChildRows(parentId)
-      : layerModel.getChildRows(parentId);
-
-    rows.forEach((row) => {
-      if (!row || row.type !== "layer") {
-        return;
-      }
-
-      if (layerModel.isExpanded(row.id)) {
-        layerModel.toggleExpanded(row.id);
-        changed = true;
-      }
-
-      if (row.id) {
-        walkRows(row.id);
-      }
-    });
-  }
-
-  walkRows(layerModel.getRootParentId());
-  return changed;
 }
 
 function syncOpenLayerMenuLayout(panel) {
@@ -2227,12 +2250,11 @@ function renderLayerMenuRows({
 
   function render(nextUiState = null) {
     const appearanceState = layerModel.getAppearanceState();
-    const appearanceButton = document.getElementById("layerMenuAppearanceButton");
-    const screenButton = document.getElementById("layerMenuScreenButton");
+    const settingsButton = document.getElementById("layerMenuScreenButton");
     const scrollRegion = document.getElementById("layerMenuPanelScroll") ?? panel;
     const footerRegion = document.getElementById("layerMenuPanelFooter");
-    applySettingsBackground(panel, appearanceButton, appearanceState.settings);
-    applyScreenBackground(appearanceState.screen, screenButton);
+    applySettingsBackground(panel, settingsButton, appearanceState.settings);
+    applyScreenBackground(appearanceState.screen, null);
 
     if (nextUiState?.rowId) {
       transientColorRowState.set(nextUiState.rowId, nextUiState);
@@ -2328,7 +2350,7 @@ function renderLayerMenuRows({
         const nextState = layerModel.setAppearanceValue("settings", target.key, nextValue)
           ?? layerModel.getAppearanceState().settings
           ?? { ...DEFAULT_SETTINGS_BACKGROUND };
-        applySettingsBackground(panel, appearanceButton, nextState);
+        applySettingsBackground(panel, settingsButton, nextState);
         return;
       }
 
@@ -2361,7 +2383,7 @@ function renderLayerMenuRows({
           state: parentState,
           expandStateKey: getRowStateKey(parentRow),
           onToggleExpanded,
-          toggleEnabled: parentRow.id !== "earth" && layerModel.getChildRows(parentRow.id).some(isStyleChildRow),
+          toggleEnabled: parentRow.id !== "earth" && parentRow.id !== "settings" && layerModel.getChildRows(parentRow.id).some(isStyleChildRow),
         },
       );
 
@@ -2404,10 +2426,11 @@ function renderLayerMenuRows({
       );
     }
 
-    if (panel.dataset.screenRowOpen === "true") {
+    if (panel.dataset.settingsRowOpen === "true") {
+      const settingsRow = layerModel.getRowById("settings");
       scrollRegion.append(
         buildRows(
-          [createAppearanceFillRow({ id: "screen-background-fill", label: "Background", kind: "screen-background" })],
+          settingsRow ? [settingsRow] : [],
           layerModel,
           onToggleExpanded,
           onToggleVisibility,
@@ -2420,26 +2443,7 @@ function renderLayerMenuRows({
           null,
           null,
           onDataAction ?? null,
-        ),
-      );
-    }
-
-    if (panel.dataset.appearanceRowOpen === "true") {
-      scrollRegion.append(
-        buildRows(
-          [createAppearanceFillRow({ id: "settings-background-fill", label: "Settings", kind: "settings-background" })],
-          layerModel,
-          onToggleExpanded,
-          onToggleVisibility,
-          reorderApi,
-          onPanelRowInput,
-          appearanceState,
-          0,
-          null,
-          false,
-          null,
-          null,
-          onDataAction ?? null,
+          onFilterAction ?? null,
         ),
       );
     }
@@ -2471,16 +2475,6 @@ function renderLayerMenuRows({
       syncOpenLayerMenuLayout(panel);
     });
   }
-
-  const hoverCapableMediaQuery = window.matchMedia("(hover: hover) and (pointer: fine)");
-  panel.addEventListener("pointerleave", () => {
-    if (!hoverCapableMediaQuery.matches) {
-      return;
-    }
-    if (collapseExpandedLayersOnHoverLeave(layerModel)) {
-      render();
-    }
-  });
 
   render();
   return render;

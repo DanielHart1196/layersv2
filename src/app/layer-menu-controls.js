@@ -5,6 +5,37 @@ function setLayerMenuOpen(wrapper, panel, button, isOpen) {
   button?.setAttribute("aria-label", isOpen ? "Close layer menu" : "Open layer menu");
 }
 
+function setReloadMenuOpen(wrapper, menu, isOpen) {
+  wrapper?.classList.toggle("is-reload-menu-open", isOpen);
+  menu?.classList.toggle("is-open", isOpen);
+}
+
+async function reloadWithCacheClear() {
+  try {
+    if ("caches" in window) {
+      const cacheKeys = await caches.keys();
+      await Promise.all(cacheKeys.map((cacheKey) => caches.delete(cacheKey)));
+    }
+
+    window.localStorage?.clear();
+    window.sessionStorage?.clear();
+  } catch (_error) {
+    // Still continue with URL-busted reload if storage/cache clearing fails.
+  }
+
+  const reloadUrl = new URL(window.location.href);
+  reloadUrl.searchParams.set("_reload", String(Date.now()));
+  window.location.replace(reloadUrl.toString());
+}
+
+const TOOLBAR_CLOSE_ICON = `
+  <svg class="layer-menu-toolbar-close-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path class="layer-menu-icon-border" d="M7 7l10 10"></path>
+    <path class="layer-menu-icon-border" d="M17 7L7 17"></path>
+    <path class="layer-menu-icon-mark" d="M7 7l10 10"></path>
+    <path class="layer-menu-icon-mark" d="M17 7L7 17"></path>
+  </svg>
+`;
 const LAYER_MENU_POSITION_STORAGE_KEY = "layerv2.layerMenuPosition.v1";
 const LAYER_MENU_DEFAULT_TOP = 72;
 const LAYER_MENU_DEFAULT_RIGHT = 14;
@@ -17,6 +48,14 @@ const TOOLBAR_EARTH_PATHS = Object.freeze([
 
 function createSvgElement(tagName) {
   return document.createElementNS("http://www.w3.org/2000/svg", tagName);
+}
+
+function createToolbarCloseMark() {
+  const closeMark = document.createElement("span");
+  closeMark.className = "layer-menu-toolbar-close";
+  closeMark.setAttribute("aria-hidden", "true");
+  closeMark.innerHTML = TOOLBAR_CLOSE_ICON;
+  return closeMark;
 }
 
 function createToolbarGlobeSvg() {
@@ -270,27 +309,19 @@ function setAppearanceRowOpen(panel, button, datasetKey, isOpen, labels) {
     if (button.classList.contains("layer-menu-earth-button")) {
       const globe = createToolbarGlobeSvg();
       if (isOpen) {
-        const closeMark = document.createElement("span");
-        closeMark.className = "layer-menu-toolbar-close";
-        closeMark.setAttribute("aria-hidden", "true");
-        closeMark.textContent = "×";
-        button.replaceChildren(globe, closeMark);
+        button.replaceChildren(globe, createToolbarCloseMark());
       } else {
         button.replaceChildren(globe);
       }
     } else if (button.id === "layerMenuScreenButton") {
       const gear = createToolbarGearSvg();
       if (isOpen) {
-        const closeMark = document.createElement("span");
-        closeMark.className = "layer-menu-toolbar-close";
-        closeMark.setAttribute("aria-hidden", "true");
-        closeMark.textContent = "×";
-        button.replaceChildren(gear, closeMark);
+        button.replaceChildren(gear, createToolbarCloseMark());
       } else {
         button.replaceChildren(gear);
       }
     } else if (isOpen) {
-      button.textContent = "×";
+      button.replaceChildren(createToolbarCloseMark());
     } else {
       button.innerHTML = button.dataset.closedHtml ?? "";
     }
@@ -314,6 +345,10 @@ function enableLayerMenuControls({
   wrapper,
   button,
   panel,
+  reloadMenu,
+  reloadButton,
+  hardReloadButton,
+  clearCacheReloadButton,
   earthButton,
   appearanceButton,
   screenButton,
@@ -346,20 +381,20 @@ function enableLayerMenuControls({
     },
     {
       button: screenButton,
-      datasetKey: "screenRowOpen",
+      datasetKey: "settingsRowOpen",
       labels: {
-        open: "Hide screen background row",
-        closed: "Show screen background row",
+        open: "Hide settings rows",
+        closed: "Show settings rows",
       },
     },
-    {
+    ...(appearanceButton ? [{
       button: appearanceButton,
       datasetKey: "appearanceRowOpen",
       labels: {
         open: "Hide settings background row",
         closed: "Show settings background row",
       },
-    },
+    }] : []),
   ];
 
   appearanceControls.forEach(({ button: controlButton, datasetKey, labels }) => {
@@ -382,11 +417,77 @@ function enableLayerMenuControls({
 
   let activeDrag = null;
   let suppressNextButtonClick = false;
+  let reloadPressTimer = null;
+  let reloadLongPressTriggered = false;
+  let reloadPressGesture = null;
+  let ignoreNextReloadContextMenu = false;
+
+  const clearReloadPressTimer = () => {
+    if (reloadPressTimer == null) {
+      return;
+    }
+    window.clearTimeout(reloadPressTimer);
+    reloadPressTimer = null;
+  };
+
+  const closeReloadMenu = () => {
+    setReloadMenuOpen(wrapper, reloadMenu, false);
+  };
+
+  const openReloadMenu = ({ fromLongPress = false } = {}) => {
+    clearReloadPressTimer();
+    if (fromLongPress) {
+      reloadLongPressTriggered = true;
+      ignoreNextReloadContextMenu = true;
+      suppressNextButtonClick = true;
+    }
+    closeLayerMenu();
+    setReloadMenuOpen(wrapper, reloadMenu, true);
+  };
+
+  const stopReloadPressGesture = () => {
+    clearReloadPressTimer();
+    window.removeEventListener("pointermove", handleReloadPressMove);
+    window.removeEventListener("pointerup", stopReloadPressGesture);
+    window.removeEventListener("pointercancel", stopReloadPressGesture);
+    reloadPressGesture = null;
+  };
+
+  function handleReloadPressMove(event) {
+    if (!reloadPressGesture || event.pointerId !== reloadPressGesture.pointerId) {
+      return;
+    }
+    const deltaX = event.clientX - reloadPressGesture.startX;
+    const deltaY = event.clientY - reloadPressGesture.startY;
+    if (Math.hypot(deltaX, deltaY) >= DRAG_THRESHOLD_PX) {
+      stopReloadPressGesture();
+    }
+  }
+
+  const startReloadPressGesture = (event) => {
+    if (!reloadMenu || event.pointerType === "mouse") {
+      return;
+    }
+    closeReloadMenu();
+    clearReloadPressTimer();
+    reloadLongPressTriggered = false;
+    reloadPressGesture = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
+    reloadPressTimer = window.setTimeout(() => openReloadMenu({ fromLongPress: true }), 500);
+    window.addEventListener("pointermove", handleReloadPressMove, { passive: true });
+    window.addEventListener("pointerup", stopReloadPressGesture);
+    window.addEventListener("pointercancel", stopReloadPressGesture);
+  };
 
   wrapper.addEventListener("pointerdown", stopPropagation);
   wrapper.addEventListener("click", stopPropagation);
   panel.addEventListener("pointerdown", stopPropagation);
   panel.addEventListener("click", stopPropagation);
+  reloadMenu?.addEventListener("pointerdown", (event) => event.stopPropagation());
+  reloadMenu?.addEventListener("click", (event) => event.stopPropagation());
 
   appearanceControls.forEach(({ button: controlButton, datasetKey, labels }) => {
     controlButton?.addEventListener("pointerdown", stopPropagation);
@@ -409,8 +510,10 @@ function enableLayerMenuControls({
 
   function closeLayerMenu() {
     if (!panel.classList.contains("is-open")) {
+      closeReloadMenu();
       return;
     }
+    closeReloadMenu();
     closeAppearanceRows(panel, appearanceControls, rerenderLayerMenu);
     setLayerMenuOpen(wrapper, panel, button, false);
     if (!draggableMenuMediaQuery.matches) {
@@ -467,6 +570,7 @@ function enableLayerMenuControls({
 
   button.addEventListener("pointerdown", (event) => {
     event.stopPropagation();
+    startReloadPressGesture(event);
     if (!draggableMenuMediaQuery.matches) {
       return;
     }
@@ -489,10 +593,16 @@ function enableLayerMenuControls({
 
   button.addEventListener("click", (event) => {
     event.stopPropagation();
+    if (reloadLongPressTriggered) {
+      event.preventDefault();
+      reloadLongPressTriggered = false;
+      return;
+    }
     if (suppressNextButtonClick) {
       suppressNextButtonClick = false;
       return;
     }
+    closeReloadMenu();
     syncLayerMenuMaxHeight(wrapper, panel, button);
     const nextOpen = !panel.classList.contains("is-open");
     if (!nextOpen) {
@@ -510,8 +620,38 @@ function enableLayerMenuControls({
     }
   });
 
+  button.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    if (!reloadMenu) {
+      return;
+    }
+    if (ignoreNextReloadContextMenu) {
+      ignoreNextReloadContextMenu = false;
+      openReloadMenu();
+      return;
+    }
+    openReloadMenu();
+  });
+
+  reloadButton?.addEventListener("click", () => {
+    closeReloadMenu();
+    window.location.reload();
+  });
+
+  hardReloadButton?.addEventListener("click", () => {
+    closeReloadMenu();
+    const reloadUrl = new URL(window.location.href);
+    reloadUrl.searchParams.set("_reload", String(Date.now()));
+    window.location.replace(reloadUrl.toString());
+  });
+
+  clearCacheReloadButton?.addEventListener("click", async () => {
+    closeReloadMenu();
+    await reloadWithCacheClear();
+  });
+
   document.addEventListener("click", (event) => {
-    if (draggableMenuMediaQuery.matches || !panel.classList.contains("is-open")) {
+    if (!reloadMenu?.classList?.contains("is-open") && (draggableMenuMediaQuery.matches || !panel.classList.contains("is-open"))) {
       return;
     }
 
@@ -524,20 +664,35 @@ function enableLayerMenuControls({
       return;
     }
 
+    closeReloadMenu();
     closeLayerMenu();
   });
 
+  document.addEventListener("pointerdown", (event) => {
+    if (!reloadMenu?.classList?.contains("is-open")) {
+      return;
+    }
+
+    const target = event.target;
+    if (!(target instanceof Node)) {
+      return;
+    }
+
+    if (reloadMenu.contains(target) || button.contains(target)) {
+      return;
+    }
+
+    closeReloadMenu();
+  });
+
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && reloadMenu?.classList?.contains("is-open")) {
+      closeReloadMenu();
+      return;
+    }
     if (event.key === "Escape" && panel.classList.contains("is-open")) {
       closeLayerMenu();
     }
-  });
-
-  wrapper.addEventListener("pointerleave", () => {
-    if (!draggableMenuMediaQuery.matches) {
-      return;
-    }
-    closeAppearanceRows(panel, appearanceControls, rerenderLayerMenu);
   });
 
   window.addEventListener("resize", () => {

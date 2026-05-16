@@ -29,7 +29,7 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-function normalizeHexColor(value, fallback = "#122330") {
+function normalizeHexColor(value, fallback = "#f8f8f8") {
   const normalized = String(value ?? "").trim().replace(/^#*/, "");
   if (/^[0-9a-fA-F]{6}$/.test(normalized)) {
     return `#${normalized.toUpperCase()}`;
@@ -47,14 +47,14 @@ function hexToRgb(hex) {
 }
 
 function getSettingsBackground(state) {
-  const color = normalizeHexColor(state?.color, "#122330");
+  const color = normalizeHexColor(state?.color, "#f8f8f8");
   const rgb = hexToRgb(color);
   const alpha = Math.max(0, Math.min(100, Number(state?.opacity) || 0)) / 100;
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
 }
 
 function getPreviewHeaderBackground(state) {
-  const color = normalizeHexColor(state?.color, "#122330");
+  const color = normalizeHexColor(state?.color, "#f8f8f8");
   const rgb = hexToRgb(color);
   const darkenFactor = 0.45;
   return `rgba(${Math.round(rgb.r * darkenFactor)}, ${Math.round(rgb.g * darkenFactor)}, ${Math.round(rgb.b * darkenFactor)}, 0.96)`;

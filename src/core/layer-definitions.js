@@ -4,6 +4,7 @@ const ROOT_PARENT_ID = "__root__";
 const ROOT_ROW_IDS = ["earth"];
 const SHARED_COLOR_STORAGE_KEY = "layerv2.colors.customColors";
 const SHARED_COLOR_PRESETS = ["#000000", "#FFFFFF", "#d94b4b", "#e58a2b", "#e5c84a", "#5b8c5a", "#4b6ed9", "#8c5bd6"];
+const SETTINGS_BACKGROUND_STORAGE_KEY = "layerv2.colors.settingsBackground";
 
 function normalizeGeometryTypes(geometryTypes = [], geometryType = "mixed") {
   const source = Array.isArray(geometryTypes) && geometryTypes.length
@@ -219,6 +220,35 @@ function localLayerToRow(entry) {
 
 function createLayerDefinitions() {
   return {
+    settings: createDataRow({
+      id: "settings",
+      label: "Settings",
+      layerId: "settings",
+      defaultExpanded: true,
+      rows: [
+        {
+          id: "settings-background-fill",
+          type: "fill",
+          label: "Background",
+          storageKey: SETTINGS_BACKGROUND_STORAGE_KEY,
+          presets: SHARED_COLOR_PRESETS,
+          min: 0,
+          max: 100,
+          step: 1,
+          valueFormat: "percent",
+          defaultExpanded: true,
+          initialState: {},
+          colorTarget: {
+            kind: "settings-background",
+            key: "color",
+          },
+          opacityTarget: {
+            kind: "settings-background",
+            key: "opacity",
+          },
+        },
+      ],
+    }),
     earth: createDataRow({
       id: "earth",
       label: "Earth",

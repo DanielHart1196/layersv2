@@ -408,6 +408,38 @@ function createStartupDebugOverlay({
 
   const fmtRect = (rect) => `${Math.round(rect.width)}x${Math.round(rect.height)}@${Math.round(rect.left)},${Math.round(rect.top)}`;
   const bool = (value) => (value ? "yes" : "no");
+  const compactCss = (value) => String(value || "none").replace(/\s+/g, "");
+  const shortShadow = (value) => {
+    const text = String(value || "none");
+    return text === "none" ? "none" : compactCss(text).slice(0, 42);
+  };
+  const describeMenuElement = (element) => {
+    if (!element) {
+      return "missing";
+    }
+    const style = window.getComputedStyle(element);
+    const rect = element.getBoundingClientRect?.();
+    const rectText = rect ? fmtRect(rect) : "missing";
+    return [
+      compactCss(style.backgroundColor),
+      `b:${style.borderTopWidth}/${compactCss(style.borderTopColor)}`,
+      `r:${style.borderRadius}`,
+      `s:${shortShadow(style.boxShadow)}`,
+      rectText,
+    ].join(" ");
+  };
+  const getElementName = (element) => {
+    if (!element) {
+      return "missing";
+    }
+    if (element.id) {
+      return `#${element.id}`;
+    }
+    if (typeof element.className === "string" && element.className) {
+      return `.${element.className.split(/\s+/).filter(Boolean).slice(0, 2).join(".")}`;
+    }
+    return element.tagName?.toLowerCase?.() ?? "unknown";
+  };
 
   function readState() {
     const stage = document.getElementById("mapStage");
@@ -418,6 +450,16 @@ function createStartupDebugOverlay({
     const startupError = getStartupError?.() ?? window.LayerV2?.mapStartupError ?? null;
     const errorText = startupError ? String(startupError?.message ?? startupError) : "none";
     const topElement = document.elementFromPoint?.(16, 16);
+    const menuPanel = document.getElementById("layerMenuPanel");
+    const menuScroll = document.getElementById("layerMenuPanelScroll");
+    const menuFooter = document.getElementById("layerMenuPanelFooter");
+    const menuGroup = menuPanel?.querySelector?.(".layer-menu-row-group");
+    const menuRow = menuPanel?.querySelector?.(".layer-menu-row");
+    const menuChild = menuPanel?.querySelector?.(".layer-menu-row-children");
+    const menuRect = menuPanel?.getBoundingClientRect?.();
+    const menuHit = menuRect
+      ? document.elementFromPoint?.(menuRect.left + Math.min(20, menuRect.width / 2), menuRect.top + Math.min(20, menuRect.height / 2))
+      : null;
 
     return [
       ["token", token],
@@ -431,6 +473,15 @@ function createStartupDebugOverlay({
       ["canvas", canvasRect ? fmtRect(canvasRect) : "missing"],
       ["canvases", String(stage?.querySelectorAll?.("canvas")?.length ?? 0)],
       ["top-left", topElement?.id || topElement?.className || topElement?.tagName || "unknown"],
+      ["menu-token", "menu-bg-debug-2026-05-16-a"],
+      ["menu-open", bool(Boolean(menuPanel?.classList?.contains("is-open")))],
+      ["menu-hit", getElementName(menuHit)],
+      ["menu-panel", describeMenuElement(menuPanel)],
+      ["menu-scroll", describeMenuElement(menuScroll)],
+      ["menu-footer", describeMenuElement(menuFooter)],
+      ["menu-group", describeMenuElement(menuGroup)],
+      ["menu-row", describeMenuElement(menuRow)],
+      ["menu-child", describeMenuElement(menuChild)],
     ];
   }
 

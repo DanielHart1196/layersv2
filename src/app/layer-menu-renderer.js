@@ -175,7 +175,7 @@ function applySettingsBackground(panel, appearanceButton, state) {
 
   const alpha = (Number(state?.opacity) || 0) / 100;
   const fillColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
-  panel.style.backgroundColor = fillColor;
+  panel.style.backgroundColor = "transparent";
   appearanceButton?.style.setProperty("--swatch-color", normalizeHexColor(state?.color) ?? DEFAULT_SETTINGS_BACKGROUND.color);
 
   const layerMenuButton = document.getElementById("layerMenuButton");
@@ -1261,9 +1261,11 @@ function createSliderBlock({ label, row, value, onInput, className = "" }) {
   return block;
 }
 
-function createColorRow(row, value, onInput, requestRender) {
+function createColorRow(row, value, onInput, requestRender, { variant = "row" } = {}) {
   const wrapper = document.createElement("div");
-  wrapper.className = "layer-menu-row layer-menu-row-color";
+  wrapper.className = variant === "block"
+    ? "layer-menu-color-block"
+    : "layer-menu-row layer-menu-row-color";
   let currentHex = normalizeHexColor(value) ?? "#8C6A2A";
   let currentHsv = rgbToHsv(hexToRgb(currentHex));
   const pressRuntime = createColorPressRuntime();
@@ -1639,8 +1641,7 @@ function createStyleRow(row, value, onInput, requestRender, { parentId, reorderA
     const colorRow = createColorRow({
       id: `${row.id}-color`, label: isAppearanceRow ? row.label : "Color", type: "color",
       storageKey: row.storageKey, presets: row.presets,
-    }, colorValue, (nextColor) => onInput(withRowContext(row.colorTarget), nextColor), requestRender);
-    colorRow.classList.add("layer-menu-row-fill-color");
+    }, colorValue, (nextColor) => onInput(withRowContext(row.colorTarget), nextColor), requestRender, { variant: "block" });
     const opacityBlock = createSliderBlock({
       label: "Opacity", row, value: opacityValue,
       onInput: (v) => onInput(withRowContext(row.opacityTarget), v),
@@ -1660,8 +1661,7 @@ function createStyleRow(row, value, onInput, requestRender, { parentId, reorderA
     const colorRow = createColorRow({
       id: `${row.id}-color`, label: "Color", type: "color",
       storageKey: row.storageKey, presets: row.presets,
-    }, colorValue, (nextColor) => onInput(withRowContext(row.colorTarget), nextColor), requestRender);
-    colorRow.classList.add("layer-menu-row-line-color");
+    }, colorValue, (nextColor) => onInput(withRowContext(row.colorTarget), nextColor), requestRender, { variant: "block" });
     const opacityBlock = createSliderBlock({
       label: "Opacity", row: { ...row, valueFormat: "percent" },
       value: opacityValue, onInput: (v) => onInput(withRowContext(row.opacityTarget), v),
@@ -1681,8 +1681,7 @@ function createStyleRow(row, value, onInput, requestRender, { parentId, reorderA
     const colorRow = createColorRow({
       id: `${row.id}-color`, label: "Color", type: "color",
       storageKey: row.storageKey, presets: row.presets,
-    }, colorValue, (nextColor) => onInput(withRowContext(row.colorTarget), nextColor), requestRender);
-    colorRow.classList.add("layer-menu-row-point-color");
+    }, colorValue, (nextColor) => onInput(withRowContext(row.colorTarget), nextColor), requestRender, { variant: "block" });
     const opacityBlock = createSliderBlock({
       label: "Opacity", row: { ...row, valueFormat: "percent" },
       value: opacityValue, onInput: (v) => onInput(withRowContext(row.opacityTarget), v),
@@ -1777,6 +1776,25 @@ function reapplyRowTargets(row, layerModel, onRowInput) {
   if (row.runtimeTargetId) {
     onRowInput({ target: { kind: "runtime-style", runtimeTargetId: row.runtimeTargetId, key: "visible" } }, layerModel.isRowVisible(row.id));
   }
+}
+
+function createRowGroup(row, depth, parentId, children = null) {
+  const group = document.createElement("div");
+  group.className = "layer-menu-row-group";
+  group.dataset.groupRowId = row?.dataset?.rowId ?? "";
+  group.dataset.groupParentId = parentId ?? "";
+  group.style.setProperty("--row-depth", String(depth));
+  group.append(row);
+
+  if (children?.childNodes?.length) {
+    const childContainer = document.createElement("div");
+    childContainer.className = "layer-menu-row-children";
+    childContainer.style.setProperty("--row-depth", String(depth + 1));
+    childContainer.append(children);
+    group.append(childContainer);
+  }
+
+  return group;
 }
 
 function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth = 0, parentId = null, inheritedHidden = false, onAddRow = null, onRemoveRow = null, onDataAction = null, onFilterAction = null) {
@@ -1912,8 +1930,8 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       onFilterAction,
     );
     layerRow.style.setProperty("--row-depth", String(depth));
-    fragment.append(layerRow);
 
+    let childFragment = null;
     if (row.type === "layer" && row.layerId) {
       const nextInheritedHidden = inheritedHidden || (state[rowStateKey]?.visible === false);
       const isEarthParent = row.id === "earth";
@@ -1921,9 +1939,10 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
         ? orderedChildRows
         : orderedChildRows.filter((childRow) => !isStyleChildRow(childRow) || state[rowStateKey]?.expanded);
       if (visibleChildRows.length) {
-        fragment.append(buildRows(visibleChildRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden, onAddRow, onRemoveRow, onDataAction, onFilterAction));
+        childFragment = buildRows(visibleChildRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden, onAddRow, onRemoveRow, onDataAction, onFilterAction);
       }
     }
+    fragment.append(createRowGroup(layerRow, depth, parentId, childFragment));
   });
 
   return fragment;

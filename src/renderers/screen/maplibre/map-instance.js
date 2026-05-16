@@ -1768,7 +1768,15 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       if (layerState[parentId]) {
         layerState[parentId].rowOrder = orderedLayerIds;
       }
-      applyFullLayerOrder(map, layerState, getOrderedChildRowIds);
+      const getLiveOrderedChildRowIds = (candidateParentId) => {
+        if (candidateParentId === parentId) {
+          return orderedLayerIds;
+        }
+        return typeof getOrderedChildRowIds === "function"
+          ? getOrderedChildRowIds(candidateParentId)
+          : null;
+      };
+      applyFullLayerOrder(map, layerState, getLiveOrderedChildRowIds);
     },
     reapplyFullOrder() {
       applyFullLayerOrder(map, layerState, getOrderedChildRowIds);

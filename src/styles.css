@@ -693,6 +693,10 @@ ul {
   box-shadow: none;
 }
 
+.layer-menu.is-open .layer-menu-row-group > .layer-menu-row-style {
+  border-width: 0;
+}
+
 .layer-menu-row-children {
   display: grid;
   gap: 6px;
@@ -713,6 +717,11 @@ ul {
 
 .layer-menu-row-children .layer-menu-row-group > .layer-menu-row {
   background: transparent;
+}
+
+.layer-menu-row-group.is-hidden > .layer-menu-row-children {
+  opacity: 0.4;
+  pointer-events: none;
 }
 
 .layer-menu-row-layer {
@@ -914,8 +923,15 @@ ul {
     1px 1px rgba(0, 0, 0, 0.9);
 }
 
-.layer-menu-row.is-dragging {
-  opacity: 0.5;
+.layer-menu-row.is-dragging,
+.layer-menu-row-group.is-dragging {
+  position: relative;
+  z-index: 100;
+}
+
+.layer-menu-row.is-dragging .layer-menu-row-grabber,
+.layer-menu-row-group.is-dragging .layer-menu-row-grabber {
+  cursor: grabbing;
 }
 
 body.is-reordering-rows {

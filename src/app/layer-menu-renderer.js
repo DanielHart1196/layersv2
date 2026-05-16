@@ -227,30 +227,129 @@ function getRenderedLayerRow(parentId, rowId) {
   return document.querySelector(`.layer-menu-row[data-parent-id="${parentId}"][data-row-id="${rowId}"]`);
 }
 
-function getAdjacentPreviewOrder(rowIds, rowId, direction) {
-  if (!Array.isArray(rowIds) || !rowIds.length || !rowId) {
+function getReorderItemForRow(row) {
+  if (!row) {
     return null;
   }
 
-  const sourceIndex = rowIds.indexOf(rowId);
-  if (sourceIndex === -1) {
+  const group = row.parentElement?.classList?.contains("layer-menu-row-group")
+    ? row.parentElement
+    : null;
+  return group ?? row;
+}
+
+function getReorderRowFromItem(item) {
+  if (!item) {
     return null;
   }
 
-  const targetIndex = direction === "up" ? sourceIndex - 1 : sourceIndex + 1;
-  if (targetIndex < 0 || targetIndex >= rowIds.length) {
-    return null;
+  if (item.classList?.contains("layer-menu-row")) {
+    return item;
   }
 
-  const nextOrder = rowIds.slice();
-  const [moved] = nextOrder.splice(sourceIndex, 1);
-  nextOrder.splice(targetIndex, 0, moved);
-  return nextOrder;
+  return item.querySelector?.(":scope > .layer-menu-row[data-row-id][data-parent-id]") ?? null;
+}
+
+function getRenderedReorderItem(parentId, rowId) {
+  return getReorderItemForRow(getRenderedLayerRow(parentId, rowId));
+}
+
+function getAdjacentReorderItem(item, direction, parentId) {
+  let sibling = direction === "up"
+    ? item?.previousElementSibling
+    : item?.nextElementSibling;
+
+  while (sibling) {
+    const row = getReorderRowFromItem(sibling);
+    if (row?.dataset?.parentId === parentId && row.dataset.rowId) {
+      return sibling;
+    }
+    sibling = direction === "up"
+      ? sibling.previousElementSibling
+      : sibling.nextElementSibling;
+  }
+
+  return null;
 }
 
 function setupPointerReorderGrabber(grabber, parentId, rowId, reorderApi) {
   let activeGesture = null;
   let suppressClick = false;
+  let holdTimer = null;
+
+  function clearHoldTimer() {
+    if (holdTimer !== null) {
+      window.clearTimeout(holdTimer);
+      holdTimer = null;
+    }
+  }
+
+  function resolveGestureElements(gesture) {
+    const row = getRenderedLayerRow(parentId, rowId);
+    const item = getReorderItemForRow(row);
+    gesture.rowElement = row;
+    gesture.itemElement = item;
+    return Boolean(row && item);
+  }
+
+  function activateGesture(gesture) {
+    if (gesture.dragging) {
+      return true;
+    }
+
+    reorderApi.collapseRow(rowId);
+    if (!resolveGestureElements(gesture)) {
+      return false;
+    }
+
+    const rect = gesture.itemElement.getBoundingClientRect();
+    gesture.dragging = true;
+    gesture.anchorTop = rect.top;
+    gesture.anchorBottom = rect.bottom;
+    gesture.currentOrder = reorderApi.getOrderedRowIds(parentId);
+    gesture.itemElement.classList.add("is-dragging");
+    gesture.rowElement.classList.add("is-dragging");
+    gesture.itemElement.style.touchAction = "none";
+    document.body.classList.add("is-reordering-rows");
+    navigator.vibrate?.(10);
+    return true;
+  }
+
+  function moveDraggedItem(gesture, direction) {
+    const item = gesture.itemElement;
+    const adjacent = getAdjacentReorderItem(item, direction, parentId);
+    const container = item?.parentElement;
+    if (!item || !adjacent || !container) {
+      return null;
+    }
+
+    const adjacentHeight = adjacent.getBoundingClientRect().height;
+    const previousParent = item.parentElement;
+    const previousSibling = item.previousElementSibling;
+
+    if (direction === "up") {
+      container.insertBefore(item, adjacent);
+    } else {
+      container.insertBefore(item, adjacent.nextElementSibling);
+    }
+
+    const positionChanged =
+      item.parentElement !== previousParent ||
+      item.previousElementSibling !== previousSibling;
+
+    if (!positionChanged) {
+      return null;
+    }
+
+    if (direction === "up") {
+      gesture.startY -= adjacentHeight;
+    } else {
+      gesture.startY += adjacentHeight;
+    }
+    gesture.currentOrder = reorderApi.getOrderedRowIds(parentId);
+    reorderApi.onLiveOrder?.(parentId, gesture.currentOrder);
+    return { adjacentHeight };
+  }
 
   function cleanupGesture(commit = false) {
     const gesture = activeGesture;
@@ -258,6 +357,7 @@ function setupPointerReorderGrabber(grabber, parentId, rowId, reorderApi) {
       return;
     }
 
+    clearHoldTimer();
     window.removeEventListener("pointermove", handlePointerMove);
     window.removeEventListener("pointerup", handlePointerUp);
     window.removeEventListener("pointercancel", handlePointerCancel);
@@ -265,12 +365,18 @@ function setupPointerReorderGrabber(grabber, parentId, rowId, reorderApi) {
     document.body.classList.remove("is-reordering-rows");
 
     if (gesture.dragging) {
-      if (commit && Array.isArray(gesture.previewOrder)) {
-        reorderApi.onCommit(parentId, gesture.previewOrder);
+      if (gesture.itemElement) {
+        gesture.itemElement.style.transform = "";
+        gesture.itemElement.style.touchAction = "";
+        gesture.itemElement.classList.remove("is-dragging");
+      }
+      gesture.rowElement?.classList?.remove("is-dragging");
+
+      if (commit && Array.isArray(gesture.currentOrder)) {
+        reorderApi.onCommit(parentId, gesture.currentOrder);
       } else {
         reorderApi.onCancel(parentId);
       }
-      reorderApi.setDragging(null);
     }
 
     if (typeof grabber.releasePointerCapture === "function") {
@@ -303,62 +409,50 @@ function setupPointerReorderGrabber(grabber, parentId, rowId, reorderApi) {
     const deltaY = event.clientY - gesture.startY;
 
     if (!gesture.dragging) {
+      if (event.pointerType === "touch") {
+        if (Math.hypot(deltaX, deltaY) > 8) {
+          cleanupGesture(false);
+        }
+        return;
+      }
+
       if (Math.hypot(deltaX, deltaY) < 6) {
         return;
       }
 
-      gesture.dragging = true;
-      document.body.classList.add("is-reordering-rows");
-      reorderApi.setDragging({ parentId, rowId });
+      if (!activateGesture(gesture)) {
+        cleanupGesture(false);
+        return;
+      }
     }
 
     event.preventDefault();
 
-    const renderedRow = getRenderedLayerRow(parentId, rowId);
-    if (!renderedRow) {
+    if (!gesture.itemElement) {
       return;
     }
 
-    const rect = renderedRow.getBoundingClientRect();
     let direction = null;
-    if (event.clientY < rect.top) {
+    if (event.clientY < gesture.anchorTop) {
       direction = "up";
-    } else if (event.clientY > rect.bottom) {
+    } else if (event.clientY > gesture.anchorBottom) {
       direction = "down";
     }
 
-    if (!direction) {
-      return;
+    if (direction) {
+      const result = moveDraggedItem(gesture, direction);
+      if (result) {
+        if (direction === "up") {
+          gesture.anchorTop -= result.adjacentHeight;
+          gesture.anchorBottom -= result.adjacentHeight;
+        } else {
+          gesture.anchorTop += result.adjacentHeight;
+          gesture.anchorBottom += result.adjacentHeight;
+        }
+      }
     }
 
-    const nextPreviewOrder = getAdjacentPreviewOrder(
-      reorderApi.getOrderedRowIds(parentId),
-      rowId,
-      direction,
-    );
-
-    if (!nextPreviewOrder) {
-      return;
-    }
-
-    if (
-      Array.isArray(gesture.previewOrder)
-      && gesture.previewOrder.length === nextPreviewOrder.length
-      && gesture.previewOrder.every((value, index) => value === nextPreviewOrder[index])
-    ) {
-      return;
-    }
-
-    // Collapse any expanded row being jumped over before the preview re-renders.
-    const orderedIds = reorderApi.getOrderedRowIds(parentId);
-    const currentIndex = orderedIds.indexOf(rowId);
-    const jumpedIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
-    if (jumpedIndex >= 0 && jumpedIndex < orderedIds.length) {
-      reorderApi.collapseRow(orderedIds[jumpedIndex]);
-    }
-
-    gesture.previewOrder = nextPreviewOrder;
-    reorderApi.onPreview(parentId, nextPreviewOrder);
+    gesture.itemElement.style.transform = `translateY(${event.clientY - gesture.startY}px)`;
   }
 
   function handlePointerUp(event) {
@@ -398,7 +492,11 @@ function setupPointerReorderGrabber(grabber, parentId, rowId, reorderApi) {
       startX: event.clientX,
       startY: event.clientY,
       dragging: false,
-      previewOrder: null,
+      rowElement: getRenderedLayerRow(parentId, rowId),
+      itemElement: getRenderedReorderItem(parentId, rowId),
+      currentOrder: null,
+      anchorTop: 0,
+      anchorBottom: 0,
     };
 
     if (typeof grabber.setPointerCapture === "function") {
@@ -413,6 +511,15 @@ function setupPointerReorderGrabber(grabber, parentId, rowId, reorderApi) {
     window.addEventListener("pointerup", handlePointerUp, { passive: false });
     window.addEventListener("pointercancel", handlePointerCancel);
     window.addEventListener("pointerleave", handlePointerCancel);
+
+    if (event.pointerType === "touch") {
+      holdTimer = window.setTimeout(() => {
+        holdTimer = null;
+        if (activeGesture?.pointerId === event.pointerId && !activeGesture.dragging) {
+          activateGesture(activeGesture);
+        }
+      }, 250);
+    }
   });
 }
 
@@ -1551,10 +1658,6 @@ function createColorRow(row, value, onInput, requestRender, { variant = "row" } 
   return wrapper;
 }
 
-// ── Unified style row (fill / line / point) ───────────────────────────────────
-// Shell: grabber + visibility toggle + label + optional remove button.
-// Body: controls declared by the row definition (color, sliders).
-
 function createStyleRow(row, value, onInput, requestRender, { parentId, reorderApi, isVisible, isExpanded, isExpandable = true, inheritedHidden = false, onToggleVisible, onToggleExpanded } = {}) {
   const isAppearanceRow = row?.colorTarget?.kind === "settings-background"
     || row?.opacityTarget?.kind === "settings-background"
@@ -1612,6 +1715,10 @@ function createStyleRow(row, value, onInput, requestRender, { parentId, reorderA
     }
 
     wrapper.append(header);
+  }
+
+  if (!isAppearanceRow) {
+    return wrapper;
   }
 
   // ── Body: controls ─────────────────────────────────────────────────────────
@@ -1693,6 +1800,97 @@ function createStyleRow(row, value, onInput, requestRender, { parentId, reorderA
     wrapper.append(body);
   }
   return wrapper;
+}
+
+function createStyleControlRows(row, value, onInput, requestRender, { inheritedHidden = false } = {}) {
+  const fragment = document.createDocumentFragment();
+  const withRowContext = (target) => ({
+    id: row.id,
+    runtimeTargetId: row.runtimeTargetId,
+    target,
+  });
+
+  const appendColorRow = ({ id, label, target, fallback }) => {
+    fragment.append(createColorRow({
+      id,
+      label,
+      type: "color",
+      storageKey: row.storageKey,
+      presets: row.presets,
+    }, value?.color ?? fallback, (nextColor) => onInput(withRowContext(target), nextColor), requestRender));
+  };
+
+  const appendSliderRow = ({ id, label, target, sliderRow, sliderValue }) => {
+    fragment.append(createSliderRow({
+      ...sliderRow,
+      id,
+      label,
+    }, sliderValue, (nextValue) => onInput(withRowContext(target), nextValue), { inheritedHidden }));
+  };
+
+  if (row.type === "fill") {
+    appendColorRow({
+      id: `${row.id}-color`,
+      label: "Color",
+      target: row.colorTarget,
+      fallback: "#8C6A2A",
+    });
+    appendSliderRow({
+      id: `${row.id}-opacity`,
+      label: "Opacity",
+      target: row.opacityTarget,
+      sliderRow: row,
+      sliderValue: Number(value?.opacity ?? 100),
+    });
+  }
+
+  if (row.type === "line") {
+    appendSliderRow({
+      id: `${row.id}-weight`,
+      label: "Weight",
+      target: row.weightTarget,
+      sliderRow: { ...row, min: row.weightMin, max: row.weightMax, step: row.weightStep, valueFormat: "pixels" },
+      sliderValue: Number(value?.weight ?? 1),
+    });
+    appendColorRow({
+      id: `${row.id}-color`,
+      label: "Color",
+      target: row.colorTarget,
+      fallback: "#C89A42",
+    });
+    appendSliderRow({
+      id: `${row.id}-opacity`,
+      label: "Opacity",
+      target: row.opacityTarget,
+      sliderRow: { ...row, valueFormat: "percent" },
+      sliderValue: Number(value?.opacity ?? 100),
+    });
+  }
+
+  if (row.type === "point") {
+    appendSliderRow({
+      id: `${row.id}-radius`,
+      label: "Radius",
+      target: row.radiusTarget,
+      sliderRow: { ...row, min: row.radiusMin, max: row.radiusMax, step: row.radiusStep, valueFormat: "pixels" },
+      sliderValue: Number(value?.radius ?? 6),
+    });
+    appendColorRow({
+      id: `${row.id}-color`,
+      label: "Color",
+      target: row.colorTarget,
+      fallback: "#e74c3c",
+    });
+    appendSliderRow({
+      id: `${row.id}-opacity`,
+      label: "Opacity",
+      target: row.opacityTarget,
+      sliderRow: { ...row, valueFormat: "percent" },
+      sliderValue: Number(value?.opacity ?? 80),
+    });
+  }
+
+  return fragment;
 }
 
 function getDisplayRowValue(row, layerModel, appearanceState) {
@@ -1781,6 +1979,7 @@ function reapplyRowTargets(row, layerModel, onRowInput) {
 function createRowGroup(row, depth, parentId, children = null) {
   const group = document.createElement("div");
   group.className = "layer-menu-row-group";
+  group.classList.toggle("is-hidden", row?.classList?.contains("is-hidden"));
   group.dataset.groupRowId = row?.dataset?.rowId ?? "";
   group.dataset.groupParentId = parentId ?? "";
   group.style.setProperty("--row-depth", String(depth));
@@ -1889,7 +2088,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
         || row?.opacityTarget?.kind === "settings-background"
         || row?.colorTarget?.kind === "screen-background"
         || row?.opacityTarget?.kind === "screen-background";
-      const isExpanded = true;
+      const isExpanded = isAppearanceRow || layerModel.isExpanded(row.id);
       const styleRow = createStyleRow(
         row,
         getDisplayRowValue(row, layerModel, appearanceState),
@@ -1900,18 +2099,31 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
           reorderApi: parentId ? reorderApi : null,
           isVisible,
           isExpanded,
-          isExpandable: false,
+          isExpandable: !isAppearanceRow,
           inheritedHidden,
           onToggleVisible: () => {
             layerModel.toggleRowVisible(row.id);
             reapplyRowTargets(row, layerModel, onRowInput);
             onToggleExpanded.__requestRender();
           },
-          onToggleExpanded: null,
+          onToggleExpanded: () => {
+            layerModel.toggleExpanded(row.id);
+            onToggleExpanded.__requestRender();
+          },
         },
       );
       styleRow.style.setProperty("--row-depth", String(depth));
-      fragment.append(styleRow);
+      let childFragment = null;
+      if (!isAppearanceRow && isExpanded) {
+        childFragment = createStyleControlRows(
+          row,
+          getDisplayRowValue(row, layerModel, appearanceState),
+          (syntheticRow, nextValue) => onRowInput(syntheticRow, nextValue),
+          onToggleExpanded.__requestRender,
+          { inheritedHidden: inheritedHidden || !isVisible },
+        );
+      }
+      fragment.append(isAppearanceRow ? styleRow : createRowGroup(styleRow, depth, parentId, childFragment));
       return;
     }
 
@@ -2064,6 +2276,13 @@ function renderLayerMenuRows({
         .filter(Boolean);
       return renderedIds.length ? renderedIds : getOrderedRows(parentId).map((row) => row.id);
     };
+    const mergeRenderedOrder = (parentId, renderedOrder) => {
+      const nextOrder = Array.isArray(renderedOrder) ? [...renderedOrder] : [];
+      const nextOrderSet = new Set(nextOrder);
+      return getOrderedRows(parentId).map((row) => row.id).map((rowId) => (
+        nextOrderSet.has(rowId) ? nextOrder.shift() : rowId
+      ));
+    };
     const reorderApi = {
       dragState: activeDragState,
       getOrderedRows,
@@ -2077,17 +2296,16 @@ function renderLayerMenuRows({
         render();
       },
       onCancel(parentId) {
-        if (transientReorderState.delete(parentId)) {
-          render();
-        }
+        transientReorderState.delete(parentId);
+        onRowInput({ type: "reorder", parentId }, getOrderedRows(parentId).map((row) => row.id));
+        render();
+      },
+      onLiveOrder(parentId, nextOrder) {
+        onRowInput({ type: "reorder", parentId }, mergeRenderedOrder(parentId, nextOrder));
       },
       onCommit(parentId, nextOrder) {
         transientReorderState.delete(parentId);
-        const fullOrder = getOrderedRows(parentId).map((row) => row.id);
-        const nextOrderSet = new Set(nextOrder);
-        const mergedOrder = fullOrder.map((rowId) => (
-          nextOrderSet.has(rowId) ? nextOrder.shift() : rowId
-        ));
+        const mergedOrder = mergeRenderedOrder(parentId, nextOrder);
         const committedOrder = layerModel.setChildRowOrder(parentId, mergedOrder);
         if (committedOrder) {
           onRowInput({ type: "reorder", parentId }, committedOrder);

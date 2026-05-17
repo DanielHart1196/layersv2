@@ -2,6 +2,8 @@ import { requireSupabase } from "../../lib/supabase.js";
 
 const LOCAL_BORDERS_PMTILES_URL = "/data/world-atlas/ne_10m_admin_0_boundary_lines_land.pmtiles";
 const DEFAULT_PMTILES_SOURCE_LAYER = "layer";
+let catalogCache = null;
+let catalogRequest = null;
 
 function normalizeGeometryTypes(geometryTypes = [], geometryType = "mixed") {
   const source = Array.isArray(geometryTypes) && geometryTypes.length
@@ -251,23 +253,40 @@ export async function updateLayerDefaultStyle(layerId, patch) {
   if (error) throw new Error(error.message);
 }
 
-export async function getSupabaseCatalog() {
+export async function getSupabaseCatalog({ forceRefresh = false } = {}) {
+  if (!forceRefresh && catalogCache) {
+    return catalogCache.map((entry) => ({ ...entry, geometryTypes: entry.geometryTypes.slice() }));
+  }
+  if (!forceRefresh && catalogRequest) {
+    return catalogRequest;
+  }
+
   const supabase = requireSupabase();
-  const { data, error } = await supabase
+  catalogRequest = supabase
     .from("layers")
     .select("id, name, geometry_type, geometry_types")
     .in("view_access", ["public", "unlisted"])
-    .order("name");
+    .order("name")
+    .then(({ data, error }) => {
+      if (error || !data?.length) {
+        catalogCache = [];
+        return [];
+      }
 
-  if (error || !data?.length) return [];
+      catalogCache = data.map((layer) => ({
+        id: layer.id,
+        label: layer.name,
+        group: "Uploaded layers",
+        geometryTypes: normalizeGeometryTypes(layer.geometry_types, layer.geometry_type ?? "mixed"),
+        geometryType: layer.geometry_type ?? "mixed",
+      }));
+      return catalogCache.map((entry) => ({ ...entry, geometryTypes: entry.geometryTypes.slice() }));
+    })
+    .finally(() => {
+      catalogRequest = null;
+    });
 
-  return data.map((layer) => ({
-    id: layer.id,
-    label: layer.name,
-    group: "Uploaded layers",
-    geometryTypes: normalizeGeometryTypes(layer.geometry_types, layer.geometry_type ?? "mixed"),
-    geometryType: layer.geometry_type ?? "mixed",
-  }));
+  return catalogRequest;
 }
 
 export async function getLayerDatasets(layerId) {

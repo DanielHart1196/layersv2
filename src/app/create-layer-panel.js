@@ -424,12 +424,13 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
   function createInitialState(overrides = {}) {
     return {
       parentId: null,
-      mode: CREATE_LAYER_MODE_NEW,
+      mode: CREATE_LAYER_MODE_EXISTING,
       name: "",
       existingLayers: [],
       existingLayersLoaded: false,
       existingLayersLoading: false,
       existingLayersError: "",
+      existingLayerSearch: "",
       selectedExistingLayerId: "",
       step: "form",
       file: null,
@@ -543,6 +544,14 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
   }
 
   function renderExistingLayerList() {
+    const search = state.existingLayerSearch.trim().toLowerCase();
+    const visibleLayers = search
+      ? state.existingLayers.filter((layer) => {
+        const layerName = String(layer.label ?? layer.name ?? "").toLowerCase();
+        return layerName.includes(search);
+      })
+      : state.existingLayers;
+
     if (state.existingLayersLoading && !state.existingLayersLoaded) {
       return `<div class="clp-existing-list-state">Loading layers…</div>`;
     }
@@ -555,9 +564,13 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       return `<div class="clp-existing-list-state">No layers found.</div>`;
     }
 
+    if (!visibleLayers.length) {
+      return `<div class="clp-existing-list-state">No matches for "${escapeHtml(state.existingLayerSearch)}".</div>`;
+    }
+
     return `
       <div class="clp-existing-list" role="listbox" aria-label="Existing layers">
-        ${state.existingLayers.map((layer) => {
+        ${visibleLayers.map((layer) => {
           const selected = state.selectedExistingLayerId === layer.id;
           const layerName = layer.label ?? layer.name ?? "Untitled layer";
           return `
@@ -575,6 +588,15 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
         }).join("")}
       </div>
     `;
+  }
+
+  function updateExistingLayerList(root) {
+    const listSlot = root.querySelector(".clp-existing-list-slot");
+    if (!listSlot) {
+      return;
+    }
+    listSlot.innerHTML = renderExistingLayerList();
+    bindExistingLayerList(root);
   }
 
   function bindExistingLayerList(root) {
@@ -1609,7 +1631,18 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
         ${state.mode === CREATE_LAYER_MODE_EXISTING ? `
           <div class="clp-field">
             <span class="clp-field-label">Layers</span>
-            ${renderExistingLayerList()}
+            <input
+              class="clp-field-input clp-existing-search-input"
+              type="search"
+              value="${escapeHtml(state.existingLayerSearch)}"
+              placeholder="Search layers"
+              aria-label="Search existing layers"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <div class="clp-existing-list-slot">
+              ${renderExistingLayerList()}
+            </div>
           </div>
         ` : `
           <label class="clp-field">
@@ -1632,6 +1665,10 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
 
     bindModeSelector(el);
     bindExistingLayerList(el);
+    el.querySelector(".clp-existing-search-input")?.addEventListener("input", (event) => {
+      state.existingLayerSearch = event.target.value ?? "";
+      updateExistingLayerList(el);
+    });
     nameInput?.addEventListener("input", (event) => {
       state.name = event.target.value;
     });
@@ -2011,6 +2048,9 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     el.querySelector("#clpAnother")?.addEventListener("click", () => {
       state = createInitialState({ parentId: state.parentId });
       render();
+      if (state.mode === CREATE_LAYER_MODE_EXISTING) {
+        void ensureExistingLayersLoaded();
+      }
     });
     el.querySelector("#clpClose")?.addEventListener("click", close);
     return el;
@@ -2029,8 +2069,13 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       state = createInitialState({ parentId, name });
       panel.classList.add("is-open");
       render();
+      if (state.mode === CREATE_LAYER_MODE_EXISTING) {
+        void ensureExistingLayersLoaded();
+      }
       if (shouldAutofocusCreateLayerName()) {
-        requestAnimationFrame(() => panel.querySelector(".clp-name-input")?.focus());
+        requestAnimationFrame(() => panel.querySelector(
+          state.mode === CREATE_LAYER_MODE_EXISTING ? ".clp-existing-search-input" : ".clp-name-input"
+        )?.focus());
       }
     },
     close,

@@ -54,6 +54,20 @@ const CLOSE_ICON = `
     <path class="layer-menu-icon-mark" d="M17 7L7 17"></path>
   </svg>
 `;
+const TRASH_ICON = `
+  <svg class="layer-menu-trash-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path class="layer-menu-icon-border" d="M3 6h18"></path>
+    <path class="layer-menu-icon-border" d="M8 6V4h8v2"></path>
+    <path class="layer-menu-icon-border" d="M6 6l1 14h10l1-14"></path>
+    <path class="layer-menu-icon-border" d="M10 11v5"></path>
+    <path class="layer-menu-icon-border" d="M14 11v5"></path>
+    <path class="layer-menu-icon-mark" d="M3 6h18"></path>
+    <path class="layer-menu-icon-mark" d="M8 6V4h8v2"></path>
+    <path class="layer-menu-icon-mark" d="M6 6l1 14h10l1-14"></path>
+    <path class="layer-menu-icon-mark" d="M10 11v5"></path>
+    <path class="layer-menu-icon-mark" d="M14 11v5"></path>
+  </svg>
+`;
 
 function normalizeHexColor(value) {
   const normalized = String(value ?? "").trim().replace(/^#*/, "");
@@ -286,6 +300,70 @@ function setupPointerReorderGrabber(grabber, parentId, rowId, reorderApi) {
   let suppressClick = false;
   let holdTimer = null;
 
+  function getDeleteDropTarget(gesture) {
+    return reorderApi.getDeleteDropTarget?.(parentId, rowId, gesture?.rowElement) ?? null;
+  }
+
+  function syncDeleteDropTarget(gesture, event) {
+    const target = getDeleteDropTarget(gesture);
+    if (!target) {
+      gesture.overDelete = false;
+      return;
+    }
+
+    const rect = target.getBoundingClientRect();
+    const overDelete = event.clientX >= rect.left
+      && event.clientX <= rect.right
+      && event.clientY >= rect.top
+      && event.clientY <= rect.bottom;
+    gesture.overDelete = overDelete;
+    target.classList.toggle("is-drop-delete-hover", overDelete);
+    gesture.itemElement?.classList?.toggle("is-delete-target", overDelete);
+    gesture.rowElement?.classList?.toggle("is-delete-target", overDelete);
+  }
+
+  function clearDeleteDropTarget(gesture) {
+    const target = getDeleteDropTarget(gesture);
+    target?.classList?.remove("is-drop-delete-zone", "is-drop-delete-hover");
+    gesture?.itemElement?.classList?.remove("is-delete-target");
+    gesture?.rowElement?.classList?.remove("is-delete-target");
+  }
+
+  function isPointerOverDeleteTarget(gesture, event) {
+    const target = getDeleteDropTarget(gesture);
+    if (!target || !event) {
+      return false;
+    }
+
+    const rect = target.getBoundingClientRect();
+    return event.clientX >= rect.left
+      && event.clientX <= rect.right
+      && event.clientY >= rect.top
+      && event.clientY <= rect.bottom;
+  }
+
+  function getDragBounds(gesture) {
+    const containerRect = gesture.itemElement?.parentElement?.getBoundingClientRect();
+    const deleteTargetRect = getDeleteDropTarget(gesture)?.getBoundingClientRect();
+    return {
+      top: containerRect?.top ?? Number.NEGATIVE_INFINITY,
+      bottom: Math.max(
+        containerRect?.bottom ?? Number.POSITIVE_INFINITY,
+        deleteTargetRect?.bottom ?? Number.NEGATIVE_INFINITY,
+      ),
+    };
+  }
+
+  function getClampedDragDeltaY(gesture, pointerY) {
+    const bounds = getDragBounds(gesture);
+    const naturalTop = Number.isFinite(gesture.itemNaturalTop) ? gesture.itemNaturalTop : 0;
+    const itemHeight = Number.isFinite(gesture.itemHeight) ? gesture.itemHeight : 0;
+    const minDelta = bounds.top - naturalTop;
+    const maxDelta = bounds.bottom - (naturalTop + itemHeight);
+    const rawDelta = pointerY - gesture.startY;
+    return Math.max(minDelta, Math.min(maxDelta, rawDelta));
+  }
+
   function clearHoldTimer() {
     if (holdTimer !== null) {
       window.clearTimeout(holdTimer);
@@ -315,10 +393,13 @@ function setupPointerReorderGrabber(grabber, parentId, rowId, reorderApi) {
     gesture.dragging = true;
     gesture.anchorTop = rect.top;
     gesture.anchorBottom = rect.bottom;
+    gesture.itemNaturalTop = rect.top;
+    gesture.itemHeight = rect.height;
     gesture.currentOrder = reorderApi.getOrderedRowIds(parentId);
     gesture.itemElement.classList.add("is-dragging");
     gesture.rowElement.classList.add("is-dragging");
     gesture.itemElement.style.touchAction = "none";
+    getDeleteDropTarget(gesture)?.classList?.add("is-drop-delete-zone");
     document.body.classList.add("is-reordering-rows");
     navigator.vibrate?.(10);
     return true;
@@ -352,15 +433,17 @@ function setupPointerReorderGrabber(grabber, parentId, rowId, reorderApi) {
 
     if (direction === "up") {
       gesture.startY -= adjacentHeight;
+      gesture.itemNaturalTop -= adjacentHeight;
     } else {
       gesture.startY += adjacentHeight;
+      gesture.itemNaturalTop += adjacentHeight;
     }
     gesture.currentOrder = reorderApi.getOrderedRowIds(parentId);
     reorderApi.onLiveOrder?.(parentId, gesture.currentOrder);
     return { adjacentHeight };
   }
 
-  function cleanupGesture(commit = false) {
+  function cleanupGesture(commit = false, event = null) {
     const gesture = activeGesture;
     if (!gesture) {
       return;
@@ -377,11 +460,16 @@ function setupPointerReorderGrabber(grabber, parentId, rowId, reorderApi) {
       if (gesture.itemElement) {
         gesture.itemElement.style.transform = "";
         gesture.itemElement.style.touchAction = "";
-        gesture.itemElement.classList.remove("is-dragging");
+        gesture.itemElement.classList.remove("is-dragging", "is-delete-target");
       }
-      gesture.rowElement?.classList?.remove("is-dragging");
+      gesture.rowElement?.classList?.remove("is-dragging", "is-delete-target");
+      clearDeleteDropTarget(gesture);
 
-      if (commit && Array.isArray(gesture.currentOrder)) {
+      const droppedOnDelete = commit && isPointerOverDeleteTarget(gesture, event);
+      if (droppedOnDelete && reorderApi.onDeleteDrop) {
+        reorderApi.onCancel(parentId);
+        reorderApi.onDeleteDrop(parentId, rowId);
+      } else if (commit && Array.isArray(gesture.currentOrder)) {
         reorderApi.onCommit(parentId, gesture.currentOrder);
       } else {
         reorderApi.onCancel(parentId);
@@ -461,7 +549,8 @@ function setupPointerReorderGrabber(grabber, parentId, rowId, reorderApi) {
       }
     }
 
-    gesture.itemElement.style.transform = `translateY(${event.clientY - gesture.startY}px)`;
+    gesture.itemElement.style.transform = `translateY(${getClampedDragDeltaY(gesture, event.clientY)}px)`;
+    syncDeleteDropTarget(gesture, event);
   }
 
   function handlePointerUp(event) {
@@ -470,7 +559,7 @@ function setupPointerReorderGrabber(grabber, parentId, rowId, reorderApi) {
     }
 
     event.preventDefault();
-    cleanupGesture(true);
+    cleanupGesture(true, event);
   }
 
   function handlePointerCancel(event) {
@@ -506,6 +595,9 @@ function setupPointerReorderGrabber(grabber, parentId, rowId, reorderApi) {
       currentOrder: null,
       anchorTop: 0,
       anchorBottom: 0,
+      itemNaturalTop: 0,
+      itemHeight: 0,
+      overDelete: false,
     };
 
     if (typeof grabber.setPointerCapture === "function") {
@@ -2021,15 +2113,71 @@ function createAppearanceFillRow({ id, label, kind }) {
 function createAddButton(depth, parentId, onAddRow) {
   const btn = document.createElement("button");
   btn.className = "layer-menu-add-row";
+  if (depth === 0) {
+    btn.classList.add("layer-menu-root-add-row");
+  }
   btn.style.setProperty("--row-depth", String(depth + 1));
   btn.setAttribute("type", "button");
   btn.setAttribute("aria-label", depth === 0 ? "Add layer" : "Add row");
+  btn.dataset.addRowParentId = parentId ?? "";
+  btn.dataset.addRowDepth = String(depth);
   btn.textContent = depth === 0 ? "+ Add layer" : "+ Add row";
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
     onAddRow({ kind: "open-add-panel", depth, parentId });
   });
   return btn;
+}
+
+function createDeleteConfirmPanel(row, anchor, onCancel, onConfirm) {
+  const panel = document.createElement("div");
+  panel.className = "layer-menu-delete-confirm";
+
+  const label = document.createElement("span");
+  label.className = "layer-menu-delete-confirm-label";
+  label.textContent = `Remove ${row?.label ?? "layer"}?`;
+
+  const actions = document.createElement("div");
+  actions.className = "layer-menu-delete-confirm-actions";
+
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "layer-menu-delete-confirm-cancel";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onCancel();
+  });
+
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.className = "layer-menu-delete-confirm-remove";
+  confirm.innerHTML = `${TRASH_ICON}<span>Remove</span>`;
+  confirm.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onConfirm();
+  });
+
+  actions.append(cancel, confirm);
+  panel.append(label, actions);
+  document.body.append(panel);
+
+  const anchorRect = anchor?.getBoundingClientRect?.() ?? null;
+  const panelRect = panel.getBoundingClientRect();
+  const viewportMargin = 12;
+  const top = anchorRect
+    ? Math.max(viewportMargin, anchorRect.top - panelRect.height - 8)
+    : viewportMargin;
+  const left = anchorRect
+    ? Math.min(
+      window.innerWidth - panelRect.width - viewportMargin,
+      Math.max(viewportMargin, anchorRect.left + (anchorRect.width - panelRect.width) / 2),
+    )
+    : viewportMargin;
+  panel.style.top = `${top}px`;
+  panel.style.left = `${left}px`;
+
+  return panel;
 }
 
 function makeRemoveButton(row, parentId, onRemoveRow) {
@@ -2292,8 +2440,55 @@ function renderLayerMenuRows({
   const transientColorRowState = new Map();
   const transientReorderState = new Map();
   let activeDragState = null;
+  let deleteConfirmPanel = null;
+  let deleteConfirmOutsideHandler = null;
+
+  function removeDeleteConfirmOutsideHandler() {
+    if (deleteConfirmOutsideHandler) {
+      document.removeEventListener("pointerdown", deleteConfirmOutsideHandler, true);
+      deleteConfirmOutsideHandler = null;
+    }
+  }
+
+  function dismissDeleteConfirmPanel() {
+    removeDeleteConfirmOutsideHandler();
+    deleteConfirmPanel?.remove();
+    deleteConfirmPanel = null;
+  }
+
+  function showDeleteDropConfirm(parentId, rowId, row) {
+    if (!row || !onRemoveRow) {
+      return;
+    }
+
+    dismissDeleteConfirmPanel();
+    const anchor = document.querySelector(".layer-menu-root-add-row");
+    deleteConfirmPanel = createDeleteConfirmPanel(
+      row,
+      anchor,
+      dismissDeleteConfirmPanel,
+      () => {
+        dismissDeleteConfirmPanel();
+        onRemoveRow(rowId, parentId, row);
+      },
+    );
+    deleteConfirmOutsideHandler = (event) => {
+      if (deleteConfirmPanel?.contains(event.target)) {
+        return;
+      }
+      dismissDeleteConfirmPanel();
+    };
+    window.setTimeout(() => {
+      if (deleteConfirmOutsideHandler) {
+        document.addEventListener("pointerdown", deleteConfirmOutsideHandler, true);
+      }
+    }, 0);
+  }
 
   function render(nextUiState = null) {
+    if (!panel.classList.contains("is-open")) {
+      dismissDeleteConfirmPanel();
+    }
     const appearanceState = layerModel.getAppearanceState();
     const settingsButton = document.getElementById("layerMenuScreenButton");
     const scrollRegion = document.getElementById("layerMenuPanelScroll") ?? panel;
@@ -2383,6 +2578,23 @@ function renderLayerMenuRows({
         if (layerModel.isExpanded(expandKey)) {
           onToggleExpanded(expandKey);
         }
+      },
+      getDeleteDropTarget(parentId, rowId) {
+        const row = layerModel.getRowById(rowId);
+        const isRootDynamicLayer = parentId === layerModel.getRootParentId()
+          && row?.type === "layer"
+          && layerModel.isDynamic(rowId);
+        if (!isRootDynamicLayer || !onRemoveRow) {
+          return null;
+        }
+        return footerRegion?.querySelector(".layer-menu-root-add-row") ?? null;
+      },
+      onDeleteDrop(parentId, rowId) {
+        const row = layerModel.getRowById(rowId);
+        if (!row || !onRemoveRow) {
+          return;
+        }
+        showDeleteDropConfirm(parentId, rowId, row);
       },
     };
 
@@ -2513,7 +2725,9 @@ function renderLayerMenuRows({
     );
 
     if (onAddRow) {
-      (footerRegion ?? scrollRegion).append(createAddButton(0, layerModel.getRootParentId(), onAddRow));
+      const rootAddButton = createAddButton(0, layerModel.getRootParentId(), onAddRow);
+      const addButtonContainer = footerRegion ?? scrollRegion;
+      addButtonContainer.append(rootAddButton);
     }
 
     requestAnimationFrame(() => {

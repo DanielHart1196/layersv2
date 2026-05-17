@@ -41,10 +41,21 @@ export const LOCAL_LAYERS = [
     source: {
       kind: "geojson",
       initialUrl: "/data/world-atlas/ne_110m_land.geojson",
-      url: "/data/world-atlas/countries-dissolved-land.geojson",
+      url: "/data/world-atlas/ne_110m_land.geojson",
     },
+    defaultDetail: "low",
+    detailLevels: [
+      { label: "Low", value: "low", url: "/data/world-atlas/ne_110m_land.geojson", lineUrl: "/data/world-atlas/ne_110m_coastline.geojson" },
+      { label: "High", value: "high", url: "/data/world-atlas/countries-dissolved-land.geojson", lineUrl: "/data/world-atlas/ne_10m_coastline.geojson" },
+    ],
     fill: { color: "#6EAA6E", opacity: 100 },
-    line: { color: "#000000", opacity: 100, weight: 1, deferInitial: true },
+    line: {
+      color: "#000000",
+      opacity: 100,
+      weight: 1,
+      deferInitial: true,
+      source: { kind: "geojson", url: "/data/world-atlas/ne_110m_coastline.geojson" },
+    },
   },
 
   {

@@ -189,6 +189,37 @@ function createSliderRow({
   };
 }
 
+function createChoiceSliderRow({
+  id,
+  label,
+  key,
+  options = [],
+  initialValue,
+  target,
+}) {
+  const normalizedOptions = options
+    .map((option) => ({
+      label: String(option?.label ?? option?.value ?? ""),
+      value: String(option?.value ?? option?.label ?? ""),
+    }))
+    .filter((option) => option.label && option.value);
+  const fallbackValue = normalizedOptions[0]?.value ?? "";
+  return {
+    id,
+    type: "choice-slider",
+    label,
+    key,
+    options: normalizedOptions,
+    min: 0,
+    max: Math.max(0, normalizedOptions.length - 1),
+    step: 1,
+    target,
+    initialState: {
+      [key]: initialValue ?? fallbackValue,
+    },
+  };
+}
+
 function localLayerToRow(entry) {
   return createDataRow({
     id: entry.id,
@@ -197,6 +228,14 @@ function localLayerToRow(entry) {
     geometryType: entry.fill ? "polygon" : "line",
     hidden: entry.defaultVisible === false,
     rows: [
+      ...(entry.detailLevels ? [createChoiceSliderRow({
+        id: `${entry.id}-detail`,
+        label: "Detail",
+        key: "detail",
+        options: entry.detailLevels,
+        initialValue: entry.defaultDetail,
+        target: { kind: "earth-land-detail", key: "detail" },
+      })] : []),
       ...(entry.fill ? [createStyleRow({
         id: `${entry.id}-fill`, type: "fill",
         layerId: entry.id,
@@ -331,6 +370,7 @@ export {
   SHARED_COLOR_STORAGE_KEY,
   createLayerDefinitions,
   createDataRow,
+  createChoiceSliderRow,
   createFilterRow,
   createRowDefinitionIndex,
   createSortRow,

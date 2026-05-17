@@ -217,6 +217,11 @@ async function bootstrapApplication() {
         return;
       }
 
+      if (update.target?.kind === "earth-land-detail") {
+        screenRuntime.setEarthLandDetail(update.value);
+        return;
+      }
+
       // Skip map update if the row has been disabled.
       if (!layerModel.isRowVisible(row.id)) {
         return;
@@ -457,6 +462,9 @@ function createDeferredScreenRuntime() {
     },
     setLayerStyleValue(layerId, key, value) {
       withRuntime((target) => target.setLayerStyleValue?.(layerId, key, value));
+    },
+    setEarthLandDetail(detail) {
+      withRuntime((target) => target.setEarthLandDetail?.(detail));
     },
     loadDynamicLayer(args) {
       withRuntime((target) => target.loadDynamicLayer?.(args));

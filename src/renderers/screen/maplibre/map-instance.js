@@ -891,7 +891,7 @@ function buildStyle(layerState) {
       localLayerSourceId(entry.id),
       entry.source.kind === "atlas-vector"
         ? createGeojsonVectorSourceSpec(localLayerTileSourceId(entry.id))
-        : { type: "geojson", data: entry.source.initialUrl ?? entry.source.url },
+        : { type: "geojson", data: entry.id === "land" ? getLandDetailUrl(layerState) : (entry.source.initialUrl ?? entry.source.url) },
     ])),
     layers: [
       {
@@ -1137,14 +1137,32 @@ async function loadBritishEmpireVector() {
 // ─── Standard layer registry ─────────────────────────────────────────────────
 // Derived from src/config/local-layers.js — do not edit here.
 
+function toRegistrySource(layerId, source, sourceId = localLayerSourceId(layerId), tileSourceId = localLayerTileSourceId(layerId)) {
+  if (source.kind === "pmtiles") {
+    return {
+      kind: "runtime-vector",
+      id: sourceId,
+      pmtilesId: source.pmtilesId,
+      atlasVectorTileId: tileSourceId,
+    };
+  }
+  if (source.kind === "atlas-vector") {
+    return {
+      kind: "atlas-vector",
+      id: sourceId,
+      atlasVectorTileId: tileSourceId,
+    };
+  }
+  return { kind: "geojson", id: sourceId, url: source.url };
+}
+
 function toRegistryEntry(entry) {
   const { id, deferred, source, fill, line, circle } = entry;
   const sourceLayer = source.sourceLayer ?? null;
-  const registrySource = source.kind === "pmtiles"
-    ? { kind: "runtime-vector", id: localLayerSourceId(id), pmtilesId: source.pmtilesId, atlasVectorTileId: localLayerTileSourceId(id) }
-    : source.kind === "atlas-vector"
-      ? { kind: "atlas-vector", id: localLayerSourceId(id), atlasVectorTileId: localLayerTileSourceId(id) }
-      : { kind: "geojson", id: localLayerSourceId(id), url: source.url };
+  const registrySource = toRegistrySource(id, source);
+  const registryLineSource = line?.source
+    ? toRegistrySource(id, line.source, `${localLayerSourceId(id)}-line-source`, `${localLayerTileSourceId(id)}-line`)
+    : null;
   return {
     layerId: id,
     deferred: deferred ?? false,
@@ -1159,7 +1177,8 @@ function toRegistryEntry(entry) {
     line: line ? {
       id: localLayerLineId(id),
       runtimeTargetId: `${id}::line`,
-      sourceLayer,
+      source: registryLineSource,
+      sourceLayer: line.source?.sourceLayer ?? sourceLayer,
       defaultColor: line.color,
       defaultOpacity: line.opacity,
       defaultWeight: line.weight ?? 1,
@@ -1179,6 +1198,33 @@ function toRegistryEntry(entry) {
 }
 
 const STANDARD_LAYER_REGISTRY = LOCAL_LAYERS.map(toRegistryEntry);
+const LAND_LAYER_CONFIG = LOCAL_LAYERS.find((entry) => entry.id === "land") ?? null;
+const LAND_DETAIL_URLS = new Map((LAND_LAYER_CONFIG?.detailLevels ?? []).map((entry) => [entry.value, entry.url]));
+const LAND_DETAIL_LINE_URLS = new Map((LAND_LAYER_CONFIG?.detailLevels ?? [])
+  .filter((entry) => entry.lineUrl)
+  .map((entry) => [entry.value, entry.lineUrl]));
+
+function normalizeLandDetail(detail) {
+  if (detail === "50m" || detail === "10m" || detail === "osm") {
+    return "high";
+  }
+  if (detail === "110m") {
+    return "low";
+  }
+  return detail;
+}
+
+function getLandDetailUrl(layerState, detail = null) {
+  const selectedDetail = normalizeLandDetail(detail ?? layerState?.["land-detail"]?.detail ?? LAND_LAYER_CONFIG?.defaultDetail ?? "low");
+  return LAND_DETAIL_URLS.get(selectedDetail) ?? LAND_LAYER_CONFIG?.source?.url ?? "/data/world-atlas/ne_110m_land.geojson";
+}
+
+function getLandDetailLineUrl(layerState, detail = null) {
+  const selectedDetail = normalizeLandDetail(detail ?? layerState?.["land-detail"]?.detail ?? LAND_LAYER_CONFIG?.defaultDetail ?? "low");
+  return LAND_DETAIL_LINE_URLS.get(selectedDetail)
+    ?? LAND_LAYER_CONFIG?.line?.source?.url
+    ?? getLandDetailUrl(layerState, detail);
+}
 
 // Special registry entries for Olympics and Empires
 const OLYMPICS_REGISTRY_ENTRY = {
@@ -1262,27 +1308,30 @@ function findRegistryEntry(layerId) {
   return FULL_REGISTRY.find(entry => entry.layerId === layerId);
 }
 
+function ensureRegistrySource(map, manifest, source) {
+  if (!source || map.getSource(source.id)) {
+    return;
+  }
+  let sourceSpec;
+  if (source.kind === "runtime-vector") {
+    sourceSpec = createRuntimeVectorSourceSpec({
+      manifest,
+      pmtilesId: source.pmtilesId,
+      atlasVectorTileId: source.atlasVectorTileId,
+      maxZoom: source.maxZoom,
+    });
+  } else if (source.kind === "atlas-vector") {
+    sourceSpec = createGeojsonVectorSourceSpec(source.atlasVectorTileId, source.maxZoom);
+  } else {
+    sourceSpec = { type: "geojson", data: source.url };
+  }
+  map.addSource(source.id, sourceSpec);
+}
+
 function attachStandardLayer(map, layerState, manifest, entry) {
   const { source, fill, line, layerId } = entry;
 
-  const hasSource = map.getSource(source.id);
-
-  if (!hasSource) {
-    let sourceSpec;
-    if (source.kind === "runtime-vector") {
-      sourceSpec = createRuntimeVectorSourceSpec({
-        manifest,
-        pmtilesId: source.pmtilesId,
-        atlasVectorTileId: source.atlasVectorTileId,
-        maxZoom: source.maxZoom,
-      });
-    } else if (source.kind === "atlas-vector") {
-      sourceSpec = createGeojsonVectorSourceSpec(source.atlasVectorTileId, source.maxZoom);
-    } else {
-      sourceSpec = { type: "geojson", data: source.url };
-    }
-    map.addSource(source.id, sourceSpec);
-  }
+  ensureRegistrySource(map, manifest, source);
 
   if (fill && !map.getLayer(fill.id)) {
     const fillSpec = {
@@ -1302,10 +1351,14 @@ function attachStandardLayer(map, layerState, manifest, entry) {
   }
 
   if (line && !map.getLayer(line.id)) {
+    const lineSource = layerId === "land" && line.source
+      ? { ...line.source, url: getLandDetailLineUrl(layerState) }
+      : line.source ?? source;
+    ensureRegistrySource(map, manifest, lineSource);
     const lineSpec = {
       id: line.id,
       type: "line",
-      source: source.id,
+      source: lineSource.id,
       layout: {
         ...line.extraLayout,
         visibility: getMaplibreLayerVisibility(layerState, line.runtimeTargetId ?? layerId, layerId),
@@ -1845,6 +1898,22 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         if (olympicsSource && "setData" in olympicsSource) {
           olympicsSource.setData(getOlympicsVectorUrl(layerState));
         }
+      }
+    },
+    setEarthLandDetail(detail) {
+      if (!layerState["land-detail"] || typeof layerState["land-detail"] !== "object") {
+        layerState["land-detail"] = {};
+      }
+      layerState["land-detail"].detail = detail;
+      const source = map.getSource(localLayerSourceId("land"));
+      const detailUrl = getLandDetailUrl(layerState, detail);
+      if (source && "setData" in source) {
+        source.setData(detailUrl);
+      }
+      const lineSource = map.getSource(`${localLayerSourceId("land")}-line-source`);
+      const detailLineUrl = getLandDetailLineUrl(layerState, detail);
+      if (lineSource && "setData" in lineSource) {
+        lineSource.setData(detailLineUrl);
       }
     },
     attachDynamicLayer(layerId, geojson, tilesUrl, style, options) {

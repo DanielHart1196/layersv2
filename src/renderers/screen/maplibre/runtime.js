@@ -142,6 +142,9 @@ function createMaplibreScreenRuntime({
     setLayerStyleValue(layerId, key, value) {
       mapInstance?.setLayerStyleValue?.(layerId, key, value);
     },
+    setEarthLandDetail(detail) {
+      mapInstance?.setEarthLandDetail?.(detail);
+    },
     loadDynamicLayer({ layerId, rowId = null, parentRowId = undefined, childRows = [], geojson, tilesUrl, style, options = {} }) {
       mapInstance?.attachDynamicLayer?.(layerId, geojson, tilesUrl, style, {
         ...options,

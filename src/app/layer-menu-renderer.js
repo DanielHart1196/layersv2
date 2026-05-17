@@ -1213,6 +1213,10 @@ function isStyleChildRow(row) {
   return row?.type === "fill" || row?.type === "line" || row?.type === "point";
 }
 
+function isLayerExpansionChildRow(row) {
+  return isStyleChildRow(row) || row?.type === "choice-slider";
+}
+
 function createLayerActionButton(kind, label, onClick) {
   const button = document.createElement("button");
   button.type = "button";
@@ -1244,11 +1248,12 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
   const isSettingsParent = definition.id === "settings";
   const isTopPanelParent = isEarthParent || isSettingsParent;
   const hasStyleChildren = childRows.some(isStyleChildRow);
+  const hasExpansionChildren = childRows.some(isLayerExpansionChildRow);
   const hasVisibility = Boolean(definition.layerId) && !isSettingsParent;
   const isExpanded = isTopPanelParent || Boolean(state?.expanded);
   const hasLayerActions = Boolean(definition?.layerRef);
   const isExpandable = isTopPanelParent
-    || hasStyleChildren
+    || hasExpansionChildren
     || hasLayerActions
     || (hasChildren && !isTopPanelParent);
   const isReorderable = Boolean(parentId && definition.layerId && definition.id !== "ocean" && !isTopPanelParent && !isExpanded);
@@ -1375,6 +1380,37 @@ function createSliderRow(row, value, onInput, { inheritedHidden = false } = {}) 
     const nextValue = Number(input.value);
     valueLabel.textContent = formatRowValue(row, nextValue);
     onInput(nextValue);
+  });
+
+  wrapper.classList.toggle("is-hidden", inheritedHidden);
+  wrapper.append(header, input);
+  return wrapper;
+}
+
+function createChoiceSliderRow(row, value, onInput, { inheritedHidden = false } = {}) {
+  const options = Array.isArray(row.options) ? row.options : [];
+  const selectedIndex = Math.max(0, options.findIndex((option) => option.value === value));
+  const selectedOption = options[selectedIndex] ?? options[0] ?? null;
+  const wrapper = document.createElement("label");
+  wrapper.className = "layer-menu-row layer-menu-row-slider layer-menu-row-choice-slider";
+  const { header, label } = createRowHeader(row.label, selectedOption?.label ?? value, "layer-menu-slider-header");
+  const valueLabel = header.querySelector(".layer-menu-row-value");
+
+  const input = document.createElement("input");
+  input.className = "layer-menu-slider";
+  input.type = "range";
+  input.min = "0";
+  input.max = String(Math.max(0, options.length - 1));
+  input.step = "1";
+  input.value = String(selectedIndex);
+  input.disabled = inheritedHidden || options.length < 2;
+  input.addEventListener("input", () => {
+    const nextOption = options[Number(input.value)] ?? options[0];
+    if (!nextOption) {
+      return;
+    }
+    valueLabel.textContent = nextOption.label;
+    onInput(nextOption.value);
   });
 
   wrapper.classList.toggle("is-hidden", inheritedHidden);
@@ -2073,6 +2109,15 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       return;
     }
 
+    if (row.type === "choice-slider") {
+      const slider = createChoiceSliderRow(row, getDisplayRowValue(row, layerModel, appearanceState), (nextValue) => {
+        onRowInput(row, nextValue);
+      }, { inheritedHidden });
+      applyRowDepth(slider, depth);
+      fragment.append(slider);
+      return;
+    }
+
     if (row.type === "color") {
       const colorRow = createColorRow(row, getDisplayRowValue(row, layerModel, appearanceState), (nextValue) => {
         onRowInput(row, nextValue);
@@ -2200,7 +2245,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       const isSettingsParent = row.id === "settings";
       const visibleChildRows = isEarthParent || isSettingsParent
         ? orderedChildRows
-        : orderedChildRows.filter((childRow) => !isStyleChildRow(childRow) || state[rowStateKey]?.expanded);
+        : orderedChildRows.filter((childRow) => !isLayerExpansionChildRow(childRow) || state[rowStateKey]?.expanded);
       if (visibleChildRows.length) {
         childFragment = buildRows(visibleChildRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden, onAddRow, onRemoveRow, onDataAction, onFilterAction);
       }

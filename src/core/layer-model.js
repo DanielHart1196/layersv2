@@ -161,6 +161,11 @@ function createLayerModel() {
         row.weightTarget?.layerId ??
         row.target?.layerId;
       if (!layerId) {
+        Object.entries(row.initialState).forEach(([key, value]) => {
+          if (rowRecord[key] === undefined) {
+            rowRecord[key] = value;
+          }
+        });
         return;
       }
 
@@ -450,17 +455,36 @@ function createLayerModel() {
     }
 
     const target = row?.target;
-    if (target?.kind !== "layer-style") {
+    if (!target) {
       return null;
     }
 
-    return layerState[target.layerId]?.[target.key] ?? null;
+    if (target.kind === "layer-style") {
+      return layerState[target.layerId]?.[target.key] ?? null;
+    }
+
+    return layerState[row.id]?.[target.key] ?? null;
   }
 
   function setRowValue(row, nextValue) {
     const target = row?.target;
-    if (target?.kind !== "layer-style") {
+    if (!target) {
       return null;
+    }
+
+    if (target.kind !== "layer-style") {
+      if (!layerState[row.id]) {
+        layerState[row.id] = {};
+      }
+      layerState[row.id][target.key] = nextValue;
+      persistLayerState();
+      return {
+        layerId: row.id,
+        runtimeTargetId: row?.runtimeTargetId ?? row.id,
+        key: target.key,
+        value: nextValue,
+        target,
+      };
     }
 
     if (!layerState[target.layerId]) {

@@ -8,6 +8,7 @@
     "preview": "vite preview",
     "build:countries:dissolved-land": "node ./scripts/build-countries-dissolved-land-geojson.mjs",
     "build:land:110m": "node ./scripts/build-land-110m-geojson.mjs",
+    "build:natural-earth:coastline": "node ./scripts/build-natural-earth-coastline-geojson.mjs",
     "build:countries:split": "node ./scripts/build-country-geojson-splits.mjs",
     "build:natural-earth:land": "node ./scripts/build-natural-earth-land-geojson.mjs",
     "build:olympics:latest": "node ./scripts/build-olympics-latest-geojson.mjs",

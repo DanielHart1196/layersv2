@@ -44,6 +44,7 @@ function createMaplibreScreenRuntime({
   initialLayerState = {},
   getRuntimeVectors = () => [],
   getOrderedChildRowIds = null,
+  onCameraChange = null,
 } = {}) {
   let mapInstance = null;
   const dependencyState = {
@@ -111,6 +112,7 @@ function createMaplibreScreenRuntime({
       viewState,
       initialLayerState,
       getOrderedChildRowIds,
+      onCameraChange,
     });
   }
 

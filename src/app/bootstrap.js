@@ -10,6 +10,7 @@ import { createEditableRuntimeStore } from "../sources/editable/runtime-store.js
 import { createPmtilesManifest } from "../sources/pmtiles/source-manifest.js";
 import { getRowRuntimeTargetId, getRowStateKey } from "../core/layer-definitions.js";
 import { bindShareControls, readShareSnapshotFromLocation } from "./share-controls.js";
+import { bindTitleControls } from "./title-controls.js";
 
 const supabaseLayerDataCache = new Map();
 
@@ -26,7 +27,10 @@ async function bootstrapApplication() {
   const screenRenderer = createScreenRendererAdapter();
   const printRenderer = createPrintRendererAdapter();
   const projections = getProjectionRegistry();
-  const viewState = viewModel.getState();
+  const viewState = {
+    ...viewModel.getState(),
+    hasCameraState: viewModel.hasCameraState(),
+  };
   const screenRuntime = createDeferredScreenRuntime();
   let mapStartupError = null;
 
@@ -321,6 +325,7 @@ async function bootstrapApplication() {
     screenRuntime,
     viewModel,
   });
+  bindTitleControls({ viewModel });
 
   const startMapRuntime = async () => {
     try {
@@ -332,6 +337,9 @@ async function bootstrapApplication() {
         initialLayerState: layerModel.getState(),
         getRuntimeVectors: () => editableStore.getCollections(),
         getOrderedChildRowIds: (parentId) => layerModel.getOrderedChildRowIds(parentId),
+        onCameraChange: (camera) => {
+          viewModel.setCamera(camera, { persist: true });
+        },
       });
       runtime.mount(document.getElementById("mapStage"));
       screenRuntime.setRuntime(runtime);

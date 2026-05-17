@@ -87,13 +87,43 @@ ul {
   opacity: 0;
 }
 
+.map-title {
+  position: fixed;
+  top: 80px;
+  left: 18px;
+  z-index: 9;
+  display: inline-flex;
+  align-items: center;
+  min-width: 48px;
+  min-height: 32px;
+  max-width: min(360px, calc(100vw - 128px));
+  padding: 0 6px;
+  border: 0;
+  border-radius: 8px;
+  background: #f8f8f8;
+  color: #000000;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1.35;
+  outline: none;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+
+.map-title:focus-visible {
+  outline: 1px dashed rgba(0, 0, 0, 0.42);
+  outline-offset: 2px;
+}
+
 .map-scale {
   position: absolute;
-  left: 14px;
+  right: 18px;
   bottom: 18px;
   z-index: 6;
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
   gap: 6px;
   opacity: 0;
   pointer-events: none;
@@ -229,8 +259,8 @@ ul {
 
 .map-compass {
   position: absolute;
-  right: 14px;
-  bottom: 30px;
+  right: 15px;
+  bottom: 56px;
   z-index: 7;
   display: inline-flex;
   align-items: center;
@@ -416,10 +446,10 @@ ul {
   content: "";
   position: absolute;
   inset: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
+  border: 0;
   border-radius: 10px;
   background: var(--layer-menu-card-bg);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.82);
+  box-shadow: none;
 }
 
 .layer-menu:not(.is-open) .layer-menu-button {
@@ -1461,6 +1491,10 @@ body.is-reordering-rows {
   .mobile-refresh {
     top: 12px;
     right: 12px;
+  }
+
+  .map-title {
+    top: 78px;
   }
 
   .layer-menu {

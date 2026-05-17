@@ -22,6 +22,7 @@ function normalizeSharedView(view) {
   }
 
   return {
+    title: typeof view.title === "string" && view.title.trim() ? view.title.trim() : "Layers",
     projectionId: typeof view.projectionId === "string" ? view.projectionId : "globe",
     center: {
       longitude: Math.max(-180, Math.min(180, longitude)),
@@ -41,12 +42,18 @@ function normalizeShareSnapshot(snapshot) {
     return null;
   }
 
+  const title = String(snapshot.meta?.title ?? "Layers");
+  const view = normalizeSharedView(snapshot.view);
+  if (view && (!view.title || view.title === "Layers") && title.trim()) {
+    view.title = title.trim();
+  }
+
   return {
     v: SHARE_SNAPSHOT_VERSION,
     meta: {
-      title: String(snapshot.meta?.title ?? "Layers"),
+      title,
     },
-    view: normalizeSharedView(snapshot.view),
+    view,
     layers: {
       layerState: snapshot.layers.layerState && typeof snapshot.layers.layerState === "object"
         ? structuredClone(snapshot.layers.layerState)
@@ -74,10 +81,11 @@ async function readShareSnapshotFromLocation() {
 
 function buildShareSnapshot({ layerModel, screenRuntime, viewModel }) {
   const liveCamera = screenRuntime.getCameraState?.();
+  const title = viewModel.getTitle?.() ?? viewModel.getState().title ?? document.title ?? "Layers";
   return {
     v: SHARE_SNAPSHOT_VERSION,
     meta: {
-      title: document.title || "Layers",
+      title,
     },
     view: {
       ...viewModel.getState(),

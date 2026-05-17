@@ -1452,7 +1452,7 @@ function applyRegistryStyleValue(entry, map, layerState, key, value) {
   return false;
 }
 
-function createMapInstance({ container, manifest = [], viewState, initialLayerState = {}, getOrderedChildRowIds = null }) {
+function createMapInstance({ container, manifest = [], viewState, initialLayerState = {}, getOrderedChildRowIds = null, onCameraChange = null }) {
   if (!container) {
     return null;
   }
@@ -1490,9 +1490,10 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     }, SCALE_BAR_HIDE_DELAY_MS);
   }
 
-  const initialZoom = viewState?.projectionId === "globe"
+  const hasExplicitViewZoom = viewState?.hasCameraState === true && Number.isFinite(Number(viewState?.zoom));
+  const initialZoom = viewState?.projectionId === "globe" && !hasExplicitViewZoom
     ? getInitialGlobeZoom(container, viewState.zoom)
-    : viewState.zoom;
+    : Number(viewState.zoom);
 
   const map = new maplibregl.Map({
     container,
@@ -1505,6 +1506,18 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     pitch: viewState.pitch,
     attributionControl: false,
   });
+  function readCameraState() {
+    const center = map.getCenter();
+    return {
+      center: {
+        longitude: center.lng,
+        latitude: center.lat,
+      },
+      zoom: map.getZoom(),
+      bearing: map.getBearing(),
+      pitch: map.getPitch(),
+    };
+  }
   map.on("error", (event) => {
     const message = event?.error?.message ?? event?.error?.toString?.() ?? "unknown";
     const url = String(
@@ -1542,6 +1555,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
   map.on("moveend", () => {
     showInteractionOverlays();
     hideInteractionOverlaysSoon();
+    onCameraChange?.(readCameraState());
   });
   map.on("resize", () => {
     if (scaleOverlay.classList.contains("is-visible")) {
@@ -1815,16 +1829,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       return map;
     },
     getCameraState() {
-      const center = map.getCenter();
-      return {
-        center: {
-          longitude: center.lng,
-          latitude: center.lat,
-        },
-        zoom: map.getZoom(),
-        bearing: map.getBearing(),
-        pitch: map.getPitch(),
-      };
+      return readCameraState();
     },
     getZoom() {
       return map.getZoom();

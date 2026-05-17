@@ -11,12 +11,31 @@ import {
   createStyleRow,
 } from "./layer-definitions.js";
 
+const STORAGE_KEY = "layerv2.layerState.v1";
+const DEFS_STORAGE_KEY = "layerv2.dynamicDefs.v1";
+const APPEARANCE_STATE_KEY = "__appearance__";
+const LEGACY_SETTINGS_BACKGROUND_STORAGE_KEY = "layerv2.layerMenuAppearance.v1";
+const LEGACY_SCREEN_BACKGROUND_STORAGE_KEY = "layerv2.screenAppearance.v1";
+
+function saveLayerPersistenceSnapshot(snapshot = {}) {
+  try {
+    if (snapshot.layerState && typeof snapshot.layerState === "object") {
+      window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(snapshot.layerState));
+    }
+    if (snapshot.dynamicDefs && typeof snapshot.dynamicDefs === "object") {
+      window.localStorage?.setItem(DEFS_STORAGE_KEY, JSON.stringify({
+        rootRows: Array.isArray(snapshot.dynamicDefs.rootRows) ? snapshot.dynamicDefs.rootRows : [],
+        staticAdditions: snapshot.dynamicDefs.staticAdditions && typeof snapshot.dynamicDefs.staticAdditions === "object"
+          ? snapshot.dynamicDefs.staticAdditions
+          : {},
+      }));
+    }
+  } catch (_error) {
+    // Ignore storage failures and keep the runtime usable.
+  }
+}
+
 function createLayerModel() {
-  const STORAGE_KEY = "layerv2.layerState.v1";
-  const DEFS_STORAGE_KEY = "layerv2.dynamicDefs.v1";
-  const APPEARANCE_STATE_KEY = "__appearance__";
-  const LEGACY_SETTINGS_BACKGROUND_STORAGE_KEY = "layerv2.layerMenuAppearance.v1";
-  const LEGACY_SCREEN_BACKGROUND_STORAGE_KEY = "layerv2.screenAppearance.v1";
   const layerDefinitions = createLayerDefinitions();
   const rootDynamicRows = []; // top-level user-added layers
   const dynamicIds = new Set(); // IDs of all dynamically added rows
@@ -365,6 +384,16 @@ function createLayerModel() {
 
   function getState() {
     return structuredClone(layerState);
+  }
+
+  function getPersistenceSnapshot() {
+    return {
+      layerState: structuredClone(layerState),
+      dynamicDefs: {
+        rootRows: structuredClone(rootDynamicRows),
+        staticAdditions: structuredClone(Object.fromEntries(staticParentAdditions)),
+      },
+    };
   }
 
   function normalizeAppearanceColor(value, fallback) {
@@ -1039,6 +1068,7 @@ function createLayerModel() {
     getDefinitions,
     getAppearanceState,
     getRootRows,
+    getPersistenceSnapshot,
     getRootParentId,
     getRowById,
     getRowValue,
@@ -1063,4 +1093,7 @@ function createLayerModel() {
   };
 }
 
-export { createLayerModel };
+export {
+  createLayerModel,
+  saveLayerPersistenceSnapshot,
+};

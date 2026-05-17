@@ -1,8 +1,7 @@
-import { createLayerModel } from "../core/layer-model.js";
+import { createLayerModel, saveLayerPersistenceSnapshot } from "../core/layer-model.js";
 import { getProjectionRegistry } from "../core/projection/projection-registry.js";
 import { createStyleModel } from "../core/style-model.js";
 import { createViewModel } from "../core/view-model.js";
-import { createShareStateUrl } from "../export/qr/state-url.js";
 import { enableLayerMenuControls } from "./layer-menu-controls.js";
 import { renderLayerMenuRows } from "./layer-menu-renderer.js";
 import { createPrintRendererAdapter } from "../renderers/print/print-renderer.js";
@@ -10,13 +9,18 @@ import { createScreenRendererAdapter } from "../renderers/screen/screen-renderer
 import { createEditableRuntimeStore } from "../sources/editable/runtime-store.js";
 import { createPmtilesManifest } from "../sources/pmtiles/source-manifest.js";
 import { getRowRuntimeTargetId, getRowStateKey } from "../core/layer-definitions.js";
+import { bindShareControls, readShareSnapshotFromLocation } from "./share-controls.js";
 
 const supabaseLayerDataCache = new Map();
 
 async function bootstrapApplication() {
-  const layerModel = createLayerModel();
   const styleModel = createStyleModel();
-  const viewModel = createViewModel();
+  const sharedSnapshot = await readShareSnapshotFromLocation();
+  if (sharedSnapshot?.layers) {
+    saveLayerPersistenceSnapshot(sharedSnapshot.layers);
+  }
+  const layerModel = createLayerModel();
+  const viewModel = createViewModel(sharedSnapshot?.view);
   const pmtilesManifest = createPmtilesManifest();
   const editableStore = createEditableRuntimeStore();
   const screenRenderer = createScreenRendererAdapter();
@@ -309,9 +313,14 @@ async function bootstrapApplication() {
     },
     screenRuntime: screenRuntime.getStatus(),
     mapStartupError: mapStartupError ? String(mapStartupError?.message ?? mapStartupError) : null,
-    shareUrl: createShareStateUrl(viewState),
+    shareUrl: null,
     rerenderLayerMenu,
   };
+  bindShareControls({
+    layerModel,
+    screenRuntime,
+    viewModel,
+  });
 
   const startMapRuntime = async () => {
     try {
@@ -441,6 +450,9 @@ function createDeferredScreenRuntime() {
         startupMode: startupError ? "startup-failed" : "loading-map-runtime",
         liveMap: false,
       };
+    },
+    getCameraState() {
+      return runtime?.getCameraState?.() ?? null;
     },
     mount(container) {
       withRuntime((target) => target.mount?.(container));

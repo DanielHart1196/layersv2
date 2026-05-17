@@ -137,6 +137,96 @@ ul {
     inset 0 0 0 1px rgba(0, 0, 0, 0.88);
 }
 
+.map-share-wrap {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 9;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: #f8f8f8;
+  color: #000000;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.map-share-print,
+.map-share-button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+}
+
+.map-share-button {
+  width: auto;
+}
+
+.map-share-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.map-share-separator {
+  pointer-events: none;
+  user-select: none;
+}
+
+.map-share-popup {
+  position: fixed;
+  top: 50%;
+  left: 18px;
+  transform: translateY(-50%);
+  z-index: 13;
+  display: grid;
+  gap: 12px;
+  width: min(360px, calc(100vw - 36px));
+  padding: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.28);
+  border-radius: 8px;
+  background: #f8f8f8;
+  color: #101820;
+  font-family: Georgia, "Times New Roman", serif;
+}
+
+.map-share-popup[hidden] {
+  display: none;
+}
+
+.map-share-popup-title {
+  margin: 0;
+  color: #101820;
+  font-size: 1rem;
+}
+
+.map-share-popup-url {
+  margin: 0;
+  color: #5f6a70;
+  font-size: 0.84rem;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.map-share-popup-hint {
+  margin: 0;
+  color: #5f6a70;
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
 .map-compass {
   position: absolute;
   right: 14px;

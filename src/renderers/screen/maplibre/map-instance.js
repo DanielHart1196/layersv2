@@ -1814,6 +1814,18 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     getMap() {
       return map;
     },
+    getCameraState() {
+      const center = map.getCenter();
+      return {
+        center: {
+          longitude: center.lng,
+          latitude: center.lat,
+        },
+        zoom: map.getZoom(),
+        bearing: map.getBearing(),
+        pitch: map.getPitch(),
+      };
+    },
     getZoom() {
       return map.getZoom();
     },

@@ -95,6 +95,10 @@ function createMaplibreScreenRuntime({
     };
   }
 
+  function getCameraState() {
+    return mapInstance?.getCameraState?.() ?? null;
+  }
+
   function mount(container) {
     if (!container || mapInstance) {
       return;
@@ -124,6 +128,7 @@ function createMaplibreScreenRuntime({
 
   return {
     destroy,
+    getCameraState,
     getStatus,
     mount,
     renderStage,

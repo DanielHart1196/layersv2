@@ -12,6 +12,8 @@
   --row-surface: rgba(8, 18, 26, 0.72);
   --row-surface-nested: rgba(18, 35, 48, 0.56);
   --row-border: rgba(255, 255, 255, 0.22);
+  --map-control-edge: 18px;
+  --layer-menu-button-inset: 8px;
 }
 
 * {
@@ -87,20 +89,31 @@ ul {
   opacity: 0;
 }
 
-.map-title {
+.map-title-shell {
   position: fixed;
   top: 80px;
-  left: 18px;
+  left: var(--map-control-edge);
+  --map-title-right-reserve: 72px;
   z-index: 9;
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  align-items: flex-start;
   min-width: 48px;
   min-height: 32px;
-  max-width: min(360px, calc(100vw - 128px));
-  padding: 0 6px;
+  max-width: min(520px, calc(100vw - var(--map-control-edge) - var(--map-title-right-reserve)));
+  padding: 3px 6px;
   border: 0;
   border-radius: 8px;
   background: #f8f8f8;
+}
+
+.map-title {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: #000000;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 1.2rem;
@@ -111,8 +124,19 @@ ul {
   cursor: text;
 }
 
+body:has(.layer-menu.is-open) .map-title-shell {
+  --map-title-right-reserve: 156px;
+  height: 32px;
+}
+
+body:has(.layer-menu.is-open) .map-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .map-title:focus-visible {
-  outline: 1px dashed rgba(0, 0, 0, 0.42);
+  outline: none;
   outline-offset: 2px;
 }
 
@@ -175,7 +199,7 @@ ul {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 36px;
+  height: 32px;
   padding: 2px 6px;
   border-radius: 8px;
   background: #f8f8f8;
@@ -369,7 +393,7 @@ ul {
 .layer-menu {
   position: fixed;
   top: 72px;
-  right: 14px;
+  right: calc(var(--map-control-edge) - var(--layer-menu-button-inset));
   z-index: 10;
   --layer-menu-card-bg: #f8f8f8;
   --row-surface: #f8f8f8;
@@ -445,7 +469,7 @@ ul {
 .layer-menu-button::before {
   content: "";
   position: absolute;
-  inset: 8px;
+  inset: var(--layer-menu-button-inset);
   border: 0;
   border-radius: 10px;
   background: var(--layer-menu-card-bg);
@@ -737,12 +761,13 @@ ul {
 }
 
 .layer-menu-panel {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  width: min(320px, calc(100vw - 28px));
-  min-width: min(196px, calc(100vw - 28px));
-  max-width: calc(100vw - 28px);
+  position: fixed;
+  top: 130px;
+  left: 50%;
+  width: min(320px, calc(100vw - (var(--map-control-edge) * 2)));
+  min-width: min(196px, calc(100vw - (var(--map-control-edge) * 2)));
+  max-width: calc(100vw - (var(--map-control-edge) * 2));
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   border: 0;
@@ -1493,21 +1518,21 @@ body.is-reordering-rows {
     right: 12px;
   }
 
-  .map-title {
+  .map-title-shell {
     top: 78px;
   }
 
   .layer-menu {
     top: 70px;
-    right: 12px;
   }
 }
 
 @media (hover: none), (pointer: coarse) {
   .layer-menu-panel {
-    width: min(320px, calc(100vw - 24px));
-    min-width: min(220px, calc(100vw - 24px));
-    max-width: calc(100vw - 24px);
+    top: 128px;
+    width: calc(100vw - (var(--map-control-edge) * 2));
+    min-width: min(220px, calc(100vw - (var(--map-control-edge) * 2)));
+    max-width: calc(100vw - (var(--map-control-edge) * 2));
   }
 
   .layer-menu.is-open .layer-menu-button,

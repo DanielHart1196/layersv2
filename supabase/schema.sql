@@ -93,6 +93,7 @@ create table datasets (
   maxzoom           int,
   bounds            jsonb,
   artifact_metadata jsonb       not null default '{}',
+  feature_inspector jsonb       not null default '{}',
   feature_count     int         not null default 0,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
@@ -232,6 +233,7 @@ alter table features enable row level security;
 -- Spatial index — essential for viewport queries
 create index features_geometry_idx  on features using gist(geometry);
 create index features_dataset_id_idx on features(dataset_id);
+create index features_dataset_id_created_at_idx on features(dataset_id, created_at);
 create index features_valid_from_idx on features(valid_from);
 create index features_valid_to_idx   on features(valid_to);
 
@@ -310,34 +312,76 @@ returns void language sql security definer as $$
   where id = p_layer_id;
 $$;
 
--- Keep feature_count summary fields in sync.
-create or replace function sync_feature_counts()
+-- Keep feature_count summary fields in sync with one aggregate update per insert/delete statement.
+create or replace function sync_feature_counts_insert()
 returns trigger language plpgsql security definer as $$
-declare
-  v_layer_id uuid;
 begin
-  if TG_OP = 'INSERT' then
-    update datasets set feature_count = feature_count + 1, updated_at = now()
-    where id = NEW.dataset_id
-    returning layer_id into v_layer_id;
+  with dataset_counts as (
+    select dataset_id, count(*)::int as feature_delta
+    from new_rows
+    group by dataset_id
+  )
+  update datasets d
+  set feature_count = d.feature_count + dataset_counts.feature_delta,
+      updated_at = now()
+  from dataset_counts
+  where d.id = dataset_counts.dataset_id;
 
-    update layers set feature_count = feature_count + 1, updated_at = now()
-    where id = v_layer_id;
-  elsif TG_OP = 'DELETE' then
-    update datasets set feature_count = feature_count - 1, updated_at = now()
-    where id = OLD.dataset_id
-    returning layer_id into v_layer_id;
+  with layer_counts as (
+    select d.layer_id, count(*)::int as feature_delta
+    from new_rows nr
+    join datasets d on d.id = nr.dataset_id
+    group by d.layer_id
+  )
+  update layers l
+  set feature_count = l.feature_count + layer_counts.feature_delta,
+      updated_at = now()
+  from layer_counts
+  where l.id = layer_counts.layer_id;
 
-    update layers set feature_count = feature_count - 1, updated_at = now()
-    where id = v_layer_id;
-  end if;
   return null;
 end;
 $$;
 
-create trigger on_feature_change
-  after insert or delete on features
-  for each row execute function sync_feature_counts();
+create or replace function sync_feature_counts_delete()
+returns trigger language plpgsql security definer as $$
+begin
+  with dataset_counts as (
+    select dataset_id, count(*)::int as feature_delta
+    from old_rows
+    group by dataset_id
+  )
+  update datasets d
+  set feature_count = greatest(0, d.feature_count - dataset_counts.feature_delta),
+      updated_at = now()
+  from dataset_counts
+  where d.id = dataset_counts.dataset_id;
+
+  with layer_counts as (
+    select d.layer_id, count(*)::int as feature_delta
+    from old_rows orows
+    join datasets d on d.id = orows.dataset_id
+    group by d.layer_id
+  )
+  update layers l
+  set feature_count = greatest(0, l.feature_count - layer_counts.feature_delta),
+      updated_at = now()
+  from layer_counts
+  where l.id = layer_counts.layer_id;
+
+  return null;
+end;
+$$;
+
+create trigger on_feature_insert_count
+  after insert on features
+  referencing new table as new_rows
+  for each statement execute function sync_feature_counts_insert();
+
+create trigger on_feature_delete_count
+  after delete on features
+  referencing old table as old_rows
+  for each statement execute function sync_feature_counts_delete();
 
 create or replace function sync_layer_geometry_type()
 returns trigger language plpgsql security definer as $$

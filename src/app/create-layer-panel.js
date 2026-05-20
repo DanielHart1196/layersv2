@@ -480,8 +480,11 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     }
   }
 
-  async function ensureExistingLayersLoaded() {
-    if (state.existingLayersLoaded || state.existingLayersLoading) {
+  async function ensureExistingLayersLoaded({ forceRefresh = false } = {}) {
+    if (!forceRefresh && (state.existingLayersLoaded || state.existingLayersLoading)) {
+      return;
+    }
+    if (forceRefresh && state.existingLayersLoading) {
       return;
     }
 
@@ -490,7 +493,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
     render();
 
     try {
-      const layers = await getSupabaseCatalog();
+      const layers = await getSupabaseCatalog({ forceRefresh });
       state.existingLayers = Array.isArray(layers) ? layers : [];
       state.existingLayersLoaded = true;
     } catch (error) {
@@ -536,7 +539,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
         }
         state.mode = nextMode;
         if (nextMode === CREATE_LAYER_MODE_EXISTING) {
-          void ensureExistingLayersLoaded();
+          void ensureExistingLayersLoaded({ forceRefresh: true });
         }
         render();
       });
@@ -2049,7 +2052,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       state = createInitialState({ parentId: state.parentId });
       render();
       if (state.mode === CREATE_LAYER_MODE_EXISTING) {
-        void ensureExistingLayersLoaded();
+        void ensureExistingLayersLoaded({ forceRefresh: true });
       }
     });
     el.querySelector("#clpClose")?.addEventListener("click", close);
@@ -2070,7 +2073,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       panel.classList.add("is-open");
       render();
       if (state.mode === CREATE_LAYER_MODE_EXISTING) {
-        void ensureExistingLayersLoaded();
+        void ensureExistingLayersLoaded({ forceRefresh: true });
       }
       if (shouldAutofocusCreateLayerName()) {
         requestAnimationFrame(() => panel.querySelector(

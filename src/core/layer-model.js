@@ -20,7 +20,7 @@ const LEGACY_SCREEN_BACKGROUND_STORAGE_KEY = "layerv2.screenAppearance.v1";
 function saveLayerPersistenceSnapshot(snapshot = {}) {
   try {
     if (snapshot.layerState && typeof snapshot.layerState === "object") {
-      window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(snapshot.layerState));
+      window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(stripExpansionState(snapshot.layerState)));
     }
     if (snapshot.dynamicDefs && typeof snapshot.dynamicDefs === "object") {
       window.localStorage?.setItem(DEFS_STORAGE_KEY, JSON.stringify({
@@ -33,6 +33,19 @@ function saveLayerPersistenceSnapshot(snapshot = {}) {
   } catch (_error) {
     // Ignore storage failures and keep the runtime usable.
   }
+}
+
+function stripExpansionState(state) {
+  if (!state || typeof state !== "object") {
+    return state;
+  }
+  const nextState = structuredClone(state);
+  Object.values(nextState).forEach((record) => {
+    if (record && typeof record === "object") {
+      delete record.expanded;
+    }
+  });
+  return nextState;
 }
 
 function createLayerModel() {
@@ -208,6 +221,7 @@ function createLayerModel() {
   }
 
   const layerState = hydrateLayerState();
+  const expandedRowIds = new Set();
   hydrateDynamicDefs(); // must run after hydrateLayerState so state exists for dynamic rows
   delete layerState.transport;
   delete layerState.olympics;
@@ -236,6 +250,9 @@ function createLayerModel() {
         }
 
         Object.keys(defaults).forEach((key) => {
+          if (key === "expanded") {
+            return;
+          }
           if (persisted[key] !== undefined) {
             baseState[layerId][key] = persisted[key];
           }
@@ -247,6 +264,7 @@ function createLayerModel() {
       Object.entries(parsed).forEach(([layerId, state]) => {
         if (!baseState[layerId] && state && typeof state === "object") {
           baseState[layerId] = { ...state };
+          delete baseState[layerId].expanded;
         }
       });
     } catch (_error) {
@@ -258,7 +276,7 @@ function createLayerModel() {
 
   function persistLayerState() {
     try {
-      window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(layerState));
+      window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(stripExpansionState(layerState)));
     } catch (_error) {
       // Ignore storage failures and keep the runtime usable.
     }
@@ -383,12 +401,12 @@ function createLayerModel() {
   }
 
   function getState() {
-    return structuredClone(layerState);
+    return stripExpansionState(layerState);
   }
 
   function getPersistenceSnapshot() {
     return {
-      layerState: structuredClone(layerState),
+      layerState: stripExpansionState(layerState),
       dynamicDefs: {
         rootRows: structuredClone(rootDynamicRows),
         staticAdditions: structuredClone(Object.fromEntries(staticParentAdditions)),
@@ -531,18 +549,53 @@ function createLayerModel() {
   }
 
   function isExpanded(layerId) {
-    return layerState[layerId]?.expanded === true;
+    return expandedRowIds.has(layerId);
+  }
+
+  function isStyleChildRow(row) {
+    return row?.type === "fill" || row?.type === "line" || row?.type === "point";
+  }
+
+  function collapseDescendantRows(parentId) {
+    getChildRows(parentId).forEach((childRow) => {
+      if (!childRow?.id) {
+        return;
+      }
+      expandedRowIds.delete(childRow.id);
+      collapseDescendantRows(childRow.id);
+    });
+  }
+
+  function prepareRowChildrenForOpen(parentId) {
+    const childRows = getChildRows(parentId);
+    childRows.forEach((childRow) => {
+      if (!childRow?.id) {
+        return;
+      }
+      expandedRowIds.delete(childRow.id);
+      collapseDescendantRows(childRow.id);
+    });
+
+    const styleChildRows = childRows.filter(isStyleChildRow);
+    if (styleChildRows.length === 1 && styleChildRows[0]?.id) {
+      expandedRowIds.add(styleChildRows[0].id);
+    }
   }
 
   function toggleExpanded(layerId) {
-    const record = layerState[layerId];
-    if (!record || typeof record.expanded !== "boolean") {
+    if (!rowDefinitionsById.has(layerId) && !layerDefinitions[layerId]) {
       return null;
     }
 
-    record.expanded = !record.expanded;
-    persistLayerState();
-    return record.expanded;
+    if (expandedRowIds.has(layerId)) {
+      expandedRowIds.delete(layerId);
+      collapseDescendantRows(layerId);
+      return false;
+    }
+
+    expandedRowIds.add(layerId);
+    prepareRowChildrenForOpen(layerId);
+    return true;
   }
 
   function toggleVisibility(layerId) {
@@ -999,6 +1052,32 @@ function createLayerModel() {
     return newRow;
   }
 
+  function renameDataRowByLayerRef(layerRef, name) {
+    const nextName = String(name ?? "").trim();
+    if (!layerRef || !nextName) {
+      return null;
+    }
+
+    let renamedRow = null;
+    dynamicIds.forEach((rowId) => {
+      if (renamedRow) {
+        return;
+      }
+      const row = rowDefinitionsById.get(rowId);
+      if (row?.type === "layer" && row.layerRef === layerRef) {
+        row.label = nextName;
+        renamedRow = row;
+      }
+    });
+
+    if (!renamedRow) {
+      return null;
+    }
+
+    persistDynamicDefs();
+    return structuredClone(renamedRow);
+  }
+
   function setChildRowOrder(parentId, nextOrder) {
     if (!getParentRows(parentId).length || !Array.isArray(nextOrder)) {
       return null;
@@ -1079,10 +1158,12 @@ function createLayerModel() {
     isRowVisible,
     isDynamic: (rowId) => dynamicIds.has(rowId),
     normalizeChildRowOrder,
+    prepareRowChildrenForOpen,
     getOrderedChildRowIds,
     getOrderedChildRows,
     reorderChildRow,
     removeRow,
+    renameDataRowByLayerRef,
     setChildRowOrder,
     setAppearanceValue,
     setRowValue,

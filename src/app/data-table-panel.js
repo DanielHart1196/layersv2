@@ -2,7 +2,6 @@ import { buildPreviewTableMarkup, bindPreviewTableInteractions } from "./shared/
 
 const PREVIEW_PAGE_SIZE = 50;
 const INITIAL_LOAD_SIZE = 50;
-const BACKGROUND_LOAD_SIZE = 200;
 const MIN_PREVIEW_COLUMN_WIDTH = 96;
 const PREVIEW_RESIZE_HIT_WIDTH = 8;
 const PREVIEW_REORDER_HIT_HEIGHT = 10;
@@ -142,7 +141,7 @@ function renameObjectKey(target, fromKey, toKey) {
   return Object.fromEntries(Object.entries(target).map(([key, value]) => [key === fromKey ? toKey : key, value]));
 }
 
-export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getLayerDatasets, onAddDataRequested, onRenameDataset, onUpdateDatasetMetadata }) {
+export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getLayerDatasets, onAddDataRequested, onRenameLayer, onRenameDataset, onUpdateDatasetMetadata }) {
   const panel = createPanelShell();
   document.body.appendChild(panel);
 
@@ -153,6 +152,7 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       layerId: "",
       layerName: "",
       editableLayerName: "",
+      layerRenameSaving: false,
       datasets: [],
       datasetsLoading: false,
       selectedDatasetId: "",
@@ -268,6 +268,38 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       state.datasetNameDraft = selectedDataset.name ?? "";
     } finally {
       state.datasetRenameSaving = false;
+      render();
+    }
+  }
+
+  async function commitLayerRename(rawName) {
+    const nextName = String(rawName ?? "").trim();
+    if (!state.layerId) {
+      return;
+    }
+    if (!nextName) {
+      state.editableLayerName = state.layerName || "Layer";
+      render();
+      return;
+    }
+    if (nextName === state.layerName) {
+      state.editableLayerName = nextName;
+      return;
+    }
+
+    state.layerRenameSaving = true;
+    state.error = "";
+    render();
+    try {
+      const result = await onRenameLayer?.({ layerId: state.layerId, name: nextName });
+      const savedName = result?.name ?? nextName;
+      state.layerName = savedName;
+      state.editableLayerName = savedName;
+    } catch (error) {
+      state.error = error?.message ?? "Failed to rename layer.";
+      state.editableLayerName = state.layerName || "Layer";
+    } finally {
+      state.layerRenameSaving = false;
       render();
     }
   }
@@ -526,7 +558,7 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
     const pageStart = rowCount ? pageOffset + 1 : 0;
     const pageEnd = Math.min(pageOffset + rows.length, rowCount);
     const canGoPrev = pageOffset > 0;
-    const canGoNext = pageOffset + PREVIEW_PAGE_SIZE < rowCount;
+    const canGoNext = pageOffset + PREVIEW_PAGE_SIZE < totalRowCount;
     const sortDisabled = !state.isFullyLoaded;
     const { head, body } = buildPreviewTableMarkup({
       headers,
@@ -543,6 +575,7 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
     const datasetOptions = (state.datasets ?? []).map((dataset) => `
       <option value="${escapeHtml(dataset.id)}"${dataset.id === state.selectedDatasetId ? " selected" : ""}>${escapeHtml(`${dataset.name || "Dataset"} (${formatGeometryTypes(dataset.geometryTypes, dataset.geometry_type)})`)}</option>
     `).join("");
+    const layerInputDisabled = state.layerRenameSaving;
     const datasetInputDisabled = state.datasetsLoading || state.datasetRenameSaving || !selectedDataset;
     const licenseLabel = String(selectedDataset?.license ?? "").trim();
     const licenseUrl = String(selectedDataset?.license_url ?? "").trim();
@@ -559,14 +592,14 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
     const metadataControlsDisabled = state.metadataSaving || !selectedDataset;
     const summaryText = state.loading
       ? "Loading rows..."
-      : state.isBackgroundLoading && totalRowCount > rowCount
-        ? `Loading ${rowCount.toLocaleString()} of ${totalRowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns`
+      : totalRowCount > rowCount
+        ? `Showing ${rowCount.toLocaleString()} of ${totalRowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns`
         : `${rowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns`;
     content.innerHTML = `
       <div class="clp-preview dtv-preview">
         <label class="clp-field">
           <span class="clp-field-label">Layer name</span>
-          <input class="clp-field-input dtv-name-input" type="text" value="${escapeHtml(state.editableLayerName)}" placeholder="Layer name" />
+          <input class="clp-field-input dtv-name-input" type="text" value="${escapeHtml(state.editableLayerName)}" placeholder="Layer name" ${layerInputDisabled ? "disabled" : ""} />
         </label>
         <div class="dtv-dataset-row">
           <div class="dtv-dataset-picker">
@@ -643,7 +676,7 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
             <div class="clp-preview-pagination">
               <span class="clp-preview-page-range">${escapeHtml(`${pageStart}-${pageEnd}`)}</span>
               <button class="clp-undo-icon clp-preview-page-btn" id="dtvPrev" type="button" aria-label="Previous preview rows" ${canGoPrev ? "" : "disabled"}><span aria-hidden="true">&#8249;</span></button>
-              <button class="clp-undo-icon clp-preview-page-btn" id="dtvNext" type="button" aria-label="Next preview rows" ${canGoNext ? "" : "disabled"}><span aria-hidden="true">&#8250;</span></button>
+              <button class="clp-undo-icon clp-preview-page-btn" id="dtvNext" type="button" aria-label="Next preview rows" ${canGoNext && !state.loading ? "" : "disabled"}><span aria-hidden="true">&#8250;</span></button>
             </div>
           </div>
         ` : `<div class="dtv-empty">${state.loading ? "Loading..." : "No rows to show yet."}</div>`}
@@ -652,6 +685,20 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
 
     content.querySelector(".dtv-name-input")?.addEventListener("input", (event) => {
       state.editableLayerName = event.target.value;
+    });
+    content.querySelector(".dtv-name-input")?.addEventListener("blur", (event) => {
+      void commitLayerRename(event.target.value);
+    });
+    content.querySelector(".dtv-name-input")?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.currentTarget.blur();
+      }
+      if (event.key === "Escape") {
+        state.editableLayerName = state.layerName || "Layer";
+        event.currentTarget.value = state.editableLayerName;
+        event.currentTarget.blur();
+      }
     });
     content.querySelector(".dtv-dataset-name-input")?.addEventListener("input", (event) => {
       state.datasetNameDraft = event.target.value;
@@ -748,9 +795,7 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       render();
     });
     content.querySelector("#dtvNext")?.addEventListener("click", () => {
-      state.previewPageOffset += PREVIEW_PAGE_SIZE;
-      syncPreviewPageRows();
-      render();
+      void goToPreviewPage(state.previewPageOffset + PREVIEW_PAGE_SIZE);
     });
     if (headers.length) {
       bindPreviewTableInteractions(content, {
@@ -797,6 +842,48 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
     }
   }
 
+  async function goToPreviewPage(nextOffset) {
+    const safeOffset = Math.max(0, Number(nextOffset) || 0);
+    if (safeOffset < state.allRows.length) {
+      state.previewPageOffset = safeOffset;
+      syncPreviewPageRows();
+      render();
+      return;
+    }
+
+    if (!state.layerId || !state.selectedDatasetId || state.loading) {
+      return;
+    }
+
+    const requestId = state.loadRequestId;
+    state.loading = true;
+    render();
+    try {
+      const result = await loadTablePreview(state.layerId, {
+        limit: PREVIEW_PAGE_SIZE,
+        offset: safeOffset,
+        datasetId: state.selectedDatasetId,
+      });
+      if (requestId !== state.loadRequestId) {
+        return;
+      }
+      const fields = Array.isArray(result?.fields) ? result.fields : [];
+      const rows = Array.isArray(result?.rows) ? result.rows : [];
+      appendChunk(fields, rows, result?.totalRowCount);
+      state.previewPageOffset = safeOffset;
+      state.isBackgroundLoading = false;
+    } catch (error) {
+      if (requestId === state.loadRequestId) {
+        state.error = error?.message ?? "Failed to load preview rows.";
+      }
+    } finally {
+      if (requestId === state.loadRequestId) {
+        state.loading = false;
+        render();
+      }
+    }
+  }
+
   function syncRenderedBackgroundLoadUi() {
     if (!panel.classList.contains("is-open")) {
       return;
@@ -814,12 +901,13 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
     const rows = state.rows ?? [];
     const pageStart = rowCount ? pageOffset + 1 : 0;
     const pageEnd = Math.min(pageOffset + rows.length, rowCount);
+    const canGoNext = pageOffset + PREVIEW_PAGE_SIZE < totalRowCount;
     const sortDisabled = !state.isFullyLoaded;
 
     const summaryText = state.loading
       ? "Loading rows..."
-      : state.isBackgroundLoading && totalRowCount > rowCount
-        ? `Loading ${rowCount.toLocaleString()} of ${totalRowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns`
+      : totalRowCount > rowCount
+        ? `Showing ${rowCount.toLocaleString()} of ${totalRowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns`
         : `${rowCount.toLocaleString()} rows | ${columnCount.toLocaleString()} columns`;
 
     const summaryEl = content.querySelector(".upload-step-sub");
@@ -839,7 +927,7 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
 
     const nextButton = content.querySelector("#dtvNext");
     if (nextButton) {
-      nextButton.disabled = pageOffset + PREVIEW_PAGE_SIZE >= rowCount;
+      nextButton.disabled = state.loading || !canGoNext;
     }
 
     content.querySelectorAll(".clp-col-sort").forEach((button) => {
@@ -849,25 +937,6 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
         ? "Sort available when all rows are loaded"
         : `Sort ${columnName}`;
     });
-  }
-
-  async function loadRemainingRows(layerId, datasetId, offset, requestId) {
-    let nextOffset = offset;
-    while (requestId === state.loadRequestId) {
-      const result = await loadTablePreview(layerId, { limit: BACKGROUND_LOAD_SIZE, offset: nextOffset, datasetId });
-      if (requestId !== state.loadRequestId) {
-        return;
-      }
-      const fields = Array.isArray(result?.fields) ? result.fields : [];
-      const rows = Array.isArray(result?.rows) ? result.rows : [];
-      appendChunk(fields, rows, result?.totalRowCount);
-      state.isBackgroundLoading = Boolean(result?.hasMore);
-      syncRenderedBackgroundLoadUi();
-      if (!result?.hasMore || !rows.length) {
-        break;
-      }
-      nextOffset += rows.length;
-    }
   }
 
   async function loadDatasets(layerId) {
@@ -937,13 +1006,9 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       const fields = Array.isArray(result?.fields) ? result.fields : [];
       const rows = Array.isArray(result?.rows) ? result.rows : [];
       appendChunk(fields, rows, result?.totalRowCount);
-      state.isBackgroundLoading = Boolean(result?.hasMore);
+      state.isBackgroundLoading = false;
       state.loading = false;
       render();
-
-      if (state.isBackgroundLoading) {
-        await loadRemainingRows(layerId, datasetId, state.rowCount, requestId);
-      }
     } catch (error) {
       if (requestId !== state.loadRequestId) {
         return;

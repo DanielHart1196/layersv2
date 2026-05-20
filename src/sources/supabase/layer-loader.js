@@ -175,7 +175,7 @@ async function loadLayerDatasets(layerId) {
   const supabase = requireSupabase();
   const { data, error } = await supabase
     .from("datasets")
-    .select("id, layer_id, name, license, license_url, attribution, geometry_type, geometry_types, field_schema, render_format, artifact_url, source_layer, minzoom, maxzoom, bounds, artifact_metadata, feature_count, created_at")
+    .select("id, layer_id, name, license, license_url, attribution, geometry_type, geometry_types, field_schema, render_format, artifact_url, source_layer, minzoom, maxzoom, bounds, artifact_metadata, feature_inspector, feature_count, created_at")
     .eq("layer_id", layerId)
     .order("created_at", { ascending: true });
 
@@ -205,6 +205,37 @@ export async function updateDatasetName(datasetId, name) {
   return { id: datasetId, name: nextName };
 }
 
+export async function updateLayerName(layerId, name) {
+  const supabase = requireSupabase();
+  const nextName = String(name ?? "").trim();
+  if (!layerId || !nextName) {
+    throw new Error("Layer name cannot be empty.");
+  }
+
+  const { error } = await supabase
+    .from("layers")
+    .update({ name: nextName })
+    .eq("id", layerId);
+
+  if (error) {
+    throw new Error(`Failed to rename layer: ${error.message}`);
+  }
+
+  if (Array.isArray(catalogCache)) {
+    catalogCache = catalogCache.map((layer) => (
+      layer?.id === layerId ? { ...layer, label: nextName, name: nextName } : layer
+    ));
+    catalogCache.sort((left, right) => String(left?.label ?? "").localeCompare(String(right?.label ?? "")));
+  }
+
+  return { id: layerId, name: nextName };
+}
+
+export function invalidateSupabaseCatalogCache() {
+  catalogCache = null;
+  catalogRequest = null;
+}
+
 export async function updateDatasetMetadata(datasetId, { license = "", licenseUrl = "", attribution = "" } = {}) {
   const supabase = requireSupabase();
   if (!datasetId) {
@@ -229,6 +260,51 @@ export async function updateDatasetMetadata(datasetId, { license = "", licenseUr
   }
 
   return data;
+}
+
+export async function updateDatasetFeatureInspector(datasetId, featureInspector = {}) {
+  const supabase = requireSupabase();
+  if (!datasetId) {
+    throw new Error("Dataset is required.");
+  }
+  const nextFeatureInspector = featureInspector && typeof featureInspector === "object"
+    ? featureInspector
+    : {};
+
+  const { data, error } = await supabase
+    .from("datasets")
+    .update({ feature_inspector: nextFeatureInspector })
+    .eq("id", datasetId)
+    .select("id, feature_inspector")
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to update feature panel defaults: ${error.message}`);
+  }
+
+  return data;
+}
+
+export async function updateLayerDatasetsFeatureInspector(layerId, featureInspector = {}) {
+  const supabase = requireSupabase();
+  if (!layerId) {
+    throw new Error("Layer is required.");
+  }
+  const nextFeatureInspector = featureInspector && typeof featureInspector === "object"
+    ? featureInspector
+    : {};
+
+  const { data, error } = await supabase
+    .from("datasets")
+    .update({ feature_inspector: nextFeatureInspector })
+    .eq("layer_id", layerId)
+    .select("id, feature_inspector");
+
+  if (error) {
+    throw new Error(`Failed to apply feature panel defaults to layer: ${error.message}`);
+  }
+
+  return Array.isArray(data) ? data : [];
 }
 
 // Merges a partial style patch into the layer's default_style in Supabase.
@@ -293,40 +369,6 @@ export async function getLayerDatasets(layerId) {
   return loadLayerDatasets(layerId);
 }
 
-// Returns sorted distinct values for a specific property field, sampled from up to 200 features.
-export async function getLayerFieldValues(layerId, field) {
-  const supabase = requireSupabase();
-  const datasets = await loadLayerDatasets(layerId);
-  const datasetIds = datasets.map((dataset) => dataset.id);
-
-  if (!datasetIds.length) {
-    return null;
-  }
-
-  const { data, error } = await supabase
-    .from("features")
-    .select("properties")
-    .in("dataset_id", datasetIds)
-    .limit(200);
-
-  if (error || !data?.length) return null;
-
-  const seen = new Set();
-  for (const row of data) {
-    const value = row.properties?.[field];
-    if (value !== undefined && value !== null && value !== "") {
-      seen.add(value);
-    }
-  }
-
-  if (!seen.size) return null;
-
-  return [...seen].sort((a, b) => {
-    if (typeof a === "number" && typeof b === "number") return a - b;
-    return String(a).localeCompare(String(b));
-  });
-}
-
 // Returns sorted unique property field names for a layer.
 export async function getLayerFields(layerId) {
   const supabase = requireSupabase();
@@ -358,6 +400,51 @@ export async function getLayerFields(layerId) {
   }
 
   return [...keys].filter((key) => !key.startsWith("_")).sort();
+}
+
+export async function getLayerFieldValues(layerId, fieldKey, { limit = 200 } = {}) {
+  const supabase = requireSupabase();
+  const key = String(fieldKey ?? "").trim();
+  if (!layerId || !key) {
+    return [];
+  }
+
+  const datasets = await loadLayerDatasets(layerId);
+  const datasetIds = datasets.map((dataset) => dataset.id);
+  if (!datasetIds.length) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from("features")
+    .select("properties")
+    .in("dataset_id", datasetIds)
+    .limit(Math.max(1, Math.min(1000, Number(limit) || 200)));
+
+  if (error || !data?.length) {
+    return [];
+  }
+
+  const values = new Set();
+  data.forEach((row) => {
+    if (!row?.properties || typeof row.properties !== "object" || !Object.hasOwn(row.properties, key)) {
+      return;
+    }
+    const value = row.properties[key];
+    if (value === null || value === undefined) {
+      return;
+    }
+    values.add(String(value));
+  });
+
+  return [...values].sort((a, b) => {
+    const an = Number(a);
+    const bn = Number(b);
+    if (Number.isFinite(an) && Number.isFinite(bn)) {
+      return an - bn;
+    }
+    return a.localeCompare(b);
+  });
 }
 
 export async function getLayerTablePreview(layerId, { limit = 50, offset = 0, datasetId = "" } = {}) {

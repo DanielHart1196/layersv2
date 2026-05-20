@@ -4,7 +4,7 @@ import { inferFieldSchemaFromFeatures } from "../upload/field-schema.js";
 import { summarizeFeatureComplexity } from "../upload/feature-complexity.js";
 import { inferGeometryFamilies } from "../upload/geometry-family.js";
 import { addDatasetToLayer, appendFeaturesToDataset } from "../upload/insert-layer.js";
-import { getLayerDatasets as fetchLayerDatasets } from "../sources/supabase/layer-loader.js";
+import { getLayerDatasets as fetchLayerDatasets, getSupabaseCatalog } from "../sources/supabase/layer-loader.js";
 import { buildPreviewTableMarkup, bindPreviewTableInteractions } from "./shared/preview-table.js";
 
 const MIN_PREVIEW_COLUMN_WIDTH = 96;
@@ -554,8 +554,11 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
     }
   }
 
-  async function ensureExistingLayersLoaded() {
-    if (state.existingLayersLoaded || state.existingLayersLoading) {
+  async function ensureExistingLayersLoaded({ forceRefresh = false } = {}) {
+    if (!forceRefresh && (state.existingLayersLoaded || state.existingLayersLoading)) {
+      return;
+    }
+    if (forceRefresh && state.existingLayersLoading) {
       return;
     }
 
@@ -564,7 +567,7 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
     render();
 
     try {
-      const layers = await getSupabaseCatalog();
+      const layers = await getSupabaseCatalog({ forceRefresh });
       state.existingLayers = Array.isArray(layers) ? layers : [];
       state.existingLayersLoaded = true;
     } catch (error) {
@@ -611,6 +614,7 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
         state.mode = nextMode;
         state.error = "";
         if (nextMode === ADD_DATA_MODE_EXISTING) {
+          void ensureExistingLayersLoaded({ forceRefresh: true });
           if (!state.selectedDatasetId && state.datasets.length) {
             state.selectedDatasetId = state.datasets[0].id;
           }

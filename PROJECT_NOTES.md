@@ -276,6 +276,13 @@
 - Do not accept "bridge" refactors that make rows share shape while preserving special runtime behavior for `layer` rows.
 - If a row kind cannot yet support the shared runtime contract, call that out explicitly instead of treating it as already unified.
 - Filter rows should be generic query rows with presentation hints, not bespoke business widgets.
+- Future style-row undo should be transient UI state, not persisted or shared:
+  - only one undo affordance should be visible at a time
+  - the undo button should attach to the last edited `point-style`, `line-style`, or `fill-style` row
+  - the button should sit in the row header near existing row tools, likely left of the drag handle when present
+  - undo should restore that row's values to the baseline captured before the first edit in the current edit session for that row
+  - editing another style row should move the undo affordance there and clear the previous visible undo
+  - removing or hiding the row should clear its transient undo state
 - Filters should be able to target either:
   - dataset source
   - feature field/value conditions
@@ -377,6 +384,147 @@
   - direct GeoJSON for regional area fill
   - PMTiles or other delivery for outline/linework when useful
 - If a polygon-fill GeoJSON already gives the correct land edge, the matching line can come from stroking that same polygon source instead of maintaining a second outline delivery path.
+
+## Core Atlas Source Plan
+- Build broad public atlas content as first-class shared layer rows, not as bespoke basemap toggles:
+  - `Nature`
+  - `People`
+  - `Borders`
+  - `Transport`
+  - `Terrain` / `Elevation` if terrain becomes more than a background style
+- These top-level rows should use the same shared parent/child row contract as uploaded layers:
+  - child rows own visibility and styling
+  - filters such as class, scale rank, population rank, road class, rail type, biome, and admin level should be normal filter rows
+  - shipped/static datasets should still expose provenance, license, and source metadata
+- Delivery defaults:
+  - Natural Earth scale data can be direct GeoJSON for MVP slices, but PMTiles is still preferred for consistent runtime behavior as layers accumulate.
+  - Dense global data from OSM, Overture, HydroSHEDS, population grids, contours, or admin composites must be tiled and scale-dependent.
+  - Avoid loading all global feature records into Supabase `features`; shipped atlas layers should be static artifacts plus metadata unless they need editable/queryable canonical records.
+  - If a dataset is enormous but stable, prefer generated PMTiles/static metadata over treating it like an uploaded user dataset.
+
+## Nature Source Plan
+- MVP sources:
+  - Natural Earth 10m/50m/110m physical vectors for rivers, lakes, reefs, glaciers/ice, playas, physical labels, and elevation points.
+  - RESOLVE Ecoregions 2017 for biomes/ecoregions; it has 846 terrestrial ecoregions, 14 biomes, 8 realms, biome colors, ecoregion names, and CC-BY 4.0 metadata.
+  - HydroSHEDS/HydroRIVERS/HydroLAKES/HydroBASINS for serious hydrology after the Natural Earth version proves the row/style structure.
+- Later sources:
+  - HydroATLAS if we want river/lake/basin environmental attributes, not only geometry.
+  - Allen Coral Atlas for detailed reef habitat/extent, with more processing because it is Earth Engine/raster-oriented rather than a small vector file.
+  - WDPA/Protected Planet for protected areas only after license constraints are reviewed; do not assume unrestricted commercial use.
+- Suggested child rows:
+  - `Biomes`
+  - `Ecoregions`
+  - `Rivers`
+  - `Lakes`
+  - `Wetlands / Mangroves`
+  - `Reefs`
+  - `Glaciers / Ice`
+  - `Peaks`
+  - `Volcanoes`
+  - `Protected Areas` only when licensing is clear
+- Styling notes:
+  - Biomes should probably be dissolved or filtered by `BIOME_NAME` at low zoom, with ecoregion detail available at higher zoom/click.
+  - Use RESOLVE/WWF biome categories for the actual data; Mapscaping's biome page is useful UX/color inspiration but is not a clear primary data source.
+  - Hydrology line width should derive from scale rank/order/discharge where available.
+- Source references checked:
+  - Natural Earth 10m physical vectors: https://www.naturalearthdata.com/downloads/10m-physical-vectors/
+  - RESOLVE Ecoregions 2017: https://developers.google.com/earth-engine/datasets/catalog/RESOLVE_ECOREGIONS_2017
+  - HydroSHEDS products: https://www.hydrosheds.org/products
+  - HydroATLAS: https://www.hydrosheds.org/hydroatlas
+  - Allen Coral Atlas in Earth Engine: https://developers.google.com/earth-engine/datasets/catalog/ACA_reef_habitat_v2_0
+  - WDPA license notes: https://www.unep-wcmc.org/en/wdpa-data-license
+
+## People Source Plan
+- MVP sources:
+  - Natural Earth cultural vectors for populated places and urban areas.
+  - Overture Maps `places`, `buildings`, and `addresses` for richer current human geography when we are ready for GeoParquet/DuckDB processing.
+  - GHSL or WorldPop for population density / settlement surfaces; these are raster/grid products and should not be forced through normal vector feature rows.
+- Suggested child rows:
+  - `Cities`
+  - `Towns / Settlements`
+  - `Urban Areas`
+  - `Population Density`
+  - `Buildings` only as regional/high-zoom tiles, not global direct GeoJSON
+  - `Places / POIs` only with aggressive filtering/search; global POI rendering can get noisy and heavy quickly
+- Delivery notes:
+  - Cities/populated places can start with Natural Earth points and scale ranks.
+  - Population density belongs in raster or tiled grid delivery.
+  - Overture is promising for standardized people/place data, but it has no single planet file; use bbox/cloud-native processing and generate our own PMTiles.
+- Source references checked:
+  - Natural Earth 10m cultural vectors: https://www.naturalearthdata.com/downloads/10m-cultural-vectors/
+  - Overture quickstart: https://docs.overturemaps.org/getting-data/
+  - Overture AWS registry/license notes: https://registry.opendata.aws/overture/
+  - Overture Explorer/PMTiles note: https://docs.overturemaps.org/getting-data/explore/
+  - GHSL overview: https://human-settlement.emergency.copernicus.eu/
+  - WorldPop: https://www.worldpop.org/
+
+## Borders Source Plan
+- MVP sources:
+  - Natural Earth cultural vectors for country polygons, boundary lines, admin-1 states/provinces, disputed areas, and map-friendly POV variants.
+  - geoBoundaries for open-license administrative boundaries when we need more current/global ADM0/ADM1/ADM2 composites.
+- Use GADM only with license caution; it is useful and detailed, but not the preferred default for open shipped Layers content.
+- Suggested child rows:
+  - `Countries`
+  - `Country Borders`
+  - `States / Provinces`
+  - `Admin Districts`
+  - `Disputed Areas`
+  - `Maritime / EEZ` later, after source/license selection
+- Delivery notes:
+  - Natural Earth is the cartographic default for global visual borders.
+  - geoBoundaries is better for explicit administrative datasets and downloadable/open-license composites.
+  - Political boundary worldview/POV must be explicit; do not silently mix de facto, de jure, disputed, and local POV boundaries.
+- Source references checked:
+  - Natural Earth 10m cultural vectors: https://www.naturalearthdata.com/downloads/10m-cultural-vectors/
+  - geoBoundaries: https://www.geoboundaries.org/
+  - GADM world download: https://gadm.org/download_world.html
+
+## Transport Source Plan
+- MVP sources:
+  - Natural Earth cultural vectors for global roads, railroads, airports, ports, and populated-place-adjacent transport at small scale.
+  - OpenStreetMap via Geofabrik extracts for serious roads, paths, tracks, rail, trams, subway/light rail, ferry routes, stations, and transport infrastructure.
+  - Overture Maps `transportation` as a standardized alternative/augmentation to raw OSM when we are ready for cloud-native processing.
+- Rail detail:
+  - OpenRailwayMap is useful as a schema/style reference for rail/tram/subway/electrification/gauge/speed concepts, but the underlying current railway data is OSM.
+  - OpenHistoricalMap may be needed for demolished/abandoned historical rail where OSM intentionally avoids non-existent features.
+- Suggested child rows:
+  - `Roads`
+  - `Tracks / Paths`
+  - `Rail`
+  - `Trams / Light Rail`
+  - `Subway / Metro`
+  - `Stations`
+  - `Ferries`
+  - `Airports`
+  - `Ports`
+- Delivery notes:
+  - Transport must be PMTiles/vector-tile-first at any serious scale.
+  - Use zoom-dependent filters and style classes; do not render every road/path/track at global zoom.
+  - Raw Geofabrik shapefiles may omit some OSM tags; for richer tagging, process `.osm.pbf` directly.
+- Source references checked:
+  - Geofabrik OSM downloads/extracts: https://www.geofabrik.de/geofabrik/openstreetmap.html
+  - Geofabrik data/shapefile notes: https://www.geofabrik.de/en/data/index.html
+  - OSM download approaches: https://wiki.openstreetmap.org/wiki/Download
+  - OpenRailwayMap overview: https://wiki.openstreetmap.org/wiki/OpenRailwayMap
+  - OSM railway tagging: https://wiki.openstreetmap.org/wiki/Railways
+  - Overture data: https://docs.overturemaps.org/getting-data/
+
+## Elevation / Terrain Source Plan
+- Treat elevation as two different products:
+  - visual terrain background: shaded relief, hillshade, DEM terrain, hypsometric tint
+  - queryable/vector layers: contours, elevation points, peaks, mountain ranges
+- MVP sources:
+  - Natural Earth raster relief/hypsometric products for immediate cartographic background if local raster delivery is acceptable.
+  - Natural Earth elevation points for lightweight named/major elevation points.
+  - Copernicus DEM GLO-30/GLO-90 for high-quality global DEM processing when we generate our own terrain tiles/contours.
+- Runtime notes:
+  - MapLibre supports `raster-dem` sources for Mapbox Terrain-RGB and Mapzen Terrarium encodings.
+  - Terrain background should live close to Earth/base rendering, while contours/peaks can be normal shared rows.
+  - Global contours generated from DEMs will be large and must be tiled.
+- Source references checked:
+  - MapLibre raster-dem source spec: https://maplibre.org/maplibre-style-spec/sources/
+  - Copernicus DEM: https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM
+  - Natural Earth raster downloads: https://www.naturalearthdata.com/downloads/
 
 ## Temporal Layers
 - Time should be a property of layer data, not a custom frontend system.

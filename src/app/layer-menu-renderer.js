@@ -1451,6 +1451,13 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
   return row;
 }
 
+function withExpandedState(state, expanded) {
+  return {
+    ...(state ?? {}),
+    expanded: Boolean(expanded),
+  };
+}
+
 function createSliderRow(row, value, onInput, { inheritedHidden = false } = {}) {
   const wrapper = document.createElement("label");
   wrapper.className = "layer-menu-row layer-menu-row-slider";
@@ -2370,9 +2377,10 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       return;
     }
 
+    const rowExpanded = layerModel.isExpanded(rowStateKey);
     const layerRow = createLayerRow(
       row,
-      state[rowStateKey],
+      withExpandedState(state[rowStateKey], rowExpanded),
       parentId,
       inheritedHidden,
       onToggleExpanded,
@@ -2380,7 +2388,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       reorderApi,
       reorderApi.dragState,
       orderedChildRows,
-      getLayerLegendSpec(row, state[rowStateKey], layerModel, appearanceState),
+      getLayerLegendSpec(row, withExpandedState(state[rowStateKey], rowExpanded), layerModel, appearanceState),
       onDataAction,
       onFilterAction,
     );
@@ -2393,7 +2401,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       const isSettingsParent = row.id === "settings";
       const visibleChildRows = isEarthParent || isSettingsParent
         ? orderedChildRows
-        : orderedChildRows.filter((childRow) => !isLayerExpansionChildRow(childRow) || state[rowStateKey]?.expanded);
+        : orderedChildRows.filter((childRow) => !isLayerExpansionChildRow(childRow) || layerModel.isExpanded(rowStateKey));
       if (visibleChildRows.length) {
         childFragment = buildRows(visibleChildRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden, onAddRow, onRemoveRow, onDataAction, onFilterAction);
       }
@@ -2439,6 +2447,7 @@ function renderLayerMenuRows({
 
   const transientColorRowState = new Map();
   const transientReorderState = new Map();
+  const openToolbarRowIds = new Set();
   let activeDragState = null;
   let deleteConfirmPanel = null;
   let deleteConfirmOutsideHandler = null;
@@ -2631,7 +2640,11 @@ function renderLayerMenuRows({
         return;
       }
 
-      const parentState = layerModel.getState()?.[getRowStateKey(parentRow)] ?? null;
+      const parentStateKey = getRowStateKey(parentRow);
+      const parentState = withExpandedState(
+        layerModel.getState()?.[parentStateKey] ?? null,
+        layerModel.isExpanded(parentStateKey),
+      );
       const parentRowElement = scrollRegion.querySelector(`.layer-menu-row-layer[data-row-id="${parentRowId}"]`);
       updateLayerLegendSwatch(
         parentRowElement,
@@ -2646,7 +2659,10 @@ function renderLayerMenuRows({
 
       if (parentRowId !== "earth") {
         const earthRow = layerModel.getRowById("earth");
-        const earthState = layerModel.getState()?.earth ?? null;
+        const earthState = withExpandedState(
+          layerModel.getState()?.earth ?? null,
+          layerModel.isExpanded("earth"),
+        );
         const earthRowElement = scrollRegion.querySelector('.layer-menu-row-layer[data-row-id="earth"]');
         updateLayerLegendSwatch(
           earthRowElement,
@@ -2661,7 +2677,23 @@ function renderLayerMenuRows({
       }
     };
 
-    if (panel.dataset.earthRowOpen === "true") {
+    const earthRowOpen = panel.dataset.earthRowOpen === "true";
+    const settingsRowOpen = panel.dataset.settingsRowOpen === "true";
+    [
+      ["earth", earthRowOpen],
+      ["settings", settingsRowOpen],
+    ].forEach(([rowId, isOpen]) => {
+      if (isOpen && !openToolbarRowIds.has(rowId)) {
+        layerModel.prepareRowChildrenForOpen(rowId);
+      }
+      if (isOpen) {
+        openToolbarRowIds.add(rowId);
+      } else {
+        openToolbarRowIds.delete(rowId);
+      }
+    });
+
+    if (earthRowOpen) {
       const earthRow = layerModel.getRowById("earth");
       scrollRegion.append(
         buildRows(
@@ -2683,7 +2715,7 @@ function renderLayerMenuRows({
       );
     }
 
-    if (panel.dataset.settingsRowOpen === "true") {
+    if (settingsRowOpen) {
       const settingsRow = layerModel.getRowById("settings");
       scrollRegion.append(
         buildRows(

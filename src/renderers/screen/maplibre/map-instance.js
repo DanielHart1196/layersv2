@@ -96,6 +96,12 @@ const SCALE_BAR_HIDE_DELAY_MS = 1200;
 const SCALE_BAR_SCREEN_OFFSET_X = 18;
 const SCALE_BAR_SCREEN_OFFSET_Y = 28;
 const COMPASS_ACTIVE_BEARING_THRESHOLD = 0.5;
+const FEATURE_SPREAD_SOURCE_ID = "atlas-feature-spread-source";
+const FEATURE_SPREAD_POINT_LAYER_ID = "atlas-feature-spread-points";
+const FEATURE_SPREAD_HIT_RADIUS_PX = 8;
+const FEATURE_SPREAD_STACK_TOLERANCE_PX = 3;
+const FEATURE_SPREAD_BASE_RADIUS_PX = 26;
+const FEATURE_SPREAD_RADIUS_STEP_PX = 4;
 const METERS_PER_FOOT = 0.3048;
 const METERS_PER_MILE = 1609.344;
 
@@ -1452,7 +1458,7 @@ function applyRegistryStyleValue(entry, map, layerState, key, value) {
   return false;
 }
 
-function createMapInstance({ container, manifest = [], viewState, initialLayerState = {}, getOrderedChildRowIds = null, onCameraChange = null }) {
+function createMapInstance({ container, manifest = [], viewState, initialLayerState = {}, getOrderedChildRowIds = null, onCameraChange = null, onFeatureSelect = null }) {
   if (!container) {
     return null;
   }
@@ -1465,6 +1471,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
   const scaleOverlay = createScaleOverlay(container);
   const compassOverlay = createCompassOverlay(container);
   let interactionOverlayHideTimeout = null;
+  const spreadSelections = new Map();
 
   function clearInteractionOverlayHideTimeout() {
     if (interactionOverlayHideTimeout) {
@@ -1488,6 +1495,271 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       compassOverlay.classList.remove("is-visible");
       interactionOverlayHideTimeout = null;
     }, SCALE_BAR_HIDE_DELAY_MS);
+  }
+
+  function getDynamicFeatureLayerIds() {
+    return (map.getStyle()?.layers ?? [])
+      .filter((layer) => (
+        typeof layer?.id === "string"
+        && /^dynamic-.+-(fill|line|circle)$/.test(layer.id)
+        && map.getLayer(layer.id)
+      ))
+      .map((layer) => layer.id);
+  }
+
+  function getDynamicPointLayerIds() {
+    return getDynamicFeatureLayerIds().filter((layerId) => layerId.endsWith("-circle"));
+  }
+
+  function getDynamicLayerIdFromMapLayerId(mapLayerId) {
+    const match = /^dynamic-(.+)-(fill|line|circle)$/.exec(String(mapLayerId ?? ""));
+    return match?.[1] ?? "";
+  }
+
+  function inferGeometryType(feature, mapLayerId) {
+    const geometryType = feature?.geometry?.type;
+    if (geometryType) {
+      return geometryType;
+    }
+    if (String(mapLayerId).endsWith("-circle")) {
+      return "Point";
+    }
+    if (String(mapLayerId).endsWith("-line")) {
+      return "LineString";
+    }
+    if (String(mapLayerId).endsWith("-fill")) {
+      return "Polygon";
+    }
+    return null;
+  }
+
+  function createFeatureSelectionPayload(feature, fallbackLngLat = null) {
+    if (!feature) {
+      return null;
+    }
+    const mapLayerId = feature.layer?.id ?? "";
+    return {
+      layerId: getDynamicLayerIdFromMapLayerId(mapLayerId),
+      mapLayerId,
+      featureId: feature.id ?? feature.properties?._feature_id ?? feature.properties?._id ?? null,
+      geometryType: inferGeometryType(feature, mapLayerId),
+      properties: feature.properties ?? {},
+      lngLat: fallbackLngLat,
+    };
+  }
+
+  function queryTopDynamicFeature(point) {
+    const layerIds = getDynamicFeatureLayerIds();
+    if (!layerIds.length) {
+      return null;
+    }
+
+    const hitRadius = 6;
+    const queryBox = [
+      [point.x - hitRadius, point.y - hitRadius],
+      [point.x + hitRadius, point.y + hitRadius],
+    ];
+    const features = map.queryRenderedFeatures(queryBox, { layers: layerIds });
+    return features?.[0] ?? null;
+  }
+
+  function getFeatureScreenPoint(feature) {
+    const coordinates = feature?.geometry?.coordinates;
+    if (
+      Array.isArray(coordinates)
+      && Number.isFinite(Number(coordinates[0]))
+      && Number.isFinite(Number(coordinates[1]))
+    ) {
+      return map.project(coordinates);
+    }
+    return null;
+  }
+
+  function getFeatureLngLat(feature, fallbackLngLat = null) {
+    const coordinates = feature?.geometry?.coordinates;
+    if (
+      Array.isArray(coordinates)
+      && Number.isFinite(Number(coordinates[0]))
+      && Number.isFinite(Number(coordinates[1]))
+    ) {
+      return { longitude: Number(coordinates[0]), latitude: Number(coordinates[1]) };
+    }
+    return fallbackLngLat;
+  }
+
+  function queryStackedPointFeatures(point) {
+    const layerIds = getDynamicPointLayerIds();
+    if (!layerIds.length) {
+      return [];
+    }
+    const queryBox = [
+      [point.x - FEATURE_SPREAD_HIT_RADIUS_PX, point.y - FEATURE_SPREAD_HIT_RADIUS_PX],
+      [point.x + FEATURE_SPREAD_HIT_RADIUS_PX, point.y + FEATURE_SPREAD_HIT_RADIUS_PX],
+    ];
+    const candidates = map.queryRenderedFeatures(queryBox, { layers: layerIds });
+    if (!Array.isArray(candidates) || candidates.length < 2) {
+      return [];
+    }
+
+    const topPoint = getFeatureScreenPoint(candidates[0]);
+    if (!topPoint) {
+      return [];
+    }
+
+    return candidates.filter((feature) => {
+      const featurePoint = getFeatureScreenPoint(feature);
+      if (!featurePoint) {
+        return false;
+      }
+      return Math.hypot(featurePoint.x - topPoint.x, featurePoint.y - topPoint.y) <= FEATURE_SPREAD_STACK_TOLERANCE_PX;
+    });
+  }
+
+  function ensureFeatureSpreadOverlay() {
+    if (!map.getSource(FEATURE_SPREAD_SOURCE_ID)) {
+      map.addSource(FEATURE_SPREAD_SOURCE_ID, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+    }
+    if (map.getLayer("atlas-feature-spread-lines")) {
+      map.removeLayer("atlas-feature-spread-lines");
+    }
+
+    if (!map.getLayer(FEATURE_SPREAD_POINT_LAYER_ID)) {
+      map.addLayer({
+        id: FEATURE_SPREAD_POINT_LAYER_ID,
+        type: "circle",
+        source: FEATURE_SPREAD_SOURCE_ID,
+        paint: {
+          "circle-color": ["coalesce", ["get", "_spread_color"], "#e74c3c"],
+          "circle-opacity": ["coalesce", ["get", "_spread_opacity"], 0.8],
+          "circle-radius": ["coalesce", ["get", "_spread_radius"], 6],
+          "circle-stroke-color": ["coalesce", ["get", "_spread_stroke_color"], "#ffffff"],
+          "circle-stroke-opacity": ["coalesce", ["get", "_spread_stroke_opacity"], 1],
+          "circle-stroke-width": ["coalesce", ["get", "_spread_stroke_width"], 1],
+        },
+      });
+    }
+
+    if (map.getLayer(FEATURE_SPREAD_POINT_LAYER_ID)) {
+      map.moveLayer(FEATURE_SPREAD_POINT_LAYER_ID);
+    }
+  }
+
+  function setFeatureSpreadData(data) {
+    const source = map.getSource(FEATURE_SPREAD_SOURCE_ID);
+    if (source && "setData" in source) {
+      source.setData(data);
+    }
+  }
+
+  function clearFeatureSpreadOverlay() {
+    spreadSelections.clear();
+    if (map.getSource(FEATURE_SPREAD_SOURCE_ID)) {
+      setFeatureSpreadData({ type: "FeatureCollection", features: [] });
+    }
+  }
+
+  function querySpreadSelection(point) {
+    if (!map.getLayer(FEATURE_SPREAD_POINT_LAYER_ID)) {
+      return null;
+    }
+    const queryBox = [
+      [point.x - FEATURE_SPREAD_HIT_RADIUS_PX, point.y - FEATURE_SPREAD_HIT_RADIUS_PX],
+      [point.x + FEATURE_SPREAD_HIT_RADIUS_PX, point.y + FEATURE_SPREAD_HIT_RADIUS_PX],
+    ];
+    const features = map.queryRenderedFeatures(queryBox, { layers: [FEATURE_SPREAD_POINT_LAYER_ID] });
+    const spreadId = features?.[0]?.properties?._spread_id;
+    return spreadId ? spreadSelections.get(spreadId) ?? null : null;
+  }
+
+  function getConstantCirclePaint(mapLayerId, key, fallback) {
+    const value = map.getPaintProperty(mapLayerId, key);
+    if (value === undefined || value === null || Array.isArray(value) || typeof value === "object") {
+      return fallback;
+    }
+    return value;
+  }
+
+  function getSpreadPointStyle(feature) {
+    const mapLayerId = feature?.layer?.id ?? "";
+    const radius = Number(getConstantCirclePaint(mapLayerId, "circle-radius", 6));
+    return {
+      _spread_color: getConstantCirclePaint(mapLayerId, "circle-color", "#e74c3c"),
+      _spread_opacity: Number(getConstantCirclePaint(mapLayerId, "circle-opacity", 0.8)),
+      _spread_radius: Number.isFinite(radius) ? Math.max(radius, 8) : 8,
+      _spread_stroke_color: getConstantCirclePaint(mapLayerId, "circle-stroke-color", "#ffffff"),
+      _spread_stroke_opacity: Number(getConstantCirclePaint(mapLayerId, "circle-stroke-opacity", 1)),
+      _spread_stroke_width: Number(getConstantCirclePaint(mapLayerId, "circle-stroke-width", 1)),
+    };
+  }
+
+  function showFeatureSpreadOverlay(features, anchorLngLat) {
+    ensureFeatureSpreadOverlay();
+    spreadSelections.clear();
+
+    const anchorPoint = map.project([anchorLngLat.longitude, anchorLngLat.latitude]);
+    const radius = FEATURE_SPREAD_BASE_RADIUS_PX + Math.max(0, features.length - 2) * FEATURE_SPREAD_RADIUS_STEP_PX;
+    const startAngle = -Math.PI / 2;
+    const step = (Math.PI * 2) / features.length;
+    const overlayFeatures = [];
+
+    features.forEach((feature, index) => {
+      const spreadId = `spread-${index}`;
+      const angle = startAngle + step * index;
+      const spreadPoint = {
+        x: anchorPoint.x + Math.cos(angle) * radius,
+        y: anchorPoint.y + Math.sin(angle) * radius,
+      };
+      const spreadLngLat = map.unproject(spreadPoint);
+      const spreadCoordinates = [spreadLngLat.lng, spreadLngLat.lat];
+      const payload = createFeatureSelectionPayload(feature, anchorLngLat);
+      spreadSelections.set(spreadId, payload);
+      overlayFeatures.push({
+        type: "Feature",
+        properties: { _spread_id: spreadId, ...getSpreadPointStyle(feature) },
+        geometry: {
+          type: "Point",
+          coordinates: spreadCoordinates,
+        },
+      });
+    });
+
+    setFeatureSpreadData({ type: "FeatureCollection", features: overlayFeatures });
+  }
+
+  function handleFeatureClick(event) {
+    if (typeof onFeatureSelect !== "function") {
+      return;
+    }
+
+    const spreadSelection = querySpreadSelection(event.point);
+    if (spreadSelection) {
+      clearFeatureSpreadOverlay();
+      onFeatureSelect(spreadSelection);
+      return;
+    }
+
+    const stackedPointFeatures = queryStackedPointFeatures(event.point);
+    if (stackedPointFeatures.length > 1) {
+      const anchorLngLat = getFeatureLngLat(stackedPointFeatures[0], event.lngLat ? { longitude: event.lngLat.lng, latitude: event.lngLat.lat } : null);
+      if (anchorLngLat) {
+        showFeatureSpreadOverlay(stackedPointFeatures, anchorLngLat);
+        onFeatureSelect(null);
+        return;
+      }
+    }
+
+    const feature = queryTopDynamicFeature(event.point);
+    if (!feature) {
+      clearFeatureSpreadOverlay();
+      onFeatureSelect(null);
+      return;
+    }
+
+    clearFeatureSpreadOverlay();
+    onFeatureSelect(createFeatureSelectionPayload(feature, event.lngLat ? { longitude: event.lngLat.lng, latitude: event.lngLat.lat } : null));
   }
 
   const hasExplicitViewZoom = viewState?.hasCameraState === true && Number.isFinite(Number(viewState?.zoom));
@@ -1547,6 +1819,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     console.error("[MapLibre]", message, event?.error);
   });
   map.on("movestart", () => {
+    clearFeatureSpreadOverlay();
     showInteractionOverlays();
   });
   map.on("move", () => {
@@ -1557,6 +1830,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     hideInteractionOverlaysSoon();
     onCameraChange?.(readCameraState());
   });
+  map.on("click", handleFeatureClick);
   map.on("resize", () => {
     if (scaleOverlay.classList.contains("is-visible")) {
       updateScaleOverlay(map, scaleOverlay);

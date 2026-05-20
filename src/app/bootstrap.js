@@ -11,6 +11,7 @@ import { createPmtilesManifest } from "../sources/pmtiles/source-manifest.js";
 import { getRowRuntimeTargetId, getRowStateKey } from "../core/layer-definitions.js";
 import { bindShareControls, readShareSnapshotFromLocation } from "./share-controls.js";
 import { bindTitleControls } from "./title-controls.js";
+import { createFeatureInspector } from "./feature-inspector.js";
 
 const supabaseLayerDataCache = new Map();
 
@@ -27,6 +28,7 @@ async function bootstrapApplication() {
   const screenRenderer = createScreenRendererAdapter();
   const printRenderer = createPrintRendererAdapter();
   const projections = getProjectionRegistry();
+  const featureInspector = createFeatureInspector();
   const viewState = {
     ...viewModel.getState(),
     hasCameraState: viewModel.hasCameraState(),
@@ -91,6 +93,18 @@ async function bootstrapApplication() {
     });
     return result;
   };
+  const renameLayer = async ({ layerId, name }) => {
+    const { invalidateSupabaseCatalogCache, updateLayerName } = await import("../sources/supabase/layer-loader.js");
+    const result = await updateLayerName(layerId, name);
+    invalidateSupabaseCatalogCache();
+    const cached = supabaseLayerDataCache.get(layerId);
+    if (cached?.layer) {
+      cached.layer = { ...cached.layer, name: result.name };
+    }
+    layerModel.renameDataRowByLayerRef(layerId, result.name);
+    rerenderLayerMenu();
+    return result;
+  };
   const updateDatasetMetadata = async ({ datasetId, license, licenseUrl, attribution }) => {
     const { updateDatasetMetadata: saveDatasetMetadata } = await import("../sources/supabase/layer-loader.js");
     const result = await saveDatasetMetadata(datasetId, { license, licenseUrl, attribution });
@@ -111,9 +125,39 @@ async function bootstrapApplication() {
     });
     return result;
   };
+  const updateFeatureInspectorDefault = async ({ datasetId, config }) => {
+    const { updateDatasetFeatureInspector } = await import("../sources/supabase/layer-loader.js");
+    const result = await updateDatasetFeatureInspector(datasetId, config);
+    supabaseLayerDataCache.forEach((cached) => {
+      if (!Array.isArray(cached?.datasets)) {
+        return;
+      }
+      cached.datasets = cached.datasets.map((dataset) => (
+        dataset?.id === datasetId
+          ? { ...dataset, feature_inspector: result.feature_inspector ?? {} }
+          : dataset
+      ));
+    });
+    return result.feature_inspector ?? {};
+  };
+  const applyFeatureInspectorDefaultToLayer = async ({ layerId, config }) => {
+    const { updateLayerDatasetsFeatureInspector } = await import("../sources/supabase/layer-loader.js");
+    const results = await updateLayerDatasetsFeatureInspector(layerId, config);
+    const savedConfigByDatasetId = new Map(results.map((dataset) => [dataset.id, dataset.feature_inspector ?? {}]));
+    const cached = supabaseLayerDataCache.get(layerId);
+    if (cached && Array.isArray(cached.datasets)) {
+      cached.datasets = cached.datasets.map((dataset) => (
+        savedConfigByDatasetId.has(dataset.id)
+          ? { ...dataset, feature_inspector: savedConfigByDatasetId.get(dataset.id) }
+          : dataset
+      ));
+    }
+    return results[0]?.feature_inspector ?? config;
+  };
   let addDataPanelPromise = null;
   let dataTablePanelPromise = null;
   let createLayerPanelPromise = null;
+  let filterPanelPromise = null;
   const getAddDataPanel = () => {
     if (!addDataPanelPromise) {
       addDataPanelPromise = import("./add-data-panel.js").then(({ mountAddDataPanel }) => mountAddDataPanel({
@@ -149,6 +193,7 @@ async function bootstrapApplication() {
             .then((addDataPanel) => addDataPanel.open(args))
             .catch((error) => console.error("Failed to open add data panel.", error));
         },
+        onRenameLayer: renameLayer,
         onRenameDataset: renameDataset,
         onUpdateDatasetMetadata: updateDatasetMetadata,
       }));
@@ -180,6 +225,16 @@ async function bootstrapApplication() {
       }));
     }
     return createLayerPanelPromise;
+  };
+  const getFilterPanel = () => {
+    if (!filterPanelPromise) {
+      filterPanelPromise = import("./filter-panel.js").then(({ mountFilterPanel }) => mountFilterPanel({
+        getLayerFields: loadLayerFields,
+        getLayerFieldValues: loadLayerFieldValues,
+        onCreateFilter: createFilterFromTableSelection,
+      }));
+    }
+    return filterPanelPromise;
   };
 
   rerenderLayerMenu = renderLayerMenuRows({
@@ -277,10 +332,14 @@ async function bootstrapApplication() {
         return;
       }
 
-      console.info("[layers] Filter builder is not implemented yet.", {
-        layerId: row.layerRef,
-        layerName: row.label ?? row.name ?? "Dataset",
-      });
+      void getFilterPanel()
+        .then((filterPanel) => {
+          filterPanel.open({
+            layerId: row.layerRef,
+            layerName: row.label ?? row.name ?? "Dataset",
+          });
+        })
+        .catch((error) => console.error("Failed to open filter panel.", error));
     },
   });
   const layerMenuControls = enableLayerMenuControls({
@@ -339,6 +398,31 @@ async function bootstrapApplication() {
         getOrderedChildRowIds: (parentId) => layerModel.getOrderedChildRowIds(parentId),
         onCameraChange: (camera) => {
           viewModel.setCamera(camera, { persist: true });
+        },
+        onFeatureSelect: (feature) => {
+          if (!feature) {
+            featureInspector.close();
+            return;
+          }
+          const row = layerModel.getRowById(feature.layerId) ?? findLayerRowByLayerRef(layerModel, feature.layerId);
+          const sourceLayerId = row?.kind === "filter" && row?.filter?.parentLayerId
+            ? row.filter.parentLayerId
+            : feature.layerId;
+          const dataset = resolveFeatureDataset(supabaseLayerDataCache, feature, sourceLayerId);
+          featureInspector.open({
+            ...feature,
+            datasetId: dataset?.id ?? feature.properties?._dataset_id ?? "",
+            datasetName: dataset?.name ?? feature.properties?._dataset_name ?? "",
+            layerName: row?.label ?? row?.name ?? feature.layerId,
+          }, {
+            config: dataset?.feature_inspector ?? {},
+            onSaveConfig: dataset?.id
+              ? (config) => updateFeatureInspectorDefault({ datasetId: dataset.id, config })
+              : null,
+            onApplyConfigToLayer: sourceLayerId
+              ? (config) => applyFeatureInspectorDefaultToLayer({ layerId: sourceLayerId, config })
+              : null,
+          });
         },
       });
       runtime.mount(document.getElementById("mapStage"));
@@ -533,6 +617,16 @@ async function loadLayerFields(layerRef) {
   }
 }
 
+async function loadLayerFieldValues(layerRef, fieldKey) {
+  if (!SUPABASE_UUID.test(layerRef)) return [];
+  try {
+    const { getLayerFieldValues } = await import("../sources/supabase/layer-loader.js");
+    return await getLayerFieldValues(layerRef, fieldKey);
+  } catch {
+    return [];
+  }
+}
+
 async function loadLayerFromSupabaseLazy(layerId) {
   const { loadLayerFromSupabase } = await import("../sources/supabase/layer-loader.js");
   return loadLayerFromSupabase(layerId);
@@ -668,6 +762,18 @@ function findLayerRowByLayerRef(layerModel, layerRef) {
   return layerModel.getSupabaseLayers()
     .map((entry) => layerModel.getRowById(entry.rowId))
     .find((row) => row?.layerRef === layerRef) ?? null;
+}
+
+function resolveFeatureDataset(layerDataCache, feature, sourceLayerId = feature?.layerId) {
+  const layerId = sourceLayerId;
+  const properties = feature?.properties && typeof feature.properties === "object" ? feature.properties : {};
+  const datasetId = String(properties._dataset_id ?? feature?.datasetId ?? "");
+  const cached = layerDataCache.get(layerId);
+  const datasets = Array.isArray(cached?.datasets) ? cached.datasets : [];
+  if (datasetId) {
+    return datasets.find((dataset) => dataset?.id === datasetId) ?? null;
+  }
+  return datasets.length === 1 ? datasets[0] : null;
 }
 
 function buildExactMatchFilterExpression(field, value) {

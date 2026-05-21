@@ -1,4 +1,4 @@
-import { LOCAL_LAYERS } from "../config/local-layers.js";
+import { LOCAL_LAYERS, localLayerSourceId } from "../config/local-layers.js";
 
 const ROOT_PARENT_ID = "__root__";
 const ROOT_ROW_IDS = ["earth"];
@@ -199,6 +199,7 @@ function createChoiceSliderRow({
 }) {
   const normalizedOptions = options
     .map((option) => ({
+      ...option,
       label: String(option?.label ?? option?.value ?? ""),
       value: String(option?.value ?? option?.label ?? ""),
     }))
@@ -220,6 +221,62 @@ function createChoiceSliderRow({
   };
 }
 
+function createVariableSelectRow({
+  id,
+  label,
+  variableId,
+  options = [],
+  initialValue,
+}) {
+  const key = String(variableId || id || "value");
+  const normalizedOptions = options
+    .map((option) => ({
+      ...option,
+      label: String(option?.label ?? option?.value ?? ""),
+      value: String(option?.value ?? option?.label ?? ""),
+    }))
+    .filter((option) => option.label && option.value);
+  const fallbackValue = normalizedOptions[0]?.value ?? "";
+  return {
+    id,
+    type: "variable-select",
+    label,
+    variableId: key,
+    options: normalizedOptions,
+    target: { kind: "row-variable", key },
+    initialState: {
+      [key]: initialValue ?? fallbackValue,
+    },
+  };
+}
+
+function createVariableSliderRow({
+  id,
+  label,
+  variableId,
+  min,
+  max,
+  step = 1,
+  valueFormat = null,
+  initialValue,
+}) {
+  const key = String(variableId || id || "value");
+  return {
+    id,
+    type: "variable-slider",
+    label,
+    variableId: key,
+    target: { kind: "row-variable", key },
+    min,
+    max,
+    step,
+    valueFormat,
+    initialState: {
+      [key]: initialValue,
+    },
+  };
+}
+
 function localLayerToRow(entry) {
   return createDataRow({
     id: entry.id,
@@ -234,7 +291,13 @@ function localLayerToRow(entry) {
         key: "detail",
         options: entry.detailLevels,
         initialValue: entry.defaultDetail,
-        target: { kind: "earth-land-detail", key: "detail" },
+        target: {
+          kind: "source-choice",
+          key: "detail",
+          stateRowId: `${entry.id}-detail`,
+          sourceId: localLayerSourceId(entry.id),
+          lineSourceId: `${localLayerSourceId(entry.id)}-line-source`,
+        },
       })] : []),
       ...(entry.fill ? [createStyleRow({
         id: `${entry.id}-fill`, type: "fill",
@@ -376,6 +439,8 @@ export {
   createSortRow,
   createSliderRow,
   createStyleRow,
+  createVariableSelectRow,
+  createVariableSliderRow,
   getDefinitionChildOrder,
   getRowRuntimeTargetId,
   getRowStateKey,

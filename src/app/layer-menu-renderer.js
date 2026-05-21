@@ -1306,7 +1306,10 @@ function isStyleChildRow(row) {
 }
 
 function isLayerExpansionChildRow(row) {
-  return isStyleChildRow(row) || row?.type === "choice-slider";
+  return isStyleChildRow(row)
+    || row?.type === "choice-slider"
+    || row?.type === "variable-slider"
+    || row?.type === "variable-select";
 }
 
 function createLayerActionButton(kind, label, onClick) {
@@ -1330,7 +1333,233 @@ function createLayerActionButton(kind, label, onClick) {
   return button;
 }
 
-function createLayerRow(definition, state, parentId, inheritedHidden, onToggleExpanded, onToggleVisibility, reorderApi, dragState, childRows = [], legendSpec = null, onDataAction = null, onFilterAction = null) {
+function hasFilterAction(definition) {
+  return Boolean(definition?.layerRef || definition?.filter?.parentLayerId || definition?.filter?.sourceLayerId);
+}
+
+function rowHasVariableFilterControl(layerModel, targetRow) {
+  if (!targetRow?.id) {
+    return false;
+  }
+  const visit = (rows = []) => {
+    for (const row of rows) {
+      if (
+        Array.isArray(row?.variableFilters)
+        && row.variableFilters.some((filter) => String(filter?.controlRowId ?? "") === String(targetRow.id))
+      ) {
+        return true;
+      }
+      if (visit(layerModel.getChildRows(row.id))) {
+        return true;
+      }
+    }
+    return false;
+  };
+  return visit(layerModel.getRootRows());
+}
+
+function createFilterActionOverlay({ row, parentId, onEdit, onDelete, onClose }) {
+  const overlay = document.createElement("div");
+  overlay.className = "layer-menu-filter-action-overlay";
+
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.className = "layer-menu-filter-action-edit";
+  edit.textContent = "Edit";
+  edit.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onClose?.();
+    onEdit?.(row, parentId);
+  });
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "layer-menu-filter-action-delete";
+  remove.textContent = "Delete";
+  remove.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onClose?.();
+    onDelete?.(parentId, row);
+  });
+
+  overlay.append(edit, remove);
+  return overlay;
+}
+
+function enableFilterRowLongPressActions(rowElement, { row, parentId, onEdit, onDelete }) {
+  if (!rowElement || !row || (!onEdit && !onDelete)) {
+    return;
+  }
+  if (row.id && !rowElement.dataset.rowId) {
+    rowElement.dataset.rowId = row.id;
+  }
+
+  const longPressDelayMs = 300;
+  const moveTolerancePx = 8;
+  let timer = null;
+  let startX = 0;
+  let startY = 0;
+  let suppressClick = false;
+  let activePointerId = null;
+  let openingPointerId = null;
+  let suppressOverlayRelease = false;
+  let suppressNextOverlayClick = false;
+  let overlay = null;
+  let outsideHandler = null;
+  let releaseGuardHandler = null;
+  let releaseGuardTimer = null;
+
+  const clearTimer = () => {
+    if (timer) {
+      window.clearTimeout(timer);
+      timer = null;
+    }
+  };
+
+  const closeOverlay = () => {
+    if (outsideHandler) {
+      document.removeEventListener("pointerdown", outsideHandler, true);
+    }
+    if (releaseGuardHandler) {
+      document.removeEventListener("pointerup", releaseGuardHandler, true);
+    }
+    if (releaseGuardTimer) {
+      window.clearTimeout(releaseGuardTimer);
+    }
+    outsideHandler = null;
+    releaseGuardHandler = null;
+    releaseGuardTimer = null;
+    overlay?.remove();
+    overlay = null;
+    suppressClick = false;
+    suppressOverlayRelease = false;
+    suppressNextOverlayClick = false;
+    openingPointerId = null;
+    rowElement.classList.remove("has-filter-action-overlay");
+  };
+
+  const finishOverlayReleaseGuard = () => {
+    suppressOverlayRelease = false;
+    suppressNextOverlayClick = true;
+    if (releaseGuardHandler) {
+      document.removeEventListener("pointerup", releaseGuardHandler, true);
+      releaseGuardHandler = null;
+    }
+    if (releaseGuardTimer) {
+      window.clearTimeout(releaseGuardTimer);
+    }
+    releaseGuardTimer = window.setTimeout(() => {
+      suppressNextOverlayClick = false;
+      overlay?.classList.remove("is-release-guarded");
+      releaseGuardTimer = null;
+    }, 350);
+  };
+
+  const openOverlay = () => {
+    clearTimer();
+    navigator.vibrate?.(20);
+    closeOverlay();
+    suppressClick = true;
+    suppressOverlayRelease = true;
+    openingPointerId = activePointerId;
+    rowElement.classList.add("has-filter-action-overlay");
+    overlay = createFilterActionOverlay({
+      row,
+      parentId,
+      onEdit,
+      onDelete,
+      onClose: closeOverlay,
+    });
+    overlay.classList.add("is-release-guarded");
+    overlay.addEventListener("pointerup", (event) => {
+      if (!suppressOverlayRelease || event.pointerId !== openingPointerId) {
+        return;
+      }
+      finishOverlayReleaseGuard();
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+    overlay.addEventListener("click", (event) => {
+      if (!suppressNextOverlayClick) {
+        return;
+      }
+      suppressNextOverlayClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+    rowElement.append(overlay);
+    releaseGuardHandler = (event) => {
+      if (event.pointerId !== openingPointerId) {
+        return;
+      }
+      if (overlay?.contains(event.target)) {
+        return;
+      }
+      finishOverlayReleaseGuard();
+    };
+    document.addEventListener("pointerup", releaseGuardHandler, true);
+    outsideHandler = (event) => {
+      if (rowElement.contains(event.target)) {
+        return;
+      }
+      closeOverlay();
+    };
+    window.setTimeout(() => {
+      if (outsideHandler) {
+        document.addEventListener("pointerdown", outsideHandler, true);
+      }
+    }, 0);
+  };
+
+  rowElement.addEventListener("pointerdown", (event) => {
+    if (
+      event.button !== 0
+      || event.target?.closest?.(".layer-menu-row-grabber")
+      || event.target?.closest?.(".layer-menu-row-action")
+      || event.target?.closest?.(".layer-menu-filter-action-overlay")
+      || event.target?.closest?.("input, select, textarea")
+    ) {
+      return;
+    }
+    startX = event.clientX;
+    startY = event.clientY;
+    activePointerId = event.pointerId;
+    clearTimer();
+    timer = window.setTimeout(openOverlay, longPressDelayMs);
+  });
+
+  rowElement.addEventListener("pointermove", (event) => {
+    if (!timer) {
+      return;
+    }
+    const moved = Math.hypot(event.clientX - startX, event.clientY - startY);
+    if (moved > moveTolerancePx) {
+      clearTimer();
+    }
+  });
+
+  rowElement.addEventListener("pointerup", () => {
+    clearTimer();
+    activePointerId = null;
+  });
+  rowElement.addEventListener("pointercancel", () => {
+    clearTimer();
+    activePointerId = null;
+  });
+  rowElement.addEventListener("click", (event) => {
+    if (event.target?.closest?.(".layer-menu-filter-action-overlay")) {
+      return;
+    }
+    if (!suppressClick) {
+      return;
+    }
+    suppressClick = false;
+    event.preventDefault();
+    event.stopPropagation();
+  }, true);
+}
+
+function createLayerRow(definition, state, parentId, inheritedHidden, onToggleExpanded, onToggleVisibility, reorderApi, dragState, childRows = [], legendSpec = null, onDataAction = null, onFilterAction = null, onEditFilterAction = null, onRequestDeleteFilter = null) {
   const row = document.createElement("div");
   row.className = "layer-menu-row layer-menu-row-layer";
   row.dataset.rowId = definition.id;
@@ -1343,7 +1572,8 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
   const hasExpansionChildren = childRows.some(isLayerExpansionChildRow);
   const hasVisibility = Boolean(definition.layerId) && !isSettingsParent;
   const isExpanded = isTopPanelParent || Boolean(state?.expanded);
-  const hasLayerActions = Boolean(definition?.layerRef);
+  const hasDataAction = Boolean(definition?.layerRef);
+  const hasLayerActions = hasDataAction || hasFilterAction(definition);
   const isExpandable = isTopPanelParent
     || hasExpansionChildren
     || hasLayerActions
@@ -1365,10 +1595,12 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
   if (hasLayerActions && isExpanded && !isTopPanelParent) {
     const actions = document.createElement("div");
     actions.className = "layer-menu-row-actions";
-    actions.append(
-      createLayerActionButton("filter", "Add filter", () => onFilterAction?.(definition)),
-      createLayerActionButton("data", "Open layer data", () => onDataAction?.(definition)),
-    );
+    if (hasFilterAction(definition)) {
+      actions.append(createLayerActionButton("filter", "Add filter", () => onFilterAction?.(definition)));
+    }
+    if (hasDataAction) {
+      actions.append(createLayerActionButton("data", "Open layer data", () => onDataAction?.(definition)));
+    }
     header.insertBefore(actions, chevron ?? null);
   }
   const legend = createLayerLegendSwatch(legendSpec);
@@ -1448,6 +1680,15 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
     wireLayerLegendToggle(legend, state, expandStateKey, onToggleExpanded, { enabled: true });
   }
 
+  if (definition?.kind === "filter") {
+    enableFilterRowLongPressActions(row, {
+      row: definition,
+      parentId,
+      onEdit: onEditFilterAction,
+      onDelete: onRequestDeleteFilter,
+    });
+  }
+
   return row;
 }
 
@@ -1514,6 +1755,38 @@ function createChoiceSliderRow(row, value, onInput, { inheritedHidden = false } 
 
   wrapper.classList.toggle("is-hidden", inheritedHidden);
   wrapper.append(header, input);
+  return wrapper;
+}
+
+function createVariableSelectRow(row, value, onInput, { inheritedHidden = false } = {}) {
+  const options = Array.isArray(row.options) ? row.options : [];
+  const selectedOption = options.find((option) => option.value === value) ?? options[0] ?? null;
+  const wrapper = document.createElement("label");
+  wrapper.className = "layer-menu-row layer-menu-row-select layer-menu-row-variable-select";
+  const { header } = createRowHeader(row.label, selectedOption?.label ?? value ?? "", "layer-menu-slider-header");
+  const valueLabel = header.querySelector(".layer-menu-row-value");
+
+  const select = document.createElement("select");
+  select.className = "layer-menu-select";
+  select.disabled = inheritedHidden || !options.length;
+  options.forEach((option) => {
+    const optionElement = document.createElement("option");
+    optionElement.value = option.value;
+    optionElement.textContent = option.label;
+    optionElement.selected = option.value === value;
+    select.append(optionElement);
+  });
+  select.addEventListener("change", () => {
+    const nextOption = options.find((option) => option.value === select.value) ?? options[0];
+    if (!nextOption) {
+      return;
+    }
+    valueLabel.textContent = nextOption.label;
+    onInput(nextOption.value);
+  });
+
+  wrapper.classList.toggle("is-hidden", inheritedHidden);
+  wrapper.append(header, select);
   return wrapper;
 }
 
@@ -2240,7 +2513,7 @@ function createRowGroup(row, depth, parentId, children = null) {
   return group;
 }
 
-function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth = 0, parentId = null, inheritedHidden = false, onAddRow = null, onRemoveRow = null, onDataAction = null, onFilterAction = null) {
+function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth = 0, parentId = null, inheritedHidden = false, onAddRow = null, onRemoveRow = null, onDataAction = null, onFilterAction = null, onEditFilterAction = null, onRequestDeleteFilter = null) {
   const fragment = document.createDocumentFragment();
   const state = layerModel.getState();
 
@@ -2255,21 +2528,59 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       : childRows;
     const isDynamic = onRemoveRow && layerModel.isDynamic(row.id);
 
-    if (row.type === "slider") {
+    if (row.type === "slider" || row.type === "variable-slider") {
       const slider = createSliderRow(row, getDisplayRowValue(row, layerModel, appearanceState), (nextValue) => {
         onRowInput(row, nextValue);
       }, { inheritedHidden });
+      if (rowHasVariableFilterControl(layerModel, row)) {
+        enableFilterRowLongPressActions(slider, {
+          row,
+          parentId,
+          onEdit: onEditFilterAction,
+          onDelete: onRequestDeleteFilter,
+        });
+      }
       applyRowDepth(slider, depth);
       fragment.append(slider);
       return;
     }
 
     if (row.type === "choice-slider") {
-      const slider = createChoiceSliderRow(row, getDisplayRowValue(row, layerModel, appearanceState), (nextValue) => {
-        onRowInput(row, nextValue);
-      }, { inheritedHidden });
+      const isVariableFilterControl = rowHasVariableFilterControl(layerModel, row);
+      const slider = isVariableFilterControl
+        ? createVariableSelectRow(row, getDisplayRowValue(row, layerModel, appearanceState), (nextValue) => {
+            onRowInput(row, nextValue);
+          }, { inheritedHidden })
+        : createChoiceSliderRow(row, getDisplayRowValue(row, layerModel, appearanceState), (nextValue) => {
+            onRowInput(row, nextValue);
+          }, { inheritedHidden });
+      if (isVariableFilterControl) {
+        enableFilterRowLongPressActions(slider, {
+          row,
+          parentId,
+          onEdit: onEditFilterAction,
+          onDelete: onRequestDeleteFilter,
+        });
+      }
       applyRowDepth(slider, depth);
       fragment.append(slider);
+      return;
+    }
+
+    if (row.type === "variable-select") {
+      const select = createVariableSelectRow(row, getDisplayRowValue(row, layerModel, appearanceState), (nextValue) => {
+        onRowInput(row, nextValue);
+      }, { inheritedHidden });
+      if (rowHasVariableFilterControl(layerModel, row)) {
+        enableFilterRowLongPressActions(select, {
+          row,
+          parentId,
+          onEdit: onEditFilterAction,
+          onDelete: onRequestDeleteFilter,
+        });
+      }
+      applyRowDepth(select, depth);
+      fragment.append(select);
       return;
     }
 
@@ -2391,6 +2702,8 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       getLayerLegendSpec(row, withExpandedState(state[rowStateKey], rowExpanded), layerModel, appearanceState),
       onDataAction,
       onFilterAction,
+      onEditFilterAction,
+      onRequestDeleteFilter,
     );
     applyRowDepth(layerRow, depth);
 
@@ -2403,7 +2716,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
         ? orderedChildRows
         : orderedChildRows.filter((childRow) => !isLayerExpansionChildRow(childRow) || layerModel.isExpanded(rowStateKey));
       if (visibleChildRows.length) {
-        childFragment = buildRows(visibleChildRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden, onAddRow, onRemoveRow, onDataAction, onFilterAction);
+        childFragment = buildRows(visibleChildRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden, onAddRow, onRemoveRow, onDataAction, onFilterAction, onEditFilterAction, onRequestDeleteFilter);
       }
     }
     fragment.append(createRowGroup(layerRow, depth, parentId, childFragment));
@@ -2440,6 +2753,7 @@ function renderLayerMenuRows({
   onRemoveRow,
   onDataAction,
   onFilterAction,
+  onEditFilterAction,
 }) {
   if (!panel || !layerModel) {
     return () => {};
@@ -2479,6 +2793,37 @@ function renderLayerMenuRows({
       () => {
         dismissDeleteConfirmPanel();
         onRemoveRow(rowId, parentId, row);
+      },
+    );
+    deleteConfirmOutsideHandler = (event) => {
+      if (deleteConfirmPanel?.contains(event.target)) {
+        return;
+      }
+      dismissDeleteConfirmPanel();
+    };
+    window.setTimeout(() => {
+      if (deleteConfirmOutsideHandler) {
+        document.addEventListener("pointerdown", deleteConfirmOutsideHandler, true);
+      }
+    }, 0);
+  }
+
+  function showFilterDeleteConfirm(parentId, row) {
+    if (!row || !onRemoveRow) {
+      return;
+    }
+
+    dismissDeleteConfirmPanel();
+    const anchor = row.id
+      ? panel.querySelector(`[data-row-id="${CSS.escape(row.id)}"]`)
+      : null;
+    deleteConfirmPanel = createDeleteConfirmPanel(
+      row,
+      anchor,
+      dismissDeleteConfirmPanel,
+      () => {
+        dismissDeleteConfirmPanel();
+        onRemoveRow(row.id, parentId, row);
       },
     );
     deleteConfirmOutsideHandler = (event) => {
@@ -2711,6 +3056,8 @@ function renderLayerMenuRows({
           null,
           onDataAction ?? null,
           onFilterAction ?? null,
+          onEditFilterAction ?? null,
+          showFilterDeleteConfirm,
         ),
       );
     }
@@ -2733,6 +3080,8 @@ function renderLayerMenuRows({
           null,
           onDataAction ?? null,
           onFilterAction ?? null,
+          onEditFilterAction ?? null,
+          showFilterDeleteConfirm,
         ),
       );
     }
@@ -2753,6 +3102,8 @@ function renderLayerMenuRows({
         onRemoveRow ?? null,
         onDataAction ?? null,
         onFilterAction ?? null,
+        onEditFilterAction ?? null,
+        showFilterDeleteConfirm,
       ),
     );
 

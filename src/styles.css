@@ -1030,6 +1030,7 @@ body:has(.layer-menu.is-open) .map-title {
 }
 
 .layer-menu-row {
+  position: relative;
   width: 100%;
   padding: 12px 14px;
   border: 1px solid var(--row-border);
@@ -1043,6 +1044,51 @@ body:has(.layer-menu.is-open) .map-title {
   text-align: left;
   cursor: pointer;
   overflow: visible;
+}
+
+.layer-menu-row.has-filter-action-overlay {
+  overflow: hidden;
+}
+
+.layer-menu-filter-action-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-radius: inherit;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.72);
+}
+
+.layer-menu-filter-action-overlay button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  border: 0;
+  color: #000000;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 800;
+  text-shadow: none;
+  cursor: pointer;
+}
+
+.layer-menu-filter-action-overlay.is-release-guarded button {
+  pointer-events: none;
+}
+
+.layer-menu-filter-action-edit {
+  background: rgba(248, 248, 248, 0.96);
+}
+
+.layer-menu-filter-action-delete {
+  background: rgba(220, 60, 60, 0.92);
+}
+
+.layer-menu-filter-action-overlay button + button {
+  border-left: 1px solid rgba(0, 0, 0, 0.32);
 }
 
 .layer-menu-row-group {
@@ -1511,6 +1557,21 @@ body.is-reordering-rows {
   background: transparent;
 }
 
+.layer-menu-select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  margin: 0;
+  padding: 0 10px;
+  border: 1px solid rgba(239, 247, 251, 0.55);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(239, 247, 251, 0.94);
+  font: inherit;
+  font-size: 0.88rem;
+  box-sizing: border-box;
+}
+
 .layer-menu-color-swatches {
   display: flex;
   flex-wrap: nowrap;
@@ -1892,14 +1953,60 @@ body.is-reordering-rows {
 .filter-panel-column-display {
   appearance: none;
   text-align: left;
-  cursor: pointer;
+  cursor: default;
+  display: flex;
+  align-items: center;
 }
 
-.filter-panel-column-display span {
+.filter-panel-column-display span,
+.filter-panel-value span {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.filter-panel-value {
+  display: flex;
+  align-items: center;
+  cursor: default;
+}
+
+.filter-panel-operator-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.filter-panel .filter-panel-operator-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 40px;
+  min-width: 0;
+  border: 2px solid #000000;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #000000;
+  font: inherit;
+  font-size: 0.96rem;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: none;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.filter-panel .filter-panel-operator-btn.is-selected {
+  border-color: #000000;
+  background: #000000;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.filter-panel .filter-panel-operator-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .filter-panel-select-menu-btn,
@@ -3146,6 +3253,12 @@ body.is-reordering-rows {
   gap: 6px;
 }
 
+.arp-field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .arp-field-label {
   font-size: 11px;
   font-weight: 600;
@@ -3166,6 +3279,12 @@ body.is-reordering-rows {
   outline: none;
   transition: border-color 120ms;
   box-sizing: border-box;
+}
+
+textarea.arp-field-input {
+  min-height: 112px;
+  resize: vertical;
+  line-height: 1.4;
 }
 
 .arp-field-input::placeholder { color: rgba(154, 210, 255, 0.3); }
@@ -3620,6 +3739,12 @@ body.is-reordering-rows {
   accent-color: #000000;
 }
 
+.layer-menu .layer-menu-select {
+  border-color: rgba(0, 0, 0, 0.32);
+  background: rgba(0, 0, 0, 0.025);
+  color: #000000;
+}
+
 .layer-menu .layer-menu-color-swatch {
   border-color: rgba(0, 0, 0, 0.28);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.68);
@@ -3848,7 +3973,6 @@ body.is-reordering-rows {
 
 .clp-existing-list,
 .clp-existing-item,
-.ui-select-options,
 .ui-select-option,
 .clp-table-wrap,
 .upload-dropzone,
@@ -3856,6 +3980,12 @@ body.is-reordering-rows {
 .dtv-license-panel,
 .dtv-empty {
   background: rgba(0, 0, 0, 0.025);
+  border-color: rgba(0, 0, 0, 0.16);
+  color: #000000;
+}
+
+.ui-select-options {
+  background: #ffffff;
   border-color: rgba(0, 0, 0, 0.16);
   color: #000000;
 }

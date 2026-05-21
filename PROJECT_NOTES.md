@@ -286,6 +286,9 @@
 - Filters should be able to target either:
   - dataset source
   - feature field/value conditions
+- Slider rows should own a value or choice only; the target decides whether that value drives style, a data-source choice, or filter conditions.
+- Choice sliders can represent dataset/source choices such as Earth land detail without an Earth-specific runtime target.
+- Variable sliders should be referenced by filter conditions through `valueRef` so the same slider value can drive multiple subfilters.
 - Examples:
   - Olympics `Year` is a filter row with slider UI.
   - Olympics `Gold` / `Silver` / `Bronze` are filter rows with toggle UI.

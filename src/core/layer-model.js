@@ -6,9 +6,12 @@ import {
   createDataRow,
   createFilterRow,
   createLayerDefinitions,
+  createChoiceSliderRow,
   createSortRow,
   createSliderRow,
   createStyleRow,
+  createVariableSelectRow,
+  createVariableSliderRow,
 } from "./layer-definitions.js";
 
 const STORAGE_KEY = "layerv2.layerState.v1";
@@ -96,6 +99,16 @@ function createLayerModel() {
     }
     
     return parent.rows.map((row) => row.id);
+  }
+
+  function getInitialStateTargetId(row, fallbackLayerId = null) {
+    return row?.colorTarget?.layerId
+      ?? row?.opacityTarget?.layerId
+      ?? row?.weightTarget?.layerId
+      ?? row?.radiusTarget?.layerId
+      ?? (row?.target?.kind === "layer-style" ? row.target.layerId : null)
+      ?? row?.id
+      ?? fallbackLayerId;
   }
 
   function normalizeChildRowOrder(parentId, candidateOrder = null) {
@@ -535,7 +548,7 @@ function createLayerModel() {
     }
 
     if (!layerState[target.layerId]) {
-      return null;
+      layerState[target.layerId] = {};
     }
 
     layerState[target.layerId][target.key] = nextValue;
@@ -545,6 +558,7 @@ function createLayerModel() {
       runtimeTargetId: row?.runtimeTargetId ?? target.layerId,
       key: target.key,
       value: nextValue,
+      target,
     };
   }
 
@@ -781,12 +795,13 @@ function createLayerModel() {
         layerState[row.id].parentRowId = parentRowId ?? null;
       }
       if (row.initialState) {
-        if (!layerState[mapLayerId]) {
-          layerState[mapLayerId] = {};
+        const stateTargetId = getInitialStateTargetId(row, mapLayerId);
+        if (!layerState[stateTargetId]) {
+          layerState[stateTargetId] = {};
         }
         Object.entries(row.initialState).forEach(([key, value]) => {
-          if (layerState[mapLayerId][key] === undefined) {
-            layerState[mapLayerId][key] = value;
+          if (layerState[stateTargetId][key] === undefined) {
+            layerState[stateTargetId][key] = value;
           }
         });
       }
@@ -892,9 +907,38 @@ function createLayerModel() {
         defaultRadius: 6,
       });
     } else if (rowType === "slider") {
+      newRow = createVariableSliderRow({
+        id: uid,
+        label: config.label || "Slider",
+        variableId: config.variableId || `var_${uid}`,
+        min: Number.isFinite(Number(config.min)) ? Number(config.min) : 0,
+        max: Number.isFinite(Number(config.max)) ? Number(config.max) : 100,
+        step: Number.isFinite(Number(config.step)) ? Number(config.step) : 1,
+        valueFormat: config.valueFormat ?? null,
+        initialValue: Number.isFinite(Number(config.initialValue)) ? Number(config.initialValue) : 50,
+      });
+    } else if (rowType === "choice-slider") {
+      const variableId = String(config.variableId || `var_${uid}`);
+      newRow = createChoiceSliderRow({
+        id: uid,
+        label: config.label || "Choice",
+        key: variableId,
+        options: Array.isArray(config.options) ? config.options : [],
+        initialValue: config.initialValue,
+        target: { kind: "row-variable", key: variableId },
+      });
+    } else if (rowType === "variable-select") {
+      newRow = createVariableSelectRow({
+        id: uid,
+        label: config.label || "Dropdown",
+        variableId: config.variableId || `var_${uid}`,
+        options: Array.isArray(config.options) ? config.options : [],
+        initialValue: config.initialValue,
+      });
+    } else if (rowType === "style-slider") {
       newRow = createSliderRow({
         id: uid,
-        label: "Slider",
+        label: "Style slider",
         layerId,
         key: `dyn_${uid}`,
         min: 0,
@@ -924,6 +968,7 @@ function createLayerModel() {
         op: config.op ?? "==",
         value: config.value ?? "",
         parentLayerId: mapLayerId,
+        sourceLayerId: config.sourceLayerId ?? (parentDef.filter?.sourceLayerId ?? parentDef.filter?.parentLayerId ?? mapLayerId),
       };
     } else if (rowType === "sort") {
       newRow = createSortRow({
@@ -964,12 +1009,13 @@ function createLayerModel() {
         initializeDynamicRowState(newRow.rows, newRow.runtimeLayerId ?? newRow.layerId, newRow.id);
       }
     } else if (newRow.initialState) {
-      if (!layerState[mapLayerId]) {
-        layerState[mapLayerId] = {};
+      const stateTargetId = getInitialStateTargetId(newRow, mapLayerId);
+      if (!layerState[stateTargetId]) {
+        layerState[stateTargetId] = {};
       }
       Object.entries(newRow.initialState).forEach(([key, value]) => {
-        if (layerState[mapLayerId][key] === undefined) {
-          layerState[mapLayerId][key] = value;
+        if (layerState[stateTargetId][key] === undefined) {
+          layerState[stateTargetId][key] = value;
         }
       });
       // Per-row visibility — keyed by row ID, not target layer ID.
@@ -990,6 +1036,183 @@ function createLayerModel() {
     persistLayerState();
 
     return structuredClone(newRow);
+  }
+
+  function addVariableFilterToLayer(layerId, config = {}) {
+    const parentDef = rowDefinitionsById.get(layerId) ?? layerDefinitions[layerId];
+    if (!parentDef || parentDef.type !== "layer") {
+      return null;
+    }
+
+    const conditions = Array.isArray(config.conditions)
+      ? config.conditions
+        .map((condition) => ({
+          field: String(condition?.field ?? "").trim(),
+          op: condition?.op ?? "==",
+          value: condition?.value ?? "",
+          valueRef: String(condition?.valueRef ?? "").trim(),
+        }))
+        .filter((condition) => condition.field && condition.valueRef)
+      : [];
+    if (!conditions.length) {
+      return null;
+    }
+
+    const uid = `${layerId}-dyn-variable-filter-${Date.now()}`;
+    const variableFilter = {
+      id: uid,
+      label: config.label || "Variable filter",
+      controlRowId: config.controlRowId ?? null,
+      combinator: config.combinator === "any" ? "any" : "all",
+      conditions,
+    };
+
+    if (!Array.isArray(parentDef.variableFilters)) {
+      parentDef.variableFilters = [];
+    }
+    parentDef.variableFilters.push(variableFilter);
+    persistDynamicDefs();
+    return structuredClone(variableFilter);
+  }
+
+  function updateFixedFilterRow(rowId, config = {}) {
+    const row = rowDefinitionsById.get(rowId);
+    if (!row || row.type !== "layer" || row.kind !== "filter" || !row.filter) {
+      return null;
+    }
+
+    const field = String(config.field ?? row.filter.field ?? "").trim();
+    if (!field) {
+      return null;
+    }
+    const value = config.value ?? "";
+    const op = config.op ?? row.filter.op ?? "==";
+    row.label = config.name || `${field} ${op === "==" ? "=" : op} ${value === "" ? "Empty value" : value}`;
+    row.filter = {
+      ...row.filter,
+      field,
+      op,
+      value,
+    };
+    persistDynamicDefs();
+    return structuredClone(row);
+  }
+
+  function updateVariableFilterForControlRow(controlRowId, config = {}) {
+    const controlRow = rowDefinitionsById.get(controlRowId);
+    if (!controlRow || !dynamicIds.has(controlRowId)) {
+      return null;
+    }
+
+    let parentRow = null;
+    let variableFilter = null;
+    rowDefinitionsById.forEach((row) => {
+      if (variableFilter || !row || !Array.isArray(row.variableFilters)) {
+        return;
+      }
+      const found = row.variableFilters.find((filter) => String(filter?.controlRowId ?? "") === String(controlRowId));
+      if (found) {
+        parentRow = row;
+        variableFilter = found;
+      }
+    });
+    if (!parentRow || !variableFilter) {
+      return null;
+    }
+
+    const variableId = String(config.variableId ?? controlRow.variableId ?? controlRow.key ?? controlRow.target?.key ?? "").trim();
+    if (!variableId) {
+      return null;
+    }
+    const previousKey = controlRow.variableId ?? controlRow.key ?? controlRow.target?.key;
+    const controlType = config.controlType === "dropdown" ? "dropdown" : "slider";
+    const initialValue = controlType === "dropdown"
+      ? String(config.initialValue ?? "")
+      : Number(config.initialValue);
+
+    controlRow.label = config.label || controlRow.label || "Variable";
+    controlRow.target = { kind: "row-variable", key: variableId };
+    controlRow.initialState = { [variableId]: initialValue };
+    if (!layerState[controlRow.id]) {
+      layerState[controlRow.id] = {};
+    }
+    if (previousKey && previousKey !== variableId) {
+      delete layerState[controlRow.id][previousKey];
+    }
+    layerState[controlRow.id][variableId] = initialValue;
+
+    if (controlType === "dropdown") {
+      const normalizedOptions = (Array.isArray(config.options) ? config.options : [])
+        .map((option) => ({
+          label: String(option?.label ?? option?.value ?? ""),
+          value: String(option?.value ?? option?.label ?? ""),
+        }))
+        .filter((option) => option.label && option.value);
+      controlRow.type = "variable-select";
+      controlRow.variableId = variableId;
+      delete controlRow.key;
+      delete controlRow.valueFormat;
+      delete controlRow.min;
+      delete controlRow.max;
+      delete controlRow.step;
+      controlRow.options = normalizedOptions;
+    } else {
+      controlRow.type = "variable-slider";
+      controlRow.variableId = variableId;
+      delete controlRow.key;
+      delete controlRow.options;
+      controlRow.min = Number.isFinite(Number(config.min)) ? Number(config.min) : 0;
+      controlRow.max = Number.isFinite(Number(config.max)) ? Number(config.max) : 100;
+      controlRow.step = Number.isFinite(Number(config.step)) ? Number(config.step) : 1;
+      controlRow.valueFormat = config.valueFormat ?? null;
+    }
+
+    variableFilter.label = config.filterLabel || config.label || variableFilter.label || "Variable filter";
+    variableFilter.combinator = config.combinator === "any" ? "any" : "all";
+    variableFilter.conditions = (Array.isArray(config.conditions) ? config.conditions : [])
+      .map((condition) => ({
+        field: String(condition?.field ?? "").trim(),
+        op: condition?.op ?? "==",
+        value: condition?.value ?? "",
+        valueRef: String(condition?.valueRef ?? variableId).trim(),
+      }))
+      .filter((condition) => condition.field && condition.valueRef);
+    if (!variableFilter.conditions.length) {
+      return null;
+    }
+
+    persistDynamicDefs();
+    persistLayerState();
+    return {
+      parentRow: structuredClone(parentRow),
+      controlRow: structuredClone(controlRow),
+      variableFilter: structuredClone(variableFilter),
+    };
+  }
+
+  function removeVariableFiltersForControlRow(controlRowId) {
+    const targetControlRowId = String(controlRowId ?? "");
+    if (!targetControlRowId) {
+      return [];
+    }
+
+    const affectedParentIds = [];
+    rowDefinitionsById.forEach((row) => {
+      if (!row || !Array.isArray(row.variableFilters)) {
+        return;
+      }
+      const nextFilters = row.variableFilters.filter((filter) => String(filter?.controlRowId ?? "") !== targetControlRowId);
+      if (nextFilters.length === row.variableFilters.length) {
+        return;
+      }
+      row.variableFilters = nextFilters;
+      affectedParentIds.push(row.id);
+    });
+
+    if (affectedParentIds.length) {
+      persistDynamicDefs();
+    }
+    return affectedParentIds;
   }
 
   // Adds a new data row (type: "layer") pointing to an entry in the layer catalog.
@@ -1142,6 +1365,7 @@ function createLayerModel() {
 
   return {
     addDataRow,
+    addVariableFilterToLayer,
     addRowToLayer,
     getChildRows,
     getDefinitions,
@@ -1163,6 +1387,7 @@ function createLayerModel() {
     getOrderedChildRows,
     reorderChildRow,
     removeRow,
+    removeVariableFiltersForControlRow,
     renameDataRowByLayerRef,
     setChildRowOrder,
     setAppearanceValue,
@@ -1171,6 +1396,8 @@ function createLayerModel() {
     toggleExpanded,
     toggleRowVisible,
     toggleVisibility,
+    updateFixedFilterRow,
+    updateVariableFilterForControlRow,
   };
 }
 

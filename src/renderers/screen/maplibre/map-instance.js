@@ -556,7 +556,7 @@ function applyRuntimeTargetStyle(runtimeTargetId, key, value, map, layerState) {
       return applyToLayers(targetLayerIds, "line-opacity", Number(value) / 100);
     }
     if (key === "lineWeight") {
-      return applyToLayers(targetLayerIds, "line-width", Number(value));
+      return applyToLayers(targetLayerIds, "line-width", buildLineWidthExpression(Number(value)));
     }
     return false;
   }
@@ -2135,17 +2135,6 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
 
       layerState[layerId][key] = value;
 
-      // For runtimeTarget subtargets (e.g. "uid::fill"), also mirror the value into
-      // the base layer state so that re-attach within the same session reads it correctly.
-      if (key !== "visible") {
-        const subtargetMatch = /^(.+)::(fill|line|point-fill|point-stroke)$/.exec(layerId);
-        if (subtargetMatch) {
-          const baseId = subtargetMatch[1];
-          if (!layerState[baseId]) layerState[baseId] = {};
-          layerState[baseId][key] = value;
-        }
-      }
-
       // ── Registry-driven layers (everything except ocean) ─────────────────────
       const registryEntry = findRegistryEntry(layerId);
       if (registryEntry && applyRegistryStyleValue(registryEntry, map, layerState, key, value) && key !== "visible") {
@@ -2205,6 +2194,32 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       const detailLineUrl = getLandDetailLineUrl(layerState, detail);
       if (lineSource && "setData" in lineSource) {
         lineSource.setData(detailLineUrl);
+      }
+    },
+    setSourceChoice(choiceTarget, option) {
+      const key = choiceTarget?.key ?? "value";
+      const value = option?.value ?? option?.label ?? "";
+      if (choiceTarget?.stateRowId) {
+        if (!layerState[choiceTarget.stateRowId] || typeof layerState[choiceTarget.stateRowId] !== "object") {
+          layerState[choiceTarget.stateRowId] = {};
+        }
+        layerState[choiceTarget.stateRowId][key] = value;
+      }
+
+      const sourceUrl = option?.url ?? option?.source?.url ?? null;
+      const source = sourceUrl && choiceTarget?.sourceId
+        ? map.getSource(choiceTarget.sourceId)
+        : null;
+      if (source && "setData" in source) {
+        source.setData(sourceUrl);
+      }
+
+      const lineUrl = option?.lineUrl ?? option?.lineSource?.url ?? null;
+      const lineSource = lineUrl && choiceTarget?.lineSourceId
+        ? map.getSource(choiceTarget.lineSourceId)
+        : null;
+      if (lineSource && "setData" in lineSource) {
+        lineSource.setData(lineUrl);
       }
     },
     attachDynamicLayer(layerId, geojson, tilesUrl, style, options) {

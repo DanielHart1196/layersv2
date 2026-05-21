@@ -42,6 +42,11 @@ function createCustomSelect({
     return null;
   }
 
+  if (window.__layersOpenCustomSelect?.anchor === anchor) {
+    window.__layersOpenCustomSelect.close?.();
+    return null;
+  }
+
   closeOpenSelect();
 
   const menu = document.createElement("div");
@@ -131,7 +136,7 @@ function createCustomSelect({
 
   document.body.append(menu);
   positionMenu(menu, anchor, { align, minWidth });
-  window.__layersOpenCustomSelect = { menu, close };
+  window.__layersOpenCustomSelect = { anchor, menu, close };
   window.addEventListener("resize", handleReposition);
   window.addEventListener("scroll", handleReposition, true);
   setTimeout(() => {

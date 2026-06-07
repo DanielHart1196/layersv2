@@ -111,6 +111,29 @@ function createLayerModel() {
       ?? fallbackLayerId;
   }
 
+  function getChildRowOrderPriority(row) {
+    if (row?.target?.kind === "row-variable" || row?.type === "variable-slider" || row?.type === "variable-select") {
+      return 10;
+    }
+    if (isStyleChildRow(row)) {
+      return 20;
+    }
+    if (row?.type === "layer" && row?.kind === "filter") {
+      return 30;
+    }
+    return 40;
+  }
+
+  function sortChildRowsByDisplayGroup(rowIds = []) {
+    const indexById = new Map(rowIds.map((rowId, index) => [rowId, index]));
+    return rowIds.slice().sort((leftId, rightId) => {
+      const leftRow = rowDefinitionsById.get(leftId) ?? layerDefinitions[leftId];
+      const rightRow = rowDefinitionsById.get(rightId) ?? layerDefinitions[rightId];
+      const priorityDelta = getChildRowOrderPriority(leftRow) - getChildRowOrderPriority(rightRow);
+      return priorityDelta || ((indexById.get(leftId) ?? 0) - (indexById.get(rightId) ?? 0));
+    });
+  }
+
   function normalizeChildRowOrder(parentId, candidateOrder = null) {
     const orderableRows = getOrderableChildRows(parentId);
     if (!orderableRows.length) {
@@ -137,7 +160,7 @@ function createLayerModel() {
       }
     });
 
-    return [...pinnedStartIds, ...movableOrdered, ...pinnedEndIds];
+    return [...pinnedStartIds, ...sortChildRowsByDisplayGroup(movableOrdered), ...pinnedEndIds];
   }
 
   function buildDefaultLayerState() {
@@ -318,6 +341,7 @@ function createLayerModel() {
       (defs.rootRows ?? []).forEach((row) => {
         row.geometryTypes = inferStoredRowGeometryTypes(row);
         row.geometryType = collapseGeometryTypes(row.geometryTypes);
+        migrateRowTargets(row, row.runtimeLayerId ?? row.layerRef ?? row.layerId ?? row.id);
         rootDynamicRows.push(row);
         dynamicIds.add(row.id);
         indexRowDefinitions([row]);
@@ -562,6 +586,39 @@ function createLayerModel() {
     };
   }
 
+  function isStyleCascadeLocked(layerId, key) {
+    if (!layerId || !key) {
+      return false;
+    }
+
+    return layerState[layerId]?.cascadeLocks?.[key] === true;
+  }
+
+  function toggleStyleCascadeLock(layerId, key) {
+    if (!layerId || !key) {
+      return false;
+    }
+
+    if (!layerState[layerId] || typeof layerState[layerId] !== "object") {
+      layerState[layerId] = {};
+    }
+    if (!layerState[layerId].cascadeLocks || typeof layerState[layerId].cascadeLocks !== "object") {
+      layerState[layerId].cascadeLocks = {};
+    }
+
+    const nextLocked = layerState[layerId].cascadeLocks[key] !== true;
+    if (nextLocked) {
+      layerState[layerId].cascadeLocks[key] = true;
+    } else {
+      delete layerState[layerId].cascadeLocks[key];
+      if (!Object.keys(layerState[layerId].cascadeLocks).length) {
+        delete layerState[layerId].cascadeLocks;
+      }
+    }
+    persistLayerState();
+    return nextLocked;
+  }
+
   function isExpanded(layerId) {
     return expandedRowIds.has(layerId);
   }
@@ -665,13 +722,62 @@ function createLayerModel() {
 
   // Fixes style target layerIds on a row — used during hydration to repair rows
   // created before the mapLayerId fix (when uid was used instead of layerRef).
-  function migrateRowTargets(row, correctLayerId) {
-    const fix = (t) => { if (t?.kind === "layer-style" && t.layerId !== correctLayerId) t.layerId = correctLayerId; };
+  function getRuntimeTargetBaseId(runtimeTargetId) {
+    const match = /^(.+)::(?:fill|line|point-fill|point-stroke)$/.exec(String(runtimeTargetId ?? ""));
+    return match?.[1] ?? null;
+  }
+
+  function migrateStyleRowTargets(row, correctLayerId) {
+    const resolvedLayerId = getRuntimeTargetBaseId(row?.runtimeTargetId) ?? correctLayerId;
+    const fix = (t) => {
+      if (t?.kind !== "layer-style" || !resolvedLayerId || t.layerId === resolvedLayerId) {
+        return;
+      }
+      if (!layerState[resolvedLayerId] || typeof layerState[resolvedLayerId] !== "object") {
+        layerState[resolvedLayerId] = {};
+      }
+      if (
+        t.key
+        && layerState[t.layerId]?.[t.key] !== undefined
+        && layerState[resolvedLayerId][t.key] === undefined
+      ) {
+        layerState[resolvedLayerId][t.key] = layerState[t.layerId][t.key];
+      }
+      if (
+        t.key
+        && layerState[t.layerId]?.cascadeLocks?.[t.key] === true
+        && layerState[resolvedLayerId]?.cascadeLocks?.[t.key] !== true
+      ) {
+        if (!layerState[resolvedLayerId].cascadeLocks || typeof layerState[resolvedLayerId].cascadeLocks !== "object") {
+          layerState[resolvedLayerId].cascadeLocks = {};
+        }
+        layerState[resolvedLayerId].cascadeLocks[t.key] = true;
+      }
+      t.layerId = resolvedLayerId;
+    };
     fix(row.colorTarget);
     fix(row.opacityTarget);
     fix(row.weightTarget);
     fix(row.radiusTarget);
     fix(row.target);
+  }
+
+  function migrateRowTargets(row, correctLayerId) {
+    if (!row || !correctLayerId) {
+      return;
+    }
+
+    if (isStyleChildRow(row)) {
+      migrateStyleRowTargets(row, correctLayerId);
+      return;
+    }
+
+    const rowTargetId = row.type === "layer"
+      ? (row.runtimeLayerId ?? row.layerRef ?? row.layerId ?? row.id ?? correctLayerId)
+      : correctLayerId;
+    if (Array.isArray(row.rows)) {
+      row.rows.forEach((childRow) => migrateRowTargets(childRow, rowTargetId));
+    }
   }
 
   function normalizeDatasetGeometryTypes(geometryTypes = [], geometryType = "mixed") {
@@ -1217,7 +1323,7 @@ function createLayerModel() {
 
   // Adds a new data row (type: "layer") pointing to an entry in the layer catalog.
   // layerRef is the catalog layer ID (e.g. "land", or a Supabase UUID later).
-  function addDataRow(parentId, { name, layerRef, geometryTypes = [], geometryType = "mixed" }) {
+  function addDataRow(parentId, { name, layerRef, geometryTypes = [], geometryType = "mixed", persist = true }) {
     const uid = `dyn-${Date.now()}`;
     const mapLayerId = layerRef ?? uid;
     const resolvedGeometryTypes = normalizeDatasetGeometryTypes(geometryTypes, geometryType);
@@ -1269,8 +1375,10 @@ function createLayerModel() {
       runtimeTargetId: newRow.runtimeLayerId,
       parentRowId: parentId === ROOT_PARENT_ID ? null : parentId,
     };
-    persistDynamicDefs();
-    persistLayerState();
+    if (persist) {
+      persistDynamicDefs();
+      persistLayerState();
+    }
 
     return newRow;
   }
@@ -1395,9 +1503,11 @@ function createLayerModel() {
     suppressRow,
     toggleExpanded,
     toggleRowVisible,
+    toggleStyleCascadeLock,
     toggleVisibility,
     updateFixedFilterRow,
     updateVariableFilterForControlRow,
+    isStyleCascadeLocked,
   };
 }
 

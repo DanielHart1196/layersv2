@@ -303,26 +303,26 @@ body:has(.layer-menu.is-open) .map-title {
 
 .feature-inspector-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.feature-inspector-heading {
-  min-width: 0;
-}
-
 .feature-inspector-eyebrow {
-  margin: 0 0 4px;
+  min-width: 0;
+  margin: 0;
   color: #5f6a70;
   font-size: 0.72rem;
   font-weight: 700;
   line-height: 1.2;
   text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .feature-inspector-title {
-  margin: 0;
+  margin: 6px 0 0;
   color: #000000;
   font-size: 1.05rem;
   font-weight: 700;
@@ -335,6 +335,27 @@ body:has(.layer-menu.is-open) .map-title {
   align-items: center;
   gap: 2px;
   flex: 0 0 auto;
+}
+
+.feature-inspector-stack-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 4px;
+}
+
+.feature-inspector-stack-nav[hidden] {
+  display: none;
+}
+
+.feature-inspector-stack-count {
+  min-width: 32px;
+  color: #5f6a70;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .feature-inspector-icon-btn {
@@ -1220,6 +1241,39 @@ body:has(.layer-menu.is-open) .map-title {
   pointer-events: none;
 }
 
+.layer-menu.is-style-previewing .layer-menu-button,
+.layer-menu.is-style-previewing .layer-menu-appearance,
+.layer-menu.is-style-previewing .layer-menu-panel-footer,
+.layer-menu.is-style-previewing .layer-menu-row,
+.layer-menu.is-style-previewing .layer-menu-row-group,
+.layer-menu.is-style-previewing .layer-menu-add-row {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.layer-menu.is-style-previewing .is-style-preview-context,
+.layer-menu.is-style-previewing .is-style-preview-active {
+  opacity: 1;
+}
+
+.layer-menu.is-style-previewing .layer-menu-row-group.is-style-preview-context {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.layer-menu.is-style-previewing .layer-menu-row-group.is-style-preview-context > .layer-menu-row,
+.layer-menu.is-style-previewing .layer-menu-row-group.is-style-preview-context > .layer-menu-row-children > :not(.is-style-preview-active):not(.is-style-preview-context) {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.layer-menu.is-style-previewing .layer-menu-row-group.is-style-preview-context .is-style-preview-active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .layer-menu-row-fill-opacity {
   display: grid;
   gap: 8px;
@@ -1279,6 +1333,42 @@ body:has(.layer-menu.is-open) .map-title {
 .layer-menu-row-action svg {
   width: 15px;
   height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.layer-menu-cascade-lock {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid rgba(239, 247, 251, 0.48);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(239, 247, 251, 0.72);
+  cursor: pointer;
+}
+
+.layer-menu-cascade-lock.is-locked {
+  border-color: rgba(239, 247, 251, 0.88);
+  background: rgba(239, 247, 251, 0.16);
+  color: rgba(239, 247, 251, 0.96);
+}
+
+.layer-menu-cascade-lock:focus-visible {
+  outline: 2px solid rgba(239, 247, 251, 0.86);
+  outline-offset: 2px;
+}
+
+.layer-menu-cascade-lock svg {
+  width: 14px;
+  height: 14px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.8;
@@ -2225,6 +2315,16 @@ body.is-reordering-rows {
   background: rgba(0, 0, 0, 0.08);
 }
 
+.clp-panel-create-layer .clp-existing-list-slot {
+  height: 250px;
+  min-height: 250px;
+}
+
+.clp-panel-create-layer .clp-existing-list {
+  height: 100%;
+  max-height: none;
+}
+
 .clp-existing-item {
   display: grid;
   gap: 4px;
@@ -2290,6 +2390,12 @@ body.is-reordering-rows {
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.04);
+}
+
+.clp-panel-create-layer .clp-existing-list-state {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
 }
 
 .clp-existing-list-error {
@@ -2435,8 +2541,24 @@ body.is-reordering-rows {
   margin-bottom: 12px;
 }
 
+.clp-preview-left-controls {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .clp-preview-pmtiles {
   margin-bottom: 0;
+}
+
+.clp-local-render {
+  margin-bottom: 0;
+}
+
+.clp-local-render-select {
+  min-width: 128px;
+  width: auto;
 }
 
 .clp-preview-pagination {

@@ -1,7 +1,11 @@
 import { requireSupabase } from "../../lib/supabase.js";
+import { evaluatePropertyExpression } from "../../core/filter-expressions.js";
 
 const LOCAL_BORDERS_PMTILES_URL = "/data/world-atlas/ne_10m_admin_0_boundary_lines_land.pmtiles";
 const DEFAULT_PMTILES_SOURCE_LAYER = "layer";
+const FIELD_VALUE_PAGE_SIZE = 500;
+const CLIENT_FIELD_SCAN_LIMIT = 5000;
+const CLIENT_VALUE_SCAN_LIMIT = 10000;
 let catalogCache = null;
 let catalogRequest = null;
 
@@ -384,29 +388,83 @@ export async function getLayerFields(layerId) {
     return null;
   }
 
-  const { data, error } = await supabase
-    .from("features")
-    .select("properties")
-    .in("dataset_id", datasetIds)
-    .limit(20);
-
-  if (error || !data?.length) return null;
-
   const keys = new Set();
-  for (const row of data) {
-    if (row.properties && typeof row.properties === "object") {
-      Object.keys(row.properties).forEach((key) => keys.add(key));
+  const pageSize = FIELD_VALUE_PAGE_SIZE;
+  let offset = 0;
+  while (offset < CLIENT_FIELD_SCAN_LIMIT) {
+    const end = Math.min(offset + pageSize - 1, CLIENT_FIELD_SCAN_LIMIT - 1);
+    const { data, error } = await supabase
+      .from("features")
+      .select("properties")
+      .in("dataset_id", datasetIds)
+      .order("dataset_id", { ascending: true })
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, end);
+
+    if (error) {
+      console.warn("Failed to load layer fields.", error);
+      break;
     }
+    if (!data?.length) {
+      break;
+    }
+
+    for (const row of data) {
+      if (row.properties && typeof row.properties === "object") {
+        Object.keys(row.properties).forEach((key) => keys.add(key));
+      }
+    }
+
+    if (data.length < pageSize) {
+      break;
+    }
+    offset += pageSize;
   }
 
   return [...keys].filter((key) => !key.startsWith("_")).sort();
 }
 
-export async function getLayerFieldValues(layerId, fieldKey, { limit = 200 } = {}) {
+export async function getLayerFieldValues(layerId, fieldKey, { limit = FIELD_VALUE_PAGE_SIZE, filterExpression = null } = {}) {
   const supabase = requireSupabase();
   const key = String(fieldKey ?? "").trim();
   if (!layerId || !key) {
     return [];
+  }
+
+  const values = new Set();
+  const pageSize = Math.max(1, Math.min(1000, Number(limit) || FIELD_VALUE_PAGE_SIZE));
+  let offset = 0;
+  let rpcUnavailable = !!filterExpression;
+
+  if (!filterExpression) {
+    while (true) {
+      const { data, error } = await supabase.rpc("get_layer_property_values", {
+        p_layer_id: layerId,
+        p_field_key: key,
+        p_limit: pageSize,
+        p_offset: offset,
+      });
+
+      if (error) {
+        rpcUnavailable = true;
+        console.warn("Falling back to client-side field value scan.", error);
+        break;
+      }
+
+      const pageValues = Array.isArray(data)
+        ? data.map((row) => row?.value).filter((value) => value !== null && value !== undefined)
+        : [];
+      pageValues.forEach((value) => values.add(String(value)));
+      if (pageValues.length < pageSize) {
+        return sortFieldValues(values);
+      }
+      offset += pageValues.length;
+    }
+  }
+
+  if (!rpcUnavailable) {
+    return sortFieldValues(values);
   }
 
   const datasets = await loadLayerDatasets(layerId);
@@ -415,28 +473,50 @@ export async function getLayerFieldValues(layerId, fieldKey, { limit = 200 } = {
     return [];
   }
 
-  const { data, error } = await supabase
-    .from("features")
-    .select("properties")
-    .in("dataset_id", datasetIds)
-    .limit(Math.max(1, Math.min(1000, Number(limit) || 200)));
+  offset = 0;
+  while (offset < CLIENT_VALUE_SCAN_LIMIT) {
+    const end = Math.min(offset + pageSize - 1, CLIENT_VALUE_SCAN_LIMIT - 1);
+    const { data, error } = await supabase
+      .from("features")
+      .select("properties")
+      .in("dataset_id", datasetIds)
+      .order("dataset_id", { ascending: true })
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, end);
 
-  if (error || !data?.length) {
-    return [];
+    if (error) {
+      console.warn("Failed to load field values.", error);
+      break;
+    }
+    if (!data?.length) {
+      break;
+    }
+
+    data.forEach((row) => {
+      if (filterExpression && !evaluatePropertyExpression(filterExpression, row?.properties ?? {})) {
+        return;
+      }
+      if (!row?.properties || typeof row.properties !== "object" || !Object.hasOwn(row.properties, key)) {
+        return;
+      }
+      const value = row.properties[key];
+      if (value === null || value === undefined) {
+        return;
+      }
+      values.add(String(value));
+    });
+
+    if (data.length < pageSize) {
+      break;
+    }
+    offset += pageSize;
   }
 
-  const values = new Set();
-  data.forEach((row) => {
-    if (!row?.properties || typeof row.properties !== "object" || !Object.hasOwn(row.properties, key)) {
-      return;
-    }
-    const value = row.properties[key];
-    if (value === null || value === undefined) {
-      return;
-    }
-    values.add(String(value));
-  });
+  return sortFieldValues(values);
+}
 
+function sortFieldValues(values) {
   return [...values].sort((a, b) => {
     const an = Number(a);
     const bn = Number(b);

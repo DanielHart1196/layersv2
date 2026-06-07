@@ -100,6 +100,7 @@ const FEATURE_SPREAD_SOURCE_ID = "atlas-feature-spread-source";
 const FEATURE_SPREAD_POINT_LAYER_ID = "atlas-feature-spread-points";
 const FEATURE_SPREAD_HIT_RADIUS_PX = 8;
 const FEATURE_SPREAD_STACK_TOLERANCE_PX = 3;
+const FEATURE_STACK_COORDINATE_TOLERANCE = 1e-9;
 const FEATURE_SPREAD_BASE_RADIUS_PX = 26;
 const FEATURE_SPREAD_RADIUS_STEP_PX = 4;
 const METERS_PER_FOOT = 0.3048;
@@ -266,92 +267,6 @@ function updateCompassOverlay(map, overlay) {
   }
 
   overlay.classList.toggle("is-active", Math.abs(bearing) > COMPASS_ACTIVE_BEARING_THRESHOLD);
-}
-
-function evaluateMaplibreExpression(expression, feature) {
-  if (!Array.isArray(expression)) {
-    return expression;
-  }
-
-  const [operator, ...args] = expression;
-  const properties = feature?.properties ?? {};
-
-  if (operator === "get") {
-    return properties[args[0]];
-  }
-  if (operator === "literal") {
-    return args[0];
-  }
-  if (operator === "to-string") {
-    const value = evaluateMaplibreExpression(args[0], feature);
-    return value == null ? "" : String(value);
-  }
-  if (operator === "coalesce") {
-    for (const arg of args) {
-      const value = evaluateMaplibreExpression(arg, feature);
-      if (value !== null && value !== undefined) {
-        return value;
-      }
-    }
-    return null;
-  }
-
-  return expression;
-}
-
-function evaluateMaplibreFilter(filterExpression, feature) {
-  if (!filterExpression) {
-    return true;
-  }
-  if (!Array.isArray(filterExpression)) {
-    return Boolean(filterExpression);
-  }
-
-  const [operator, ...args] = filterExpression;
-  if (operator === "all") {
-    return args.every((arg) => evaluateMaplibreFilter(arg, feature));
-  }
-  if (operator === "any") {
-    return args.some((arg) => evaluateMaplibreFilter(arg, feature));
-  }
-  if (operator === "none") {
-    return args.every((arg) => !evaluateMaplibreFilter(arg, feature));
-  }
-  if (operator === "has") {
-    return feature?.properties?.[args[0]] !== undefined;
-  }
-  if (operator === "!has") {
-    return feature?.properties?.[args[0]] === undefined;
-  }
-
-  const left = evaluateMaplibreExpression(args[0], feature);
-  const right = evaluateMaplibreExpression(args[1], feature);
-  if (operator === "==") {
-    return left === right;
-  }
-  if (operator === "!=") {
-    return left !== right;
-  }
-  if (operator === ">") {
-    return left > right;
-  }
-  if (operator === ">=") {
-    return left >= right;
-  }
-  if (operator === "<") {
-    return left < right;
-  }
-  if (operator === "<=") {
-    return left <= right;
-  }
-  if (operator === "in") {
-    return args.slice(1).map((arg) => evaluateMaplibreExpression(arg, feature)).includes(left);
-  }
-  if (operator === "!in") {
-    return !args.slice(1).map((arg) => evaluateMaplibreExpression(arg, feature)).includes(left);
-  }
-
-  return true;
 }
 
 function getRuntimeTargetIdFromState(layerState, rowId) {
@@ -1472,6 +1387,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
   const compassOverlay = createCompassOverlay(container);
   let interactionOverlayHideTimeout = null;
   const spreadSelections = new Map();
+  const dynamicFeatureFilters = new Map();
 
   function clearInteractionOverlayHideTimeout() {
     if (interactionOverlayHideTimeout) {
@@ -1575,6 +1491,29 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     return null;
   }
 
+  function getFeaturePointCoordinates(feature) {
+    const coordinates = feature?.geometry?.coordinates;
+    if (
+      Array.isArray(coordinates)
+      && Number.isFinite(Number(coordinates[0]))
+      && Number.isFinite(Number(coordinates[1]))
+    ) {
+      return [Number(coordinates[0]), Number(coordinates[1])];
+    }
+    return null;
+  }
+
+  function coordinatesMatch(leftFeature, rightFeature) {
+    const left = getFeaturePointCoordinates(leftFeature);
+    const right = getFeaturePointCoordinates(rightFeature);
+    if (!left || !right) {
+      return false;
+    }
+
+    return Math.abs(left[0] - right[0]) <= FEATURE_STACK_COORDINATE_TOLERANCE
+      && Math.abs(left[1] - right[1]) <= FEATURE_STACK_COORDINATE_TOLERANCE;
+  }
+
   function getFeatureLngLat(feature, fallbackLngLat = null) {
     const coordinates = feature?.geometry?.coordinates;
     if (
@@ -1611,7 +1550,8 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       if (!featurePoint) {
         return false;
       }
-      return Math.hypot(featurePoint.x - topPoint.x, featurePoint.y - topPoint.y) <= FEATURE_SPREAD_STACK_TOLERANCE_PX;
+      return Math.hypot(featurePoint.x - topPoint.x, featurePoint.y - topPoint.y) <= FEATURE_SPREAD_STACK_TOLERANCE_PX
+        && coordinatesMatch(feature, candidates[0]);
     });
   }
 
@@ -1745,8 +1685,14 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     if (stackedPointFeatures.length > 1) {
       const anchorLngLat = getFeatureLngLat(stackedPointFeatures[0], event.lngLat ? { longitude: event.lngLat.lng, latitude: event.lngLat.lat } : null);
       if (anchorLngLat) {
-        showFeatureSpreadOverlay(stackedPointFeatures, anchorLngLat);
-        onFeatureSelect(null);
+        clearFeatureSpreadOverlay();
+        onFeatureSelect({
+          kind: "feature-stack",
+          features: stackedPointFeatures
+            .map((feature) => createFeatureSelectionPayload(feature, anchorLngLat))
+            .filter(Boolean),
+          activeIndex: 0,
+        });
         return;
       }
     }
@@ -1921,6 +1867,12 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       return;
     }
 
+    if (featureFilter) {
+      dynamicFeatureFilters.set(layerId, featureFilter);
+    } else {
+      dynamicFeatureFilters.delete(layerId);
+    }
+
     const sourceId = `dynamic-${layerId}`;
     const layerIds = [`${sourceId}-fill`, `${sourceId}-line`, `${sourceId}-circle`];
     let applied = false;
@@ -1943,6 +1895,11 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
 
     const resolvedGeometryTypes = normalizeDynamicGeometryTypes(geometryTypes, geometryType, style);
     const resolvedRowId = rowId ?? layerId;
+    const storedFeatureFilter = dynamicFeatureFilters.get(layerId) ?? null;
+    const effectiveFeatureFilter = featureFilter ?? storedFeatureFilter;
+    if (featureFilter) {
+      dynamicFeatureFilters.set(layerId, featureFilter);
+    }
     registerRuntimeRow(layerState, {
       rowId: resolvedRowId,
       runtimeTargetId: layerId,
@@ -1950,9 +1907,10 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     });
     registerRuntimeChildRows(layerState, childRows, resolvedRowId);
 
-    if (!sourceLayerId || !featureFilter) {
+    if (!sourceLayerId) {
       const sourceId = `dynamic-${layerId}`;
       if (map.getSource(sourceId)) {
+        setDynamicLayerFeatureFilter(layerId, effectiveFeatureFilter);
         applyFullLayerOrder(map, layerState, getOrderedChildRowIds);
         return;
       }
@@ -1970,14 +1928,17 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
 
       if (resolvedGeometryTypes.includes("polygon")) {
         map.addLayer({ id: `${sourceId}-fill`, type: "fill", source: sourceId, ...sourceLayerProp,
+          ...(effectiveFeatureFilter ? { filter: effectiveFeatureFilter } : {}),
           paint: { "fill-color": color, "fill-opacity": opacity } });
       }
       if (resolvedGeometryTypes.includes("line") || resolvedGeometryTypes.includes("polygon")) {
         map.addLayer({ id: `${sourceId}-line`, type: "line", source: sourceId, ...sourceLayerProp,
+          ...(effectiveFeatureFilter ? { filter: effectiveFeatureFilter } : {}),
           paint: { "line-color": color, "line-opacity": opacity, "line-width": style?.weight ?? 2 } });
       }
       if (resolvedGeometryTypes.includes("point")) {
         map.addLayer({ id: `${sourceId}-circle`, type: "circle", source: sourceId, ...sourceLayerProp,
+          ...(effectiveFeatureFilter ? { filter: effectiveFeatureFilter } : {}),
           paint: {
             "circle-color": color,
             "circle-opacity": opacity,
@@ -2026,7 +1987,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     }
 
     const sourceLayerProp = getDynamicSourceLayerProp(sourceLayerId);
-    const filterExpression = featureFilter;
+    const filterExpression = effectiveFeatureFilter;
 
     if (resolvedGeometryTypes.includes("polygon")) {
       map.addLayer({
@@ -2075,6 +2036,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         },
       });
     }
+    reapplyStoredDynamicRuntimeStyles(layerId, map, layerState);
     applyRuntimeTargetVisibility(layerId, map, layerState);
     ["fill", "line", "point-fill", "point-stroke"].forEach((subtarget) => {
       applyRuntimeTargetVisibility(`${layerId}::${subtarget}`, map, layerState);
@@ -2230,6 +2192,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     },
     detachDynamicLayer(layerId) {
       const sourceId = `dynamic-${layerId}`;
+      dynamicFeatureFilters.delete(layerId);
       [`${sourceId}-circle`, `${sourceId}-fill`, `${sourceId}-line`].forEach((id) => {
         if (map.getLayer(id)) map.removeLayer(id);
       });

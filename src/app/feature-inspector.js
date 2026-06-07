@@ -109,6 +109,8 @@ function createFeatureInspector() {
   document.body.appendChild(panel);
 
   let currentFeature = null;
+  let currentEntries = [];
+  let currentFeatureIndex = 0;
   let currentConfig = normalizeConfig();
   let saveConfig = null;
   let applyConfigToLayer = null;
@@ -119,12 +121,36 @@ function createFeatureInspector() {
   function close() {
     panel.hidden = true;
     currentFeature = null;
+    currentEntries = [];
+    currentFeatureIndex = 0;
     saveConfig = null;
     applyConfigToLayer = null;
     isEditing = false;
     isSaving = false;
     error = "";
     panel.replaceChildren();
+  }
+
+  function applyCurrentEntry() {
+    const entry = currentEntries[currentFeatureIndex] ?? null;
+    currentFeature = entry?.feature ?? null;
+    currentConfig = normalizeConfig(entry?.config ?? {});
+    saveConfig = entry?.onSaveConfig ?? null;
+    applyConfigToLayer = entry?.onApplyConfigToLayer ?? null;
+  }
+
+  function showFeatureAt(index) {
+    if (!currentEntries.length) {
+      close();
+      return;
+    }
+
+    currentFeatureIndex = (index + currentEntries.length) % currentEntries.length;
+    applyCurrentEntry();
+    isEditing = false;
+    isSaving = false;
+    error = "";
+    renderView();
   }
 
   function renderView() {
@@ -137,11 +163,17 @@ function createFeatureInspector() {
 
     panel.innerHTML = `
       <div class="feature-inspector-header">
-        <div class="feature-inspector-heading">
-          <p class="feature-inspector-eyebrow"></p>
-          <h2 class="feature-inspector-title"></h2>
-        </div>
+        <p class="feature-inspector-eyebrow"></p>
         <div class="feature-inspector-actions">
+          <div class="feature-inspector-stack-nav" hidden>
+            <button class="feature-inspector-icon-btn feature-inspector-prev" type="button" aria-label="Previous feature at this point" title="Previous feature">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m15 18-6-6 6-6"></path></svg>
+            </button>
+            <span class="feature-inspector-stack-count"></span>
+            <button class="feature-inspector-icon-btn feature-inspector-next" type="button" aria-label="Next feature at this point" title="Next feature">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m9 18 6-6-6-6"></path></svg>
+            </button>
+          </div>
           <button class="feature-inspector-icon-btn feature-inspector-edit" type="button" aria-label="Edit feature panel defaults" title="Edit feature panel defaults">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
           </button>
@@ -150,6 +182,7 @@ function createFeatureInspector() {
           </button>
         </div>
       </div>
+      <h2 class="feature-inspector-title"></h2>
       <p class="feature-inspector-subtitle"></p>
       <dl class="feature-inspector-fields"></dl>
     `;
@@ -159,6 +192,13 @@ function createFeatureInspector() {
     const subtitle = panel.querySelector(".feature-inspector-subtitle");
     subtitle.textContent = getSubtitle(currentFeature, currentConfig);
     subtitle.hidden = !subtitle.textContent;
+
+    const stackNav = panel.querySelector(".feature-inspector-stack-nav");
+    const stackCount = panel.querySelector(".feature-inspector-stack-count");
+    if (stackNav && stackCount) {
+      stackNav.hidden = currentEntries.length <= 1;
+      stackCount.textContent = `${currentFeatureIndex + 1} / ${currentEntries.length}`;
+    }
 
     const fields = panel.querySelector(".feature-inspector-fields");
     fieldKeys.forEach((key) => {
@@ -182,6 +222,12 @@ function createFeatureInspector() {
     panel.querySelector(".feature-inspector-edit")?.addEventListener("click", () => {
       isEditing = true;
       renderEditor();
+    });
+    panel.querySelector(".feature-inspector-prev")?.addEventListener("click", () => {
+      showFeatureAt(currentFeatureIndex - 1);
+    });
+    panel.querySelector(".feature-inspector-next")?.addEventListener("click", () => {
+      showFeatureAt(currentFeatureIndex + 1);
     });
     panel.querySelector(".feature-inspector-close")?.addEventListener("click", close);
     panel.hidden = false;
@@ -309,6 +355,12 @@ function createFeatureInspector() {
     try {
       const savedConfig = await saveHandler(nextConfig);
       currentConfig = normalizeConfig(savedConfig ?? nextConfig);
+      if (currentEntries[currentFeatureIndex]) {
+        currentEntries[currentFeatureIndex] = {
+          ...currentEntries[currentFeatureIndex],
+          config: currentConfig,
+        };
+      }
       isEditing = false;
       renderView();
     } catch (saveError) {
@@ -320,11 +372,22 @@ function createFeatureInspector() {
     isSaving = false;
   }
 
-  function open(feature = {}, { config = {}, onSaveConfig = null, onApplyConfigToLayer = null } = {}) {
-    currentFeature = feature;
-    currentConfig = normalizeConfig(config);
-    saveConfig = onSaveConfig;
-    applyConfigToLayer = onApplyConfigToLayer;
+  function open(feature = {}, { config = {}, onSaveConfig = null, onApplyConfigToLayer = null, stackEntries = null, activeIndex = 0 } = {}) {
+    currentEntries = Array.isArray(stackEntries) && stackEntries.length
+      ? stackEntries.map((entry) => ({
+          feature: entry?.feature ?? {},
+          config: normalizeConfig(entry?.config ?? {}),
+          onSaveConfig: entry?.onSaveConfig ?? null,
+          onApplyConfigToLayer: entry?.onApplyConfigToLayer ?? null,
+        }))
+      : [{
+          feature,
+          config: normalizeConfig(config),
+          onSaveConfig,
+          onApplyConfigToLayer,
+        }];
+    currentFeatureIndex = Math.min(Math.max(Number(activeIndex) || 0, 0), currentEntries.length - 1);
+    applyCurrentEntry();
     isEditing = false;
     isSaving = false;
     error = "";

@@ -101,6 +101,8 @@ function createDefaultState(overrides = {}) {
     layerId: "",
     layerName: "",
     parentRowId: "",
+    valueFilterExpression: null,
+    filterLabel: "",
     fields: [],
     columnName: "",
     values: [],
@@ -154,6 +156,10 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
 
     content.innerHTML = `
       <form class="filter-panel-form">
+        <label class="clp-field">
+          <span class="clp-field-label">Label</span>
+          <input class="clp-field-input filter-panel-label" type="text" value="${escapeHtml(state.filterLabel)}" placeholder="Filter label" ${state.saving ? "disabled" : ""} />
+        </label>
         <div class="clp-mode-selector" role="radiogroup" aria-label="Filter type">
           <button class="clp-mode-option filter-panel-mode-option ${state.filterMode === "fixed" ? "is-selected" : ""}" type="button" data-filter-mode="fixed" aria-pressed="${state.filterMode === "fixed"}" ${modeLocked ? "disabled" : ""}>Fixed</button>
           <button class="clp-mode-option filter-panel-mode-option ${state.filterMode === "variable" ? "is-selected" : ""}" type="button" data-filter-mode="variable" aria-pressed="${state.filterMode === "variable"}" ${modeLocked ? "disabled" : ""}>Variable</button>
@@ -200,10 +206,6 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
           </div>
         </div>` : ""}
         ${isVariableMode ? `
-          <label class="clp-field">
-            <span class="clp-field-label">Label</span>
-            <input class="clp-field-input filter-panel-variable-label" type="text" value="${escapeHtml(state.variableLabel)}" placeholder="Year" ${controlsDisabled ? "disabled" : ""} />
-          </label>
           <label class="clp-field">
             <span class="clp-field-label">Variable</span>
             <input class="clp-field-input filter-panel-variable-id" type="text" value="${escapeHtml(state.variableId)}" placeholder="year" ${controlsDisabled ? "disabled" : ""} />
@@ -296,6 +298,9 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
       closeOpenSelect();
       state.value = event.target.value;
     });
+    content.querySelector(".filter-panel-label")?.addEventListener("input", (event) => {
+      state.filterLabel = event.target.value;
+    });
     content.querySelector(".filter-panel-select-menu-btn")?.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") {
         return;
@@ -345,13 +350,14 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
     content.querySelector(".filter-panel-cancel")?.addEventListener("click", close);
     content.querySelector(".filter-panel-form")?.addEventListener("submit", async (event) => {
       event.preventDefault();
-      state.variableLabel = content.querySelector(".filter-panel-variable-label")?.value ?? state.variableLabel;
+      state.filterLabel = content.querySelector(".filter-panel-label")?.value ?? state.filterLabel;
       state.variableId = content.querySelector(".filter-panel-variable-id")?.value ?? state.variableId;
       state.variableMin = content.querySelector(".filter-panel-variable-min")?.value ?? state.variableMin;
       state.variableMax = content.querySelector(".filter-panel-variable-max")?.value ?? state.variableMax;
       state.variableStep = content.querySelector(".filter-panel-variable-step")?.value ?? state.variableStep;
       state.variableDefault = content.querySelector(".filter-panel-variable-default")?.value ?? state.variableDefault;
       const columnName = String(state.columnName ?? "").trim();
+      const filterLabel = String(state.filterLabel ?? "").trim();
       if (!columnName) {
         state.error = "Choose a column.";
         render();
@@ -362,7 +368,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         render();
         return;
       }
-      const variableId = slugifyVariableId(state.variableId || state.variableLabel);
+      const variableId = slugifyVariableId(state.variableId || filterLabel || state.variableLabel);
       if (state.filterMode === "variable" && !variableId) {
         state.error = "Variable is required.";
         render();
@@ -381,13 +387,14 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         const payload = {
           layerId: state.layerId,
           parentRowId: state.parentRowId,
+          label: filterLabel,
           columnName,
           value: state.value,
           op: state.filterOperator,
           mode: state.filterMode,
           variableConfig: state.filterMode === "variable" ? {
             controlType: state.variableControlType,
-            label: state.variableLabel || "Variable",
+            label: filterLabel || state.variableLabel || "Variable",
             variableId,
             min: Number(state.variableMin || variableMin),
             max: Number(state.variableMax || variableMax),
@@ -399,7 +406,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
               label: optionValue === "" ? "Empty value" : String(optionValue),
               value: String(optionValue),
             })),
-            filterLabel: `${columnName} variable`,
+            filterLabel: filterLabel || `${columnName} variable`,
             combinator: "all",
             conditions: [{ field: columnName, op: state.filterOperator, valueRef: variableId }],
           } : null,
@@ -427,7 +434,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
     state.error = "";
     render();
     try {
-      const fields = await getLayerFields?.(state.layerId);
+      const fields = await getLayerFields?.(state.layerId, getLoaderContext());
       state.fields = Array.isArray(fields) ? fields : [];
       state.columnName = state.fields.includes(state.columnName)
         ? state.columnName
@@ -465,7 +472,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
     state.valuesLoading = true;
     render();
     try {
-      const values = await getLayerFieldValues?.(state.layerId, columnName);
+      const values = await getLayerFieldValues?.(state.layerId, columnName, getLoaderContext());
       if (requestId !== valueRequestId) {
         return;
       }
@@ -487,17 +494,18 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
   panel.querySelector(".clp-inner")?.addEventListener("click", (event) => event.stopPropagation());
 
   return {
-    open({ layerId = "", layerName = "", parentRowId = "" } = {}) {
+    open({ layerId = "", layerName = "", parentRowId = "", valueFilterExpression = null } = {}) {
       state = createDefaultState({
         layerId,
         layerName,
         parentRowId,
+        valueFilterExpression,
       });
       panel.classList.add("is-open");
       render();
       void loadFields();
     },
-    edit({ layerId = "", layerName = "", parentRowId = "", filter = null } = {}) {
+    edit({ layerId = "", layerName = "", parentRowId = "", filter = null, valueFilterExpression = null } = {}) {
       const mode = filter?.mode === "variable" ? "variable" : "fixed";
       state = createDefaultState({
         panelMode: "edit",
@@ -505,6 +513,8 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         layerId,
         layerName,
         parentRowId,
+        valueFilterExpression,
+        filterLabel: filter?.label ?? filter?.variableLabel ?? "",
         columnName: filter?.columnName ?? "",
         value: filter?.value ?? "",
         filterOperator: filter?.op ?? "==",
@@ -523,6 +533,15 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
     },
     close,
   };
+
+  function getLoaderContext() {
+    return {
+      parentRowId: state.parentRowId,
+      valueFilterExpression: state.valueFilterExpression,
+      editFilter: state.editFilter,
+      panelMode: state.panelMode,
+    };
+  }
 }
 
 export { mountFilterPanel };

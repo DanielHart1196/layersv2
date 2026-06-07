@@ -9,6 +9,10 @@ import { createScreenRendererAdapter } from "../renderers/screen/screen-renderer
 import { createEditableRuntimeStore } from "../sources/editable/runtime-store.js";
 import { createPmtilesManifest } from "../sources/pmtiles/source-manifest.js";
 import { getRowRuntimeTargetId, getRowStateKey } from "../core/layer-definitions.js";
+import {
+  buildExactMatchFilterExpression,
+  buildStringComparisonFilterExpression,
+} from "../core/filter-expressions.js";
 import { bindShareControls, readShareSnapshotFromLocation } from "./share-controls.js";
 import { bindTitleControls } from "./title-controls.js";
 import { createFeatureInspector } from "./feature-inspector.js";
@@ -45,7 +49,7 @@ async function bootstrapApplication() {
     const { getLayerDatasets: loadDatasets } = await import("../sources/supabase/layer-loader.js");
     return loadDatasets(layerId);
   };
-  const createFilterFromTableSelection = async ({ layerId, parentRowId = "", columnName, value, op = "==", mode = "fixed", variableConfig = null }) => {
+  const createFilterFromTableSelection = async ({ layerId, parentRowId = "", label = "", columnName, value, op = "==", mode = "fixed", variableConfig = null }) => {
     const parentRow = parentRowId
       ? layerModel.getRowById(parentRowId)
       : findLayerRowByLayerRef(layerModel, layerId);
@@ -85,13 +89,14 @@ async function bootstrapApplication() {
         throw new Error("Failed to create variable filter.");
       }
 
-      syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow);
-      syncChildDynamicFilterRows(layerModel, screenRuntime, parentRow);
+      syncDynamicFilterTree(layerModel, screenRuntime, parentRow);
       screenRuntime.reapplyFullOrder?.();
       rerenderLayerMenu();
       return;
     }
 
+    const generatedLabel = `${columnName} ${formatFilterOperatorLabel(op)} ${value === "" ? "Empty value" : value}`;
+    const filterLabel = String(label ?? "").trim() || generatedLabel;
     const existingFilterRow = layerModel.getChildRows(parentRow.id).find((row) => (
       row?.type === "layer"
       && row.kind === "filter"
@@ -104,7 +109,7 @@ async function bootstrapApplication() {
     }
 
     const nextRow = layerModel.addRowToLayer(parentRow.id, "filter", {
-      name: `${columnName} ${formatFilterOperatorLabel(op)} ${value === "" ? "Empty value" : value}`,
+      name: filterLabel,
       field: columnName,
       value,
       op,
@@ -116,13 +121,14 @@ async function bootstrapApplication() {
       throw new Error("Failed to create filter row.");
     }
 
+    inheritParentStyleForFixedFilter(layerModel, nextRow, parentRow);
     attachDynamicFilterRow(layerModel, screenRuntime, nextRow);
     applyPersistedRowVisibility(layerModel, screenRuntime, nextRow);
     syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow);
     screenRuntime.reapplyFullOrder?.();
     rerenderLayerMenu();
   };
-  const updateFilterFromPanel = async ({ editFilter, columnName, value, op = "==", mode = "fixed", variableConfig = null }) => {
+  const updateFilterFromPanel = async ({ editFilter, label = "", columnName, value, op = "==", mode = "fixed", variableConfig = null }) => {
     if (!editFilter) {
       throw new Error("No filter was selected for editing.");
     }
@@ -152,15 +158,16 @@ async function bootstrapApplication() {
       if (!result) {
         throw new Error("Failed to save variable filter.");
       }
-      syncParentDynamicFilterOwnership(layerModel, screenRuntime, result.parentRow);
-      syncChildDynamicFilterRows(layerModel, screenRuntime, result.parentRow);
+      syncDynamicFilterTree(layerModel, screenRuntime, result.parentRow);
       screenRuntime.reapplyFullOrder?.();
       rerenderLayerMenu();
       return;
     }
 
+    const generatedLabel = `${columnName} ${formatFilterOperatorLabel(op)} ${value === "" ? "Empty value" : value}`;
+    const filterLabel = String(label ?? "").trim() || generatedLabel;
     const updatedRow = layerModel.updateFixedFilterRow(editFilter.rowId, {
-      name: `${columnName} ${formatFilterOperatorLabel(op)} ${value === "" ? "Empty value" : value}`,
+      name: filterLabel,
       field: columnName,
       value,
       op,
@@ -176,8 +183,9 @@ async function bootstrapApplication() {
       ? (findRowByRuntimeTargetId(layerModel, updatedRow.filter.parentLayerId) ?? findLayerRowByLayerRef(layerModel, updatedRow.filter.parentLayerId))
       : null;
     if (parentRow) {
-      syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow);
+      syncDynamicFilterTree(layerModel, screenRuntime, parentRow);
     }
+    syncDynamicFilterTree(layerModel, screenRuntime, updatedRow);
     rerenderLayerMenu();
   };
   const renameDataset = async ({ datasetId, name }) => {
@@ -254,6 +262,55 @@ async function bootstrapApplication() {
     }
     return results[0]?.feature_inspector ?? config;
   };
+  const viewLocalUploadDraft = async ({ previousDraft, name, features = [], geometryTypes = [], geometryType = "mixed" } = {}) => {
+    if (!Array.isArray(features) || !features.length) {
+      throw new Error("No local features to view.");
+    }
+
+    if (previousDraft?.layerRef) {
+      screenRuntime.detachDynamicLayer(previousDraft.layerRef);
+    }
+    if (previousDraft?.rowId) {
+      layerModel.removeRow(previousDraft.rowId, previousDraft.parentId ?? layerModel.getRootParentId());
+    }
+
+    const parentId = layerModel.getRootParentId();
+    const layerRef = `upload-draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const added = layerModel.addDataRow(parentId, {
+      name: `Draft: ${name || "Uploaded data"}`,
+      layerRef,
+      geometryTypes,
+      geometryType,
+      persist: false,
+    });
+    if (!added) {
+      throw new Error("Could not create local draft row.");
+    }
+
+    const geojson = {
+      type: "FeatureCollection",
+      features,
+    };
+    screenRuntime.loadDynamicLayer({
+      layerId: layerRef,
+      rowId: added.id,
+      parentRowId: null,
+      childRows: added.rows ?? [],
+      geojson,
+      tilesUrl: null,
+      style: null,
+      options: {
+        geometryTypes,
+        geometryType,
+      },
+    });
+    rerenderLayerMenu();
+    return {
+      layerRef,
+      rowId: added.id,
+      parentId,
+    };
+  };
   let addDataPanelPromise = null;
   let dataTablePanelPromise = null;
   let createLayerPanelPromise = null;
@@ -264,6 +321,7 @@ async function bootstrapApplication() {
       addDataPanelPromise = import("./add-data-panel.js").then(({ mountAddDataPanel }) => mountAddDataPanel({
         getAppearanceState: () => layerModel.getAppearanceState(),
         getLayerDatasets,
+        onViewLocalDraft: viewLocalUploadDraft,
         async onDataAdded({ layerId, datasetId }) {
           const dataTablePanel = await getDataTablePanel();
           await dataTablePanel?.reloadLayerData?.({ layerId, datasetId });
@@ -427,6 +485,7 @@ async function bootstrapApplication() {
       }
 
       screenRuntime.setLayerStyleValue(update.runtimeTargetId ?? update.layerId, update.key, update.value);
+      syncVisibleStyleControls(cascadeParentStyleToFixedFilterChildren(layerModel, screenRuntime, row, update));
       // Persist style changes as new defaults for Supabase layers.
       const styleOwnerLayerRef = getStyleOwnerLayerRef(layerModel, update);
       if (styleOwnerLayerRef) {
@@ -446,14 +505,13 @@ async function bootstrapApplication() {
         const parentRow = row?.filter?.parentLayerId
           ? (findRowByRuntimeTargetId(layerModel, row.filter.parentLayerId) ?? findLayerRowByLayerRef(layerModel, row.filter.parentLayerId))
           : null;
-        screenRuntime.detachDynamicLayer(getRowRuntimeTargetId(row));
+        detachDynamicFilterRowsRecursively(screenRuntime, row);
         if (parentRow) {
-          syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow);
+          syncDynamicFilterTree(layerModel, screenRuntime, parentRow);
         }
       }
       affectedVariableFilterParents.forEach((parentRow) => {
-        syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow);
-        syncChildDynamicFilterRows(layerModel, screenRuntime, parentRow);
+        syncDynamicFilterTree(layerModel, screenRuntime, parentRow);
       });
       rerenderLayerMenu();
     },
@@ -483,6 +541,7 @@ async function bootstrapApplication() {
             layerId: sourceLayerId,
             layerName: row.label ?? row.name ?? "Dataset",
             parentRowId: row.id,
+            valueFilterExpression: buildFilterValueScopeExpression(layerModel, row.id),
           });
         })
         .catch((error) => console.error("Failed to open filter panel.", error));
@@ -504,6 +563,7 @@ async function bootstrapApplication() {
           columnName: row.filter?.field ?? "",
           value: row.filter?.value ?? "",
           op: row.filter?.op ?? "==",
+          label: row.label ?? "",
         }
         : createVariableFilterEditPayload(layerModel, row, variableMatch?.filter);
 
@@ -514,6 +574,7 @@ async function bootstrapApplication() {
             layerName: targetRow.label ?? targetRow.name ?? "Dataset",
             parentRowId: targetRow.id,
             filter: editFilter,
+            valueFilterExpression: buildFilterValueScopeExpression(layerModel, targetRow.id),
           });
         })
         .catch((error) => console.error("Failed to open filter panel.", error));
@@ -576,29 +637,51 @@ async function bootstrapApplication() {
         onCameraChange: (camera) => {
           viewModel.setCamera(camera, { persist: true });
         },
-        onFeatureSelect: (feature) => {
-          if (!feature) {
+        onFeatureSelect: (selection) => {
+          if (!selection) {
             featureInspector.close();
             return;
           }
-          const row = layerModel.getRowById(feature.layerId) ?? findLayerRowByLayerRef(layerModel, feature.layerId);
-          const sourceLayerId = row?.kind === "filter" && row?.filter?.parentLayerId
-            ? row.filter.parentLayerId
-            : feature.layerId;
-          const dataset = resolveFeatureDataset(supabaseLayerDataCache, feature, sourceLayerId);
-          featureInspector.open({
-            ...feature,
-            datasetId: dataset?.id ?? feature.properties?._dataset_id ?? "",
-            datasetName: dataset?.name ?? feature.properties?._dataset_name ?? "",
-            layerName: row?.label ?? row?.name ?? feature.layerId,
-          }, {
-            config: dataset?.feature_inspector ?? {},
-            onSaveConfig: dataset?.id
-              ? (config) => updateFeatureInspectorDefault({ datasetId: dataset.id, config })
-              : null,
-            onApplyConfigToLayer: sourceLayerId
-              ? (config) => applyFeatureInspectorDefaultToLayer({ layerId: sourceLayerId, config })
-              : null,
+          const enrichFeatureSelection = (feature) => {
+            const row = layerModel.getRowById(feature.layerId) ?? findLayerRowByLayerRef(layerModel, feature.layerId);
+            const sourceLayerId = row?.kind === "filter" && row?.filter?.parentLayerId
+              ? row.filter.parentLayerId
+              : feature.layerId;
+            const dataset = resolveFeatureDataset(supabaseLayerDataCache, feature, sourceLayerId);
+            return {
+              feature: {
+                ...feature,
+                datasetId: dataset?.id ?? feature.properties?._dataset_id ?? "",
+                datasetName: dataset?.name ?? feature.properties?._dataset_name ?? "",
+                layerName: row?.label ?? row?.name ?? feature.layerId,
+              },
+              config: dataset?.feature_inspector ?? {},
+              onSaveConfig: dataset?.id
+                ? (config) => updateFeatureInspectorDefault({ datasetId: dataset.id, config })
+                : null,
+              onApplyConfigToLayer: sourceLayerId
+                ? (config) => applyFeatureInspectorDefaultToLayer({ layerId: sourceLayerId, config })
+                : null,
+            };
+          };
+          const stackEntries = selection.kind === "feature-stack" && Array.isArray(selection.features)
+            ? selection.features.map(enrichFeatureSelection)
+            : [enrichFeatureSelection(selection)];
+          const activeIndex = Math.min(
+            Math.max(Number(selection.activeIndex) || 0, 0),
+            Math.max(stackEntries.length - 1, 0),
+          );
+          const activeEntry = stackEntries[activeIndex];
+          if (!activeEntry) {
+            featureInspector.close();
+            return;
+          }
+          featureInspector.open(activeEntry.feature, {
+            config: activeEntry.config,
+            onSaveConfig: activeEntry.onSaveConfig,
+            onApplyConfigToLayer: activeEntry.onApplyConfigToLayer,
+            stackEntries,
+            activeIndex,
           });
         },
       });
@@ -787,21 +870,25 @@ function debouncedUpdateDefaultStyle(layerRef, key, value) {
   }, 1000));
 }
 
-async function loadLayerFields(layerRef) {
-  if (!SUPABASE_UUID.test(layerRef)) return null;
+async function loadLayerFields(layerRef, context = {}) {
+  const sourceLayerId = resolveFilterPanelSourceLayerId(layerRef, context);
+  if (!SUPABASE_UUID.test(sourceLayerId)) return null;
   try {
     const { getLayerFields } = await import("../sources/supabase/layer-loader.js");
-    return await getLayerFields(layerRef);
+    return await getLayerFields(sourceLayerId);
   } catch {
     return null;
   }
 }
 
-async function loadLayerFieldValues(layerRef, fieldKey) {
-  if (!SUPABASE_UUID.test(layerRef)) return [];
+async function loadLayerFieldValues(layerRef, fieldKey, context = {}) {
+  const sourceLayerId = resolveFilterPanelSourceLayerId(layerRef, context);
+  if (!SUPABASE_UUID.test(sourceLayerId)) return [];
   try {
     const { getLayerFieldValues } = await import("../sources/supabase/layer-loader.js");
-    return await getLayerFieldValues(layerRef, fieldKey);
+    return await getLayerFieldValues(sourceLayerId, fieldKey, {
+      filterExpression: context?.valueFilterExpression ?? null,
+    });
   } catch {
     return [];
   }
@@ -821,7 +908,7 @@ async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
     try {
       const row = layerModel.getRowById(rowId);
       const loadedLayer = await loadLayerFromSupabaseLazy(layerId);
-      const { layer, geojson, tilesUrl } = loadedLayer;
+      const { layer, geojson, tilesUrl, sourceLayerId } = loadedLayer;
       supabaseLayerDataCache.set(layerId, loadedLayer);
       const rowState = layerModel.getState()?.[rowId] ?? {};
       if (geojson || tilesUrl) {
@@ -836,13 +923,14 @@ async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
           options: {
             geometryTypes: Array.isArray(layer.geometry_types) ? layer.geometry_types : [],
             geometryType: layer.geometry_type ?? null,
+            sourceLayerId,
           },
         });
       }
       if (row) {
         applyPersistedRowVisibility(layerModel, screenRuntime, row);
         attachDynamicFilterRowsRecursively(layerModel, screenRuntime, row);
-        syncParentDynamicFilterOwnership(layerModel, screenRuntime, row);
+        syncDynamicFilterOwnershipRecursively(layerModel, screenRuntime, row);
       }
     } catch (err) {
       if (err?.code === "LAYER_NOT_FOUND") {
@@ -961,6 +1049,152 @@ function getStyleOwnerLayerRef(layerModel, update) {
     : "";
 }
 
+function formatStyleControlValue(key, value) {
+  if (key === "fillOpacity" || key === "lineOpacity" || key === "pointOpacity") {
+    return `${Math.round(Number(value) || 0)}%`;
+  }
+  if (key === "lineWeight" || key === "pointRadius") {
+    return `${Number(value) || 0}px`;
+  }
+  return String(value ?? "");
+}
+
+function syncVisibleStyleControls(updates = []) {
+  updates.forEach((update) => {
+    const layerId = CSS.escape(String(update.layerId ?? ""));
+    const key = CSS.escape(String(update.key ?? ""));
+    if (!layerId || !key) {
+      return;
+    }
+
+    document.querySelectorAll(`[data-style-layer-id="${layerId}"][data-style-key="${key}"]`).forEach((element) => {
+      const valueLabel = element.querySelector(".layer-menu-row-value");
+      if (valueLabel) {
+        valueLabel.textContent = formatStyleControlValue(update.key, update.value);
+      }
+      const slider = element.querySelector("input.layer-menu-slider");
+      if (slider) {
+        slider.value = String(update.value);
+      }
+    });
+  });
+  if (updates.length) {
+    window.dispatchEvent(new CustomEvent("layers:style-control-sync", { detail: { updates } }));
+  }
+}
+
+function isFixedFilterRow(row) {
+  return row?.type === "layer" && row.kind === "filter" && row.filter;
+}
+
+function getFixedFilterChildRows(layerModel, parentRow) {
+  if (!parentRow?.id) {
+    return [];
+  }
+
+  return layerModel.getChildRows(parentRow.id).filter(isFixedFilterRow);
+}
+
+function findStyleTargetForKey(styleRow, key) {
+  return [
+    styleRow?.colorTarget,
+    styleRow?.opacityTarget,
+    styleRow?.weightTarget,
+    styleRow?.radiusTarget,
+  ].find((target) => target?.kind === "layer-style" && target.key === key) ?? null;
+}
+
+function getStyleTargetCurrentValue(layerModel, styleRow, target) {
+  if (!target?.layerId || !target.key) {
+    return null;
+  }
+
+  const storedValue = layerModel.getState()?.[target.layerId]?.[target.key];
+  return storedValue !== undefined && storedValue !== null
+    ? storedValue
+    : styleRow?.initialState?.[target.key] ?? null;
+}
+
+function inheritParentStyleForFixedFilter(layerModel, filterRow, parentRow) {
+  if (!filterRow?.id || !parentRow?.id) {
+    return [];
+  }
+
+  const updates = [];
+  const childRows = layerModel.getChildRows(filterRow.id);
+  layerModel.getChildRows(parentRow.id).forEach((parentChildRow) => {
+    [
+      parentChildRow?.colorTarget,
+      parentChildRow?.opacityTarget,
+      parentChildRow?.weightTarget,
+      parentChildRow?.radiusTarget,
+    ].forEach((parentTarget) => {
+      if (parentTarget?.kind !== "layer-style") {
+        return;
+      }
+      const value = getStyleTargetCurrentValue(layerModel, parentChildRow, parentTarget);
+      if (value === null || value === undefined) {
+        return;
+      }
+      childRows.forEach((childRow) => {
+        const childTarget = findStyleTargetForKey(childRow, parentTarget.key);
+        if (!childTarget) {
+          return;
+        }
+        const update = layerModel.setRowValue({
+          id: childRow.id,
+          runtimeTargetId: childRow.runtimeTargetId,
+          target: childTarget,
+        }, value);
+        if (update) {
+          updates.push(update);
+        }
+      });
+    });
+  });
+  return updates;
+}
+
+function applyStyleValueToFixedFilterChild(layerModel, screenRuntime, filterRow, key, value) {
+  const updates = [];
+  layerModel.getChildRows(filterRow.id).forEach((childRow) => {
+    const target = findStyleTargetForKey(childRow, key);
+    if (!target) {
+      return;
+    }
+    if (layerModel.isStyleCascadeLocked?.(target.layerId, target.key)) {
+      return;
+    }
+    const childUpdate = layerModel.setRowValue({
+      id: childRow.id,
+      runtimeTargetId: childRow.runtimeTargetId,
+      target,
+    }, value);
+    if (childUpdate) {
+      screenRuntime.setLayerStyleValue(childUpdate.runtimeTargetId ?? childUpdate.layerId, childUpdate.key, childUpdate.value);
+      updates.push(childUpdate);
+    }
+  });
+  return updates;
+}
+
+function cascadeParentStyleToFixedFilterChildren(layerModel, screenRuntime, row, update) {
+  if (!update || update.target?.kind !== "layer-style" || !row?.id) {
+    return [];
+  }
+
+  const styleRowParentId = layerModel.getState()?.[row.id]?.parentRowId;
+  const parentRow = styleRowParentId
+    ? layerModel.getRowById(styleRowParentId)
+    : (findRowByRuntimeTargetId(layerModel, update.layerId) ?? layerModel.getRowById(update.layerId));
+  if (!parentRow || getRowRuntimeTargetId(parentRow) !== update.layerId) {
+    return [];
+  }
+
+  return getFixedFilterChildRows(layerModel, parentRow)
+    .flatMap((filterRow) => applyStyleValueToFixedFilterChild(layerModel, screenRuntime, filterRow, update.key, update.value));
+}
+
 function findVariableFilterParentByControlRow(layerModel, controlRowId) {
   const targetControlRowId = String(controlRowId ?? "");
   if (!targetControlRowId) {
@@ -1028,6 +1262,7 @@ function createVariableFilterEditPayload(layerModel, controlRow, variableFilter)
   return {
     mode: "variable",
     controlRowId: controlRow?.id ?? "",
+    label: controlRow?.label ?? variableFilter?.label ?? "",
     columnName: matchCondition?.field ?? "",
     variableLogic: activeRangeFields ? "activeRange" : "match",
     variableControlType: dropdown ? "dropdown" : "slider",
@@ -1061,6 +1296,25 @@ function getFilterActionSourceLayerId(row, layerModel = null) {
   return "";
 }
 
+function resolveFilterPanelSourceLayerId(layerRef, context = {}) {
+  const contextSourceLayerId = String(context?.sourceLayerId ?? "").trim();
+  if (SUPABASE_UUID.test(contextSourceLayerId)) {
+    return contextSourceLayerId;
+  }
+  return String(layerRef ?? "").trim();
+}
+
+function buildFilterValueScopeExpression(layerModel, parentRowId) {
+  const parentRow = parentRowId ? layerModel.getRowById(parentRowId) : null;
+  if (!parentRow) {
+    return null;
+  }
+  if (parentRow.kind === "filter" && parentRow.filter) {
+    return buildDynamicFilterLayerExpression(layerModel, parentRow);
+  }
+  return buildLayerVariableFilterExpression(layerModel, parentRow);
+}
+
 function formatFilterOperatorLabel(op) {
   if (op === "==") return "=";
   if (op === "all") return "any";
@@ -1079,32 +1333,12 @@ function resolveFeatureDataset(layerDataCache, feature, sourceLayerId = feature?
   return datasets.length === 1 ? datasets[0] : null;
 }
 
-function buildExactMatchFilterExpression(field, value) {
-  return [
-    "==",
-    ["to-string", ["coalesce", ["get", field], ""]],
-    value == null ? "" : String(value),
-  ];
-}
-
-function buildStringComparisonFilterExpression(op, field, value) {
-  const comparisonValue = value == null ? "" : String(value);
-  if (op === "!=") {
-    return [
-      "!=",
-      ["to-string", ["coalesce", ["get", field], ""]],
-      comparisonValue,
-    ];
-  }
-  return buildExactMatchFilterExpression(field, comparisonValue);
-}
-
-function resolveFilterValue(layerModel, value, valueRef) {
+function resolveFilterValue(layerModel, value, valueRef, scopeRow = null) {
   if (!valueRef) {
     return value;
   }
 
-  const variableRow = findVariableRow(layerModel, valueRef);
+  const variableRow = findVariableRow(layerModel, valueRef, scopeRow);
   if (!variableRow) {
     return value;
   }
@@ -1112,13 +1346,13 @@ function resolveFilterValue(layerModel, value, valueRef) {
   return layerModel.getRowValue(variableRow) ?? value;
 }
 
-function buildFilterConditionExpression(layerModel, condition) {
+function buildFilterConditionExpression(layerModel, condition, scopeRow = null) {
   if (!condition?.field) {
     return null;
   }
 
   const op = condition.op ?? "==";
-  const value = resolveFilterValue(layerModel, condition.value, condition.valueRef);
+  const value = resolveFilterValue(layerModel, condition.value, condition.valueRef, scopeRow);
   if (op === "all") {
     return null;
   }
@@ -1138,11 +1372,11 @@ function buildFilterConditionExpression(layerModel, condition) {
   return null;
 }
 
-function buildRowFilterExpression(layerModel, row) {
+function buildRowFilterExpression(layerModel, row, scopeRow = row) {
   const conditions = Array.isArray(row?.filter?.conditions) ? row.filter.conditions : null;
   if (conditions?.length) {
     const expressions = conditions
-      .map((condition) => buildFilterConditionExpression(layerModel, condition))
+      .map((condition) => buildFilterConditionExpression(layerModel, condition, scopeRow))
       .filter(Boolean);
     if (!expressions.length) {
       return null;
@@ -1155,10 +1389,10 @@ function buildRowFilterExpression(layerModel, row) {
     field: row.filter.field,
     op: row.filter.op ?? "==",
     value: row.filter.value,
-  });
+  }, scopeRow);
 }
 
-function findVariableRow(layerModel, variableId) {
+function findVariableRow(layerModel, variableId, scopeRow = null) {
   const targetVariableId = String(variableId ?? "");
   if (!targetVariableId) {
     return null;
@@ -1176,6 +1410,13 @@ function findVariableRow(layerModel, variableId) {
     }
     return null;
   };
+
+  if (scopeRow?.id) {
+    const scopedMatch = visit([scopeRow]);
+    if (scopedMatch) {
+      return scopedMatch;
+    }
+  }
 
   return visit(layerModel.getRootRows());
 }
@@ -1203,8 +1444,7 @@ function applyVariableDrivenFilterRows(layerModel, screenRuntime, variableId) {
         );
       }
       if (row?.type === "layer" && variableFiltersUseVariable(row, variableId)) {
-        syncParentDynamicFilterOwnership(layerModel, screenRuntime, row);
-        syncChildDynamicFilterRows(layerModel, screenRuntime, row);
+        syncDynamicFilterTree(layerModel, screenRuntime, row);
       }
       visit(layerModel.getChildRows(row.id));
     });
@@ -1216,7 +1456,7 @@ function applyVariableDrivenFilterRows(layerModel, screenRuntime, variableId) {
 function buildLayerVariableFilterExpression(layerModel, row) {
   const filters = Array.isArray(row?.variableFilters) ? row.variableFilters : [];
   const expressions = filters
-    .map((filter) => buildFilterGroupExpression(layerModel, filter))
+    .map((filter) => buildFilterGroupExpression(layerModel, filter, row))
     .filter(Boolean);
   if (!expressions.length) {
     return null;
@@ -1224,20 +1464,37 @@ function buildLayerVariableFilterExpression(layerModel, row) {
   return expressions.length === 1 ? expressions[0] : ["all", ...expressions];
 }
 
-function buildDynamicFilterLayerExpression(layerModel, row) {
+function getDynamicFilterParentRow(layerModel, row) {
   const parentRow = row?.filter?.parentLayerId
     ? (findRowByRuntimeTargetId(layerModel, row.filter.parentLayerId) ?? findLayerRowByLayerRef(layerModel, row.filter.parentLayerId))
     : null;
+  return parentRow;
+}
+
+function buildDynamicFilterLayerExpression(layerModel, row, visitedRowIds = new Set()) {
+  if (!row?.id || visitedRowIds.has(row.id)) {
+    return null;
+  }
+
+  visitedRowIds.add(row.id);
+  const parentRow = getDynamicFilterParentRow(layerModel, row);
+  const parentExpression = parentRow?.kind === "filter" && parentRow.filter
+    ? buildDynamicFilterLayerExpression(layerModel, parentRow, visitedRowIds)
+    : parentRow
+      ? buildLayerVariableFilterExpression(layerModel, parentRow)
+      : null;
+
   return combineFilterExpressions([
-    parentRow ? buildLayerVariableFilterExpression(layerModel, parentRow) : null,
-    buildRowFilterExpression(layerModel, row),
+    parentExpression,
+    buildLayerVariableFilterExpression(layerModel, row),
+    buildRowFilterExpression(layerModel, row, row),
   ]);
 }
 
-function buildFilterGroupExpression(layerModel, filter) {
+function buildFilterGroupExpression(layerModel, filter, scopeRow = null) {
   const conditions = Array.isArray(filter?.conditions) ? filter.conditions : [];
   const expressions = conditions
-    .map((condition) => buildFilterConditionExpression(layerModel, condition))
+    .map((condition) => buildFilterConditionExpression(layerModel, condition, scopeRow))
     .filter(Boolean);
   if (!expressions.length) {
     return null;
@@ -1255,24 +1512,28 @@ function combineFilterExpressions(expressions = []) {
 }
 
 function buildParentExclusionFilter(layerModel, parentRow) {
-  if (!parentRow?.id) {
-    return null;
-  }
-
-  const childFilterExpressions = layerModel.getChildRows(parentRow.id)
-    .filter((row) => row?.type === "layer" && row.kind === "filter" && row.filter)
-    .map((row) => buildRowFilterExpression(layerModel, row))
+  const childFilterExpressions = getFixedFilterChildRows(layerModel, parentRow)
+    .map((row) => buildDynamicFilterLayerExpression(layerModel, row))
     .filter(Boolean);
 
   if (!childFilterExpressions.length) {
     return null;
   }
 
-  if (childFilterExpressions.length === 1) {
-    return ["!", childFilterExpressions[0]];
-  }
+  return childFilterExpressions.length === 1
+    ? ["!", childFilterExpressions[0]]
+    : ["!", ["any", ...childFilterExpressions]];
+}
 
-  return ["!", ["any", ...childFilterExpressions]];
+function getParentRuntimeFilterExpression(layerModel, parentRow) {
+  const parentExpression = parentRow?.kind === "filter" && parentRow.filter
+    ? buildDynamicFilterLayerExpression(layerModel, parentRow)
+    : buildLayerVariableFilterExpression(layerModel, parentRow);
+
+  return combineFilterExpressions([
+    parentExpression,
+    buildParentExclusionFilter(layerModel, parentRow),
+  ]);
 }
 
 function syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow) {
@@ -1282,10 +1543,7 @@ function syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow) 
 
   screenRuntime.setDynamicLayerFeatureFilter?.(
     getRowRuntimeTargetId(parentRow),
-    combineFilterExpressions([
-      buildLayerVariableFilterExpression(layerModel, parentRow),
-      buildParentExclusionFilter(layerModel, parentRow),
-    ]),
+    getParentRuntimeFilterExpression(layerModel, parentRow),
   );
 }
 
@@ -1295,11 +1553,12 @@ function syncChildDynamicFilterRows(layerModel, screenRuntime, parentRow) {
   }
 
   layerModel.getChildRows(parentRow.id).forEach((childRow) => {
-    if (childRow?.type === "layer" && childRow.kind === "filter" && childRow.filter) {
+    if (isFixedFilterRow(childRow)) {
       screenRuntime.setDynamicLayerFeatureFilter?.(
         getRowRuntimeTargetId(childRow),
         buildDynamicFilterLayerExpression(layerModel, childRow),
       );
+      syncChildDynamicFilterRows(layerModel, screenRuntime, childRow);
     }
   });
 }
@@ -1319,7 +1578,7 @@ function attachDynamicFilterRow(layerModel, screenRuntime, row) {
     tilesUrl: null,
     style: null,
     options: {
-      sourceLayerId: row.filter.parentLayerId,
+      sourceLayerId: row.filter.sourceLayerId ?? row.filter.parentLayerId,
       geometryTypes: row.geometryTypes ?? [],
       geometryType: row.geometryType,
       featureFilter: buildDynamicFilterLayerExpression(layerModel, row),
@@ -1338,6 +1597,41 @@ function attachDynamicFilterRowsRecursively(layerModel, screenRuntime, parentRow
     }
     attachDynamicFilterRowsRecursively(layerModel, screenRuntime, childRow);
   });
+}
+
+function detachDynamicFilterRowsRecursively(screenRuntime, row) {
+  if (!row) {
+    return;
+  }
+
+  if (isFixedFilterRow(row)) {
+    screenRuntime.detachDynamicLayer(getRowRuntimeTargetId(row));
+  }
+  if (Array.isArray(row.rows)) {
+    row.rows.forEach((childRow) => detachDynamicFilterRowsRecursively(screenRuntime, childRow));
+  }
+}
+
+function syncDynamicFilterOwnershipRecursively(layerModel, screenRuntime, parentRow) {
+  if (!parentRow?.id) {
+    return;
+  }
+
+  syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow);
+  layerModel.getChildRows(parentRow.id).forEach((childRow) => {
+    if (isFixedFilterRow(childRow)) {
+      syncDynamicFilterOwnershipRecursively(layerModel, screenRuntime, childRow);
+    }
+  });
+}
+
+function syncDynamicFilterTree(layerModel, screenRuntime, parentRow) {
+  if (!parentRow?.id) {
+    return;
+  }
+
+  syncDynamicFilterOwnershipRecursively(layerModel, screenRuntime, parentRow);
+  syncChildDynamicFilterRows(layerModel, screenRuntime, parentRow);
 }
 
 async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [], geometryType, layerModel, screenRuntime }) {
@@ -1457,7 +1751,7 @@ async function reloadSupabaseLayer(layerId, layerModel, screenRuntime) {
   if (row) {
     applyPersistedRowVisibility(layerModel, screenRuntime, row);
     attachDynamicFilterRowsRecursively(layerModel, screenRuntime, row);
-    syncParentDynamicFilterOwnership(layerModel, screenRuntime, row);
+    syncDynamicFilterOwnershipRecursively(layerModel, screenRuntime, row);
   }
   screenRuntime.reapplyFullOrder?.();
 }

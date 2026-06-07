@@ -68,6 +68,22 @@ const TRASH_ICON = `
     <path class="layer-menu-icon-mark" d="M14 11v5"></path>
   </svg>
 `;
+const LOCK_CLOSED_ICON = `
+  <svg class="layer-menu-lock-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path class="layer-menu-icon-border" d="M7 11V8a5 5 0 0 1 10 0v3"></path>
+    <path class="layer-menu-icon-border" d="M6 11h12v9H6z"></path>
+    <path class="layer-menu-icon-mark" d="M7 11V8a5 5 0 0 1 10 0v3"></path>
+    <path class="layer-menu-icon-mark" d="M6 11h12v9H6z"></path>
+  </svg>
+`;
+const LOCK_OPEN_ICON = `
+  <svg class="layer-menu-lock-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path class="layer-menu-icon-border" d="M7 11V8a5 5 0 0 1 9.2-2.7"></path>
+    <path class="layer-menu-icon-border" d="M6 11h12v9H6z"></path>
+    <path class="layer-menu-icon-mark" d="M7 11V8a5 5 0 0 1 9.2-2.7"></path>
+    <path class="layer-menu-icon-mark" d="M6 11h12v9H6z"></path>
+  </svg>
+`;
 
 function normalizeHexColor(value) {
   const normalized = String(value ?? "").trim().replace(/^#*/, "");
@@ -1240,6 +1256,67 @@ function createLayerLegendSwatch(spec) {
   return null;
 }
 
+function getStyleRowLegendSpec(row, layerModel = null, appearanceState = null) {
+  if (!row) {
+    return null;
+  }
+
+  const value = getDisplayRowValue(row, layerModel, appearanceState) ?? {};
+  const visible = layerModel?.isRowVisible?.(row.id) !== false;
+  const runtimeTargetId = String(row.runtimeTargetId ?? "");
+
+  if (row.type === "fill") {
+    return {
+      kind: "polygon",
+      fillColor: value?.color ?? "#8C6A2A",
+      fillOpacity: visible ? (value?.opacity ?? 100) : 0,
+      lineColor: "#FFFFFF",
+      lineOpacity: 0,
+      lineWeight: 0,
+      drawOrder: ["fill"],
+    };
+  }
+
+  if (row.type === "line" && runtimeTargetId.endsWith("::point-stroke")) {
+    const parentId = layerModel?.getState?.()?.[row.id]?.parentRowId ?? null;
+    const siblingRows = parentId ? layerModel.getChildRows(parentId) : [];
+    const baseRuntimeTargetId = runtimeTargetId.slice(0, -"::point-stroke".length);
+    const fillState = getLayerLegendChildState(siblingRows, `${baseRuntimeTargetId}::point-fill`, layerModel, appearanceState);
+    return {
+      kind: "point",
+      fillColor: "#FFFFFF",
+      fillOpacity: 0,
+      radius: Number(fillState?.value?.radius ?? 0),
+      strokeColor: value?.color ?? "#FFFFFF",
+      strokeOpacity: visible ? (value?.opacity ?? 100) : 0,
+      strokeWeight: visible ? (value?.weight ?? 1) : 0,
+    };
+  }
+
+  if (row.type === "line") {
+    return {
+      kind: "line",
+      color: value?.color ?? "#C89A42",
+      opacity: visible ? (value?.opacity ?? 100) : 0,
+      weight: visible ? (value?.weight ?? 1) : 0,
+    };
+  }
+
+  if (row.type === "point") {
+    return {
+      kind: "point",
+      fillColor: value?.color ?? "#e74c3c",
+      fillOpacity: visible ? (value?.opacity ?? 80) : 0,
+      radius: value?.radius ?? 6,
+      strokeColor: "#FFFFFF",
+      strokeOpacity: 0,
+      strokeWeight: 0,
+    };
+  }
+
+  return null;
+}
+
 function wireLayerLegendToggle(legend, state, expandStateKey, onToggleExpanded, { enabled = true } = {}) {
   if (!legend || !enabled || !expandStateKey || typeof onToggleExpanded !== "function") {
     return legend;
@@ -1301,6 +1378,52 @@ function updateLayerLegendSwatch(rowElement, legendSpec, { state = null, expandS
   header.append(nextLegend);
 }
 
+function updateStyleRowLegendSwatch(rowElement, row, layerModel, appearanceState) {
+  if (!rowElement || !row) {
+    return;
+  }
+
+  const header = rowElement.querySelector(".layer-menu-style-header");
+  if (!header) {
+    return;
+  }
+
+  const existingLegend = header.querySelector(".layer-menu-style-row-legend");
+  const nextLegend = createLayerLegendSwatch(getStyleRowLegendSpec(row, layerModel, appearanceState));
+  if (!nextLegend) {
+    existingLegend?.remove();
+    return;
+  }
+
+  nextLegend.classList.add("layer-menu-style-row-legend");
+  if (existingLegend) {
+    existingLegend.replaceWith(nextLegend);
+    return;
+  }
+
+  const leading = header.querySelector(".layer-menu-row-leading");
+  const label = leading?.querySelector(".layer-menu-row-toggle, .layer-menu-row-label");
+  if (leading && label) {
+    leading.insertBefore(nextLegend, label);
+    return;
+  }
+
+  header.append(nextLegend);
+}
+
+function updateStyleRowLegendSwatchesForParent(root, layerModel, parentId, appearanceState) {
+  if (!root || !parentId) {
+    return;
+  }
+
+  layerModel.getChildRows(parentId)
+    .filter(isStyleChildRow)
+    .forEach((styleRow) => {
+      const rowElement = root.querySelector(`.layer-menu-row-style[data-row-id="${CSS.escape(styleRow.id)}"]`);
+      updateStyleRowLegendSwatch(rowElement, styleRow, layerModel, appearanceState);
+    });
+}
+
 function isStyleChildRow(row) {
   return row?.type === "fill" || row?.type === "line" || row?.type === "point";
 }
@@ -1309,7 +1432,12 @@ function isLayerExpansionChildRow(row) {
   return isStyleChildRow(row)
     || row?.type === "choice-slider"
     || row?.type === "variable-slider"
-    || row?.type === "variable-select";
+    || row?.type === "variable-select"
+    || (row?.type === "layer" && row?.kind === "filter");
+}
+
+function isFixedFilterRow(row) {
+  return row?.type === "layer" && row.kind === "filter" && row.filter;
 }
 
 function createLayerActionButton(kind, label, onClick) {
@@ -1699,14 +1827,41 @@ function withExpandedState(state, expanded) {
   };
 }
 
-function createSliderRow(row, value, onInput, { inheritedHidden = false } = {}) {
+function appendCascadeLockButton(header, lockControl = null) {
+  if (!header || !lockControl) {
+    return;
+  }
+
+  const locked = Boolean(lockControl.locked);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "layer-menu-cascade-lock";
+  button.classList.toggle("is-locked", locked);
+  button.setAttribute("aria-label", locked ? "Unlock cascade" : "Lock cascade");
+  button.title = locked ? "Unlock cascade" : "Lock cascade";
+  button.setAttribute("aria-pressed", String(locked));
+  button.innerHTML = locked ? LOCK_CLOSED_ICON : LOCK_OPEN_ICON;
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    lockControl.onToggle?.();
+  });
+  header.append(button);
+}
+
+function createSliderRow(row, value, onInput, { inheritedHidden = false, lockControl = null } = {}) {
   const wrapper = document.createElement("label");
   wrapper.className = "layer-menu-row layer-menu-row-slider";
+  if (row?.target?.kind === "layer-style") {
+    wrapper.dataset.styleLayerId = row.target.layerId;
+    wrapper.dataset.styleKey = row.target.key;
+  }
   const { header, valueLabel } = (() => {
     const { header, label } = createRowHeader(row.label, formatRowValue(row, value), "layer-menu-slider-header");
     const valueLabel = header.querySelector(".layer-menu-row-value");
     return { header, label, valueLabel };
   })();
+  appendCascadeLockButton(header, lockControl);
 
   const input = document.createElement("input");
   input.className = "layer-menu-slider";
@@ -1716,6 +1871,11 @@ function createSliderRow(row, value, onInput, { inheritedHidden = false } = {}) 
   input.step = String(row.step);
   input.value = String(value);
   input.disabled = inheritedHidden;
+  input.addEventListener("pointerdown", (event) => {
+    if (row?.target?.kind === "layer-style") {
+      beginStylePreviewFocus(input, event);
+    }
+  });
   input.addEventListener("input", () => {
     const nextValue = Number(input.value);
     valueLabel.textContent = formatRowValue(row, nextValue);
@@ -1790,6 +1950,71 @@ function createVariableSelectRow(row, value, onInput, { inheritedHidden = false 
   return wrapper;
 }
 
+let activeStylePreviewElement = null;
+const activeStylePreviewContextElements = new Set();
+
+function getStylePreviewElement(element) {
+  return element?.closest?.(".layer-menu-row-style")
+    ?? element?.closest?.(".layer-menu-row")
+    ?? element?.closest?.(".layer-menu-color-block")
+    ?? element?.closest?.(".layer-menu-row-fill-opacity")
+    ?? null;
+}
+
+function clearStylePreviewFocus() {
+  activeStylePreviewElement?.classList?.remove("is-style-preview-active");
+  activeStylePreviewElement = null;
+  activeStylePreviewContextElements.forEach((element) => {
+    element.classList.remove("is-style-preview-context");
+  });
+  activeStylePreviewContextElements.clear();
+  document.querySelectorAll(".layer-menu.is-style-previewing").forEach((menu) => {
+    menu.classList.remove("is-style-previewing");
+  });
+  window.removeEventListener("pointerup", clearStylePreviewFocus, true);
+  window.removeEventListener("pointercancel", clearStylePreviewFocus, true);
+  window.removeEventListener("blur", clearStylePreviewFocus, true);
+  window.removeEventListener("keydown", handleStylePreviewKeydown, true);
+}
+
+function handleStylePreviewKeydown(event) {
+  if (event.key === "Escape") {
+    clearStylePreviewFocus();
+  }
+}
+
+function beginStylePreviewFocus(element, event = null) {
+  const menu = element?.closest?.(".layer-menu");
+  const activeElement = getStylePreviewElement(element);
+  if (!menu || !activeElement) {
+    return;
+  }
+
+  clearStylePreviewFocus();
+  activeStylePreviewElement = activeElement;
+  menu.classList.add("is-style-previewing");
+  activeStylePreviewElement.classList.add("is-style-preview-active");
+  const scrollRegion = activeStylePreviewElement.closest(".layer-menu-panel-scroll");
+  const childrenRegion = activeStylePreviewElement.closest(".layer-menu-row-children");
+  const contextElements = [
+    scrollRegion,
+    childrenRegion,
+    ...(scrollRegion?.querySelectorAll(".layer-menu-row-group") ?? []),
+  ].filter(Boolean);
+  contextElements.forEach((element) => {
+    if (!element.contains(activeStylePreviewElement)) {
+      return;
+    }
+    element.classList.add("is-style-preview-context");
+    activeStylePreviewContextElements.add(element);
+  });
+  window.addEventListener("pointerup", clearStylePreviewFocus, true);
+  window.addEventListener("pointercancel", clearStylePreviewFocus, true);
+  window.addEventListener("blur", clearStylePreviewFocus, true);
+  window.addEventListener("keydown", handleStylePreviewKeydown, true);
+  event?.target?.addEventListener?.("lostpointercapture", clearStylePreviewFocus, { once: true });
+}
+
 function createOpacitySlider(inputClassName, row, value, onInput) {
   const slider = document.createElement("input");
   slider.className = inputClassName;
@@ -1798,17 +2023,21 @@ function createOpacitySlider(inputClassName, row, value, onInput) {
   slider.max = String(row.max);
   slider.step = String(row.step);
   slider.value = String(value);
+  slider.addEventListener("pointerdown", (event) => {
+    beginStylePreviewFocus(slider, event);
+  });
   slider.addEventListener("input", () => {
     onInput(Number(slider.value));
   });
   return slider;
 }
 
-function createSliderBlock({ label, row, value, onInput, className = "" }) {
+function createSliderBlock({ label, row, value, onInput, className = "", lockControl = null }) {
   const block = document.createElement("div");
   block.className = className ? className : "layer-menu-row-fill-opacity";
   const { header } = createRowHeader(label, formatRowValue(row, value), "layer-menu-slider-header");
   const sliderValue = header.querySelector(".layer-menu-row-value");
+  appendCascadeLockButton(header, lockControl);
 
   const slider = createOpacitySlider("layer-menu-slider", row, value, (nextValue) => {
     sliderValue.textContent = formatRowValue(row, nextValue);
@@ -1819,17 +2048,22 @@ function createSliderBlock({ label, row, value, onInput, className = "" }) {
   return block;
 }
 
-function createColorRow(row, value, onInput, requestRender, { variant = "row" } = {}) {
+function createColorRow(row, value, onInput, requestRender, { variant = "row", lockControl = null } = {}) {
   const wrapper = document.createElement("div");
   wrapper.className = variant === "block"
     ? "layer-menu-color-block"
     : "layer-menu-row layer-menu-row-color";
+  if (row?.target?.kind === "layer-style") {
+    wrapper.dataset.styleLayerId = row.target.layerId;
+    wrapper.dataset.styleKey = row.target.key;
+  }
   let currentHex = normalizeHexColor(value) ?? "#8C6A2A";
   let currentHsv = rgbToHsv(hexToRgb(currentHex));
   const pressRuntime = createColorPressRuntime();
   const persistedUiState = requestRender?.__getColorRowUiState?.(row.id) ?? null;
   const { header } = createRowHeader(row.label, formatRowValue(row, currentHex), "layer-menu-color-header");
   const valueLabel = header.querySelector(".layer-menu-row-value");
+  appendCascadeLockButton(header, lockControl);
 
   const swatches = document.createElement("div");
   swatches.className = "layer-menu-color-swatches";
@@ -2026,6 +2260,7 @@ function createColorRow(row, value, onInput, requestRender, { variant = "row" } 
 
     target.addEventListener("pointerdown", (event) => {
       event.preventDefault();
+      beginStylePreviewFocus(target, event);
       target.setPointerCapture?.(event.pointerId);
       updateFromEvent(event);
     });
@@ -2116,7 +2351,7 @@ function isAppearanceTargetRow(row) {
     || row?.opacityTarget?.kind === "screen-background";
 }
 
-function createStyleRow(row, value, onInput, requestRender, { parentId, reorderApi, isVisible, isExpanded, isExpandable = true, inheritedHidden = false, onToggleVisible, onToggleExpanded } = {}) {
+function createStyleRow(row, value, onInput, requestRender, { parentId, reorderApi, isVisible, isExpanded, isExpandable = true, inheritedHidden = false, onToggleVisible, onToggleExpanded, layerModel = null, appearanceState = null } = {}) {
   const isAppearanceRow = isAppearanceTargetRow(row) && !parentId;
   const wrapper = document.createElement("div");
   wrapper.className = `layer-menu-row layer-menu-row-style`;
@@ -2136,6 +2371,14 @@ function createStyleRow(row, value, onInput, requestRender, { parentId, reorderA
       chevronButton: isExpandable,
       chevronExpanded: Boolean(isExpanded),
     });
+    const legend = createLayerLegendSwatch(getStyleRowLegendSpec(row, layerModel, appearanceState));
+    if (legend) {
+      legend.classList.add("layer-menu-style-row-legend");
+      const leading = header.querySelector(".layer-menu-row-leading");
+      if (leading) {
+        leading.insertBefore(legend, label);
+      }
+    }
 
     if (parentId && reorderApi) {
       wrapper.dataset.rowId = row.id;
@@ -2257,7 +2500,7 @@ function createStyleRow(row, value, onInput, requestRender, { parentId, reorderA
   return wrapper;
 }
 
-function createStyleControlRows(row, value, onInput, requestRender, { inheritedHidden = false } = {}) {
+function createStyleControlRows(row, value, onInput, requestRender, { inheritedHidden = false, getLockControl = null } = {}) {
   const fragment = document.createDocumentFragment();
   const withRowContext = (target) => ({
     id: row.id,
@@ -2270,9 +2513,12 @@ function createStyleControlRows(row, value, onInput, requestRender, { inheritedH
       id,
       label,
       type: "color",
+      target,
       storageKey: row.storageKey,
       presets: row.presets,
-    }, value?.color ?? fallback, (nextColor) => onInput(withRowContext(target), nextColor), requestRender));
+    }, value?.color ?? fallback, (nextColor) => onInput(withRowContext(target), nextColor), requestRender, {
+      lockControl: getLockControl?.(target),
+    }));
   };
 
   const appendSliderRow = ({ id, label, target, sliderRow, sliderValue }) => {
@@ -2280,7 +2526,11 @@ function createStyleControlRows(row, value, onInput, requestRender, { inheritedH
       ...sliderRow,
       id,
       label,
-    }, sliderValue, (nextValue) => onInput(withRowContext(target), nextValue), { inheritedHidden }));
+      target,
+    }, sliderValue, (nextValue) => onInput(withRowContext(target), nextValue), {
+      inheritedHidden,
+      lockControl: getLockControl?.(target),
+    }));
   };
 
   if (row.type === "fill") {
@@ -2662,6 +2912,8 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
           isExpanded,
           isExpandable: !isAppearanceRow,
           inheritedHidden,
+          layerModel,
+          appearanceState,
           onToggleVisible: () => {
             layerModel.toggleRowVisible(row.id);
             reapplyRowTargets(row, layerModel, onRowInput);
@@ -2676,12 +2928,22 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       applyRowDepth(styleRow, depth);
       let childFragment = null;
       if (!isAppearanceRow && isExpanded) {
+        const parentRow = parentId ? layerModel.getRowById(parentId) : null;
+        const getLockControl = isFixedFilterRow(parentRow)
+          ? (target) => ({
+              locked: layerModel.isStyleCascadeLocked?.(target?.layerId, target?.key),
+              onToggle: () => {
+                layerModel.toggleStyleCascadeLock?.(target?.layerId, target?.key);
+                onToggleExpanded.__requestRender();
+              },
+            })
+          : null;
         childFragment = createStyleControlRows(
           row,
           getDisplayRowValue(row, layerModel, appearanceState),
           (syntheticRow, nextValue) => onRowInput(syntheticRow, nextValue),
           onToggleExpanded.__requestRender,
-          { inheritedHidden: inheritedHidden || !isVisible },
+          { inheritedHidden: inheritedHidden || !isVisible, getLockControl },
         );
       }
       fragment.append(isAppearanceRow ? styleRow : createRowGroup(styleRow, depth, parentId, childFragment));
@@ -2839,6 +3101,121 @@ function renderLayerMenuRows({
     }, 0);
   }
 
+  function toggleExpandedFromSync(layerId) {
+    layerModel.toggleExpanded(layerId);
+    render();
+  }
+
+  function collectStyleOwnersForUpdate(layerId, key) {
+    const owners = new Map();
+    const visit = (rows = []) => {
+      rows.forEach((row) => {
+        if (isStyleChildRow(row)) {
+          const hasMatchingTarget = [
+            row.colorTarget,
+            row.opacityTarget,
+            row.weightTarget,
+            row.radiusTarget,
+          ].some((target) => target?.kind === "layer-style" && target.layerId === layerId && target.key === key);
+          const parentId = hasMatchingTarget ? layerModel.getState()?.[row.id]?.parentRowId : null;
+          const parentRow = parentId ? layerModel.getRowById(parentId) : null;
+          if (parentRow?.type === "layer") {
+            owners.set(parentId, parentRow);
+          }
+        }
+        if (row?.id) {
+          visit(layerModel.getChildRows(row.id));
+        }
+      });
+    };
+
+    visit(layerModel.getRootRows());
+    return owners;
+  }
+
+  function handleStyleControlSync(event) {
+    const updates = Array.isArray(event?.detail?.updates) ? event.detail.updates : [];
+    if (!updates.length) {
+      return;
+    }
+
+    const scrollRegion = document.getElementById("layerMenuPanelScroll") ?? panel;
+    const appearanceState = layerModel.getAppearanceState();
+    const parentIds = new Set();
+    const ownerRows = new Map();
+    updates.forEach((update) => {
+      const layerId = String(update?.layerId ?? "");
+      const key = String(update?.key ?? "");
+      if (!layerId || !key) {
+        return;
+      }
+
+      collectStyleOwnersForUpdate(layerId, key).forEach((ownerRow, ownerId) => {
+        parentIds.add(ownerId);
+        ownerRows.set(ownerId, ownerRow);
+      });
+
+      scrollRegion.querySelectorAll(".layer-menu-row-style[data-row-id]").forEach((rowElement) => {
+        const styleRow = layerModel.getRowById(rowElement.dataset.rowId);
+        const hasMatchingTarget = [
+          styleRow?.colorTarget,
+          styleRow?.opacityTarget,
+          styleRow?.weightTarget,
+          styleRow?.radiusTarget,
+        ].some((target) => target?.kind === "layer-style" && target.layerId === layerId && target.key === key);
+        const parentId = hasMatchingTarget ? layerModel.getState()?.[styleRow.id]?.parentRowId : null;
+        if (parentId) {
+          parentIds.add(parentId);
+          const parentRow = layerModel.getRowById(parentId);
+          if (parentRow?.type === "layer") {
+            ownerRows.set(parentId, parentRow);
+          }
+        }
+      });
+
+      scrollRegion.querySelectorAll(`[data-style-layer-id="${CSS.escape(layerId)}"][data-style-key="${CSS.escape(key)}"]`).forEach((element) => {
+        const group = element.closest(".layer-menu-row-group");
+        const rowId = group?.dataset?.groupRowId ?? "";
+        const parentId = rowId ? layerModel.getState()?.[rowId]?.parentRowId : null;
+        if (parentId) {
+          parentIds.add(parentId);
+          const parentRow = layerModel.getRowById(parentId);
+          if (parentRow?.type === "layer") {
+            ownerRows.set(parentId, parentRow);
+          }
+        }
+      });
+    });
+
+    parentIds.forEach((parentId) => {
+      updateStyleRowLegendSwatchesForParent(scrollRegion, layerModel, parentId, appearanceState);
+    });
+    ownerRows.forEach((parentRow, parentId) => {
+      const parentStateKey = getRowStateKey(parentRow);
+      const parentState = withExpandedState(
+        layerModel.getState()?.[parentStateKey] ?? null,
+        layerModel.isExpanded(parentStateKey),
+      );
+      const parentRowElement = scrollRegion.querySelector(`.layer-menu-row-layer[data-row-id="${CSS.escape(parentId)}"]`);
+      updateLayerLegendSwatch(
+        parentRowElement,
+        getLayerLegendSpec(parentRow, parentState, layerModel, appearanceState),
+        {
+          state: parentState,
+          expandStateKey: parentStateKey,
+          onToggleExpanded: toggleExpandedFromSync,
+          toggleEnabled: parentRow.id !== "earth" && parentRow.id !== "settings" && layerModel.getChildRows(parentRow.id).some(isStyleChildRow),
+        },
+      );
+    });
+  }
+
+  if (panel.__layersStyleControlSyncHandler) {
+    window.removeEventListener("layers:style-control-sync", panel.__layersStyleControlSyncHandler);
+  }
+  panel.__layersStyleControlSyncHandler = handleStyleControlSync;
+  window.addEventListener("layers:style-control-sync", handleStyleControlSync);
+
   function render(nextUiState = null) {
     if (!panel.classList.contains("is-open")) {
       dismissDeleteConfirmPanel();
@@ -2984,6 +3361,8 @@ function renderLayerMenuRows({
       if (!parentRow || parentRow.type !== "layer") {
         return;
       }
+
+      updateStyleRowLegendSwatchesForParent(scrollRegion, layerModel, parentRowId, layerModel.getAppearanceState());
 
       const parentStateKey = getRowStateKey(parentRow);
       const parentState = withExpandedState(

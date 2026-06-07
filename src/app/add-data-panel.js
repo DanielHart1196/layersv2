@@ -16,6 +16,14 @@ const PREVIEW_PAGE_SIZE = 50;
 
 const ADD_DATA_MODE_NEW = "new";
 const ADD_DATA_MODE_EXISTING = "existing";
+const LOCAL_RENDER_MODE_AUTO = "auto";
+const LOCAL_RENDER_OPTIONS = [
+  { id: LOCAL_RENDER_MODE_AUTO, label: "Auto" },
+  { id: "point", label: "Points" },
+  { id: "line", label: "Lines / outline" },
+  { id: "polygon", label: "Area" },
+  { id: "area-outline", label: "Area outline" },
+];
 const LICENSE_PRESETS = [
   { id: "", label: "Select license", license: "", licenseUrl: "" },
   { id: "none", label: "None", license: "", licenseUrl: "" },
@@ -87,6 +95,31 @@ function formatGeometryTypes(geometryTypes = [], fallback = "mixed") {
   return Array.isArray(geometryTypes) && geometryTypes.length
     ? geometryTypes.join(" + ")
     : fallback;
+}
+
+function normalizeGeometryTypes(geometryTypes = []) {
+  const normalized = (Array.isArray(geometryTypes) ? geometryTypes : [])
+    .map((value) => {
+      if (value === "point") return "point";
+      if (value === "line") return "line";
+      if (value === "polygon" || value === "area") return "polygon";
+      return null;
+    })
+    .filter(Boolean);
+
+  return ["point", "line", "polygon"].filter((family) => normalized.includes(family));
+}
+
+function collapseGeometryTypes(geometryTypes = []) {
+  const normalized = normalizeGeometryTypes(geometryTypes);
+  return normalized.length === 1 ? normalized[0] : "mixed";
+}
+
+function resolveLocalRenderGeometryTypes(renderMode, features = []) {
+  if (renderMode === "point") return ["point"];
+  if (renderMode === "line" || renderMode === "area-outline") return ["line"];
+  if (renderMode === "polygon") return ["polygon"];
+  return normalizeGeometryTypes(inferGeometryTypes(features));
 }
 
 function looksLikeHttpUrl(value) {
@@ -411,7 +444,7 @@ function comparePreviewRows(leftRow, rightRow, columnName, direction) {
   return direction === "desc" ? -result : result;
 }
 
-export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetchLayerDatasets, onDataAdded }) {
+export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetchLayerDatasets, onDataAdded, onViewLocalDraft }) {
   const panel = createPanelShell();
   document.body.appendChild(panel);
 
@@ -439,6 +472,8 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
       previewScrollTop: 0,
       previewPageOffset: 0,
       usePmtiles: false,
+      localRenderMode: LOCAL_RENDER_MODE_AUTO,
+      localDraft: null,
       license: "",
       licenseUrl: "",
       attribution: "",
@@ -845,6 +880,8 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
       state.parsed = parsed;
       rebuildPreview({});
       state.usePmtiles = parsed.type === "pmtiles";
+      state.localRenderMode = LOCAL_RENDER_MODE_AUTO;
+      state.localDraft = null;
       state.error = "";
       if (state.mode === ADD_DATA_MODE_EXISTING) {
         applySelectedDatasetMetadata();
@@ -941,6 +978,45 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
     } catch (error) {
       state.error = error?.message ?? "Failed to add data.";
       state.step = "preview";
+      render();
+    }
+  }
+
+  async function viewLocalDraft() {
+    if (state.parsed?.type === "pmtiles") {
+      state.error = "PMTiles files cannot be viewed locally until they are stored as a URL-backed dataset.";
+      render();
+      return;
+    }
+
+    if (!state.preview?.features?.length) {
+      state.error = "This file did not produce any usable features yet.";
+      render();
+      return;
+    }
+
+    const geometryTypes = resolveLocalRenderGeometryTypes(state.localRenderMode, state.preview.features);
+    if (!geometryTypes.length) {
+      state.error = "Choose a geometry type to view this data locally.";
+      render();
+      return;
+    }
+
+    try {
+      const result = await onViewLocalDraft?.({
+        previousDraft: state.localDraft,
+        name: state.datasetName.trim() || state.file?.name?.replace(/\.[^.]+$/, "") || "Uploaded data",
+        features: state.preview.features,
+        geometryTypes,
+        geometryType: collapseGeometryTypes(geometryTypes),
+      });
+      if (result) {
+        state.localDraft = result;
+      }
+      state.error = "";
+      render();
+    } catch (error) {
+      state.error = error?.message ?? "Failed to view local data.";
       render();
     }
   }
@@ -1786,6 +1862,18 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
             <input type="checkbox" id="clpUsePmtiles" ${state.usePmtiles ? "checked" : ""} />
             Generate PMTiles
           </label>`;
+    const localViewControl = state.preview?.kind === "pmtiles"
+      ? ""
+      : `<label class="upload-field-label upload-field-label-inline clp-local-render">
+            <span>View as</span>
+            <select class="clp-field-input clp-local-render-select" id="clpLocalRenderMode">
+              ${LOCAL_RENDER_OPTIONS.map((option) => `
+                <option value="${escapeHtml(option.id)}" ${option.id === state.localRenderMode ? "selected" : ""}>
+                  ${escapeHtml(option.label)}
+                </option>
+              `).join("")}
+            </select>
+          </label>`;
     const { head, body } = buildPreviewTableMarkup({
       headers,
       rows,
@@ -1815,7 +1903,10 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
           </table>
         </div>
         <div class="clp-preview-controls">
-          ${pmtilesControl}
+          <div class="clp-preview-left-controls">
+            ${pmtilesControl}
+            ${localViewControl}
+          </div>
           <div class="clp-preview-pagination">
             <span class="clp-preview-page-range">${escapeHtml(`${pageStart}-${pageEnd}`)}</span>
             <button class="clp-undo-icon clp-preview-page-btn" id="clpPreviewPrev" type="button" aria-label="Previous preview rows" ${canGoPrev ? "" : "disabled"}><span aria-hidden="true">&#8249;</span></button>
@@ -1824,6 +1915,7 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
         </div>
         <div class="clp-actions">
           <button class="clp-btn clp-btn-secondary" id="clpBack">Back</button>
+          <button class="clp-btn clp-btn-secondary" id="clpViewLocal" type="button" ${state.preview?.kind === "pmtiles" ? "disabled" : ""}>View locally</button>
           <button class="clp-btn clp-btn-primary" id="clpCreate">Add data</button>
         </div>
         <p class="clp-error" ${state.error ? "" : "hidden"}>${escapeHtml(state.error)}</p>
@@ -1841,6 +1933,9 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
     bindLicenseMetadataFields(el, state, render);
     el.querySelector("#clpUsePmtiles")?.addEventListener("change", (event) => {
       state.usePmtiles = event.target.checked;
+    });
+    el.querySelector("#clpLocalRenderMode")?.addEventListener("change", (event) => {
+      state.localRenderMode = event.target.value || LOCAL_RENDER_MODE_AUTO;
     });
     el.querySelector("#clpPreviewPrev")?.addEventListener("click", () => {
       state.previewPageOffset = Math.max(0, (state.previewPageOffset || 0) - PREVIEW_PAGE_SIZE);
@@ -1917,6 +2012,9 @@ export function mountAddDataPanel({ getAppearanceState, getLayerDatasets = fetch
     });
     el.querySelector("#clpCreate")?.addEventListener("click", () => {
       void submitData();
+    });
+    el.querySelector("#clpViewLocal")?.addEventListener("click", () => {
+      void viewLocalDraft();
     });
 
     return el;

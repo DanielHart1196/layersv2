@@ -1907,7 +1907,7 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     });
     registerRuntimeChildRows(layerState, childRows, resolvedRowId);
 
-    if (!sourceLayerId) {
+    if (geojson || tilesUrl) {
       const sourceId = `dynamic-${layerId}`;
       if (map.getSource(sourceId)) {
         setDynamicLayerFeatureFilter(layerId, effectiveFeatureFilter);
@@ -2186,6 +2186,24 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     },
     attachDynamicLayer(layerId, geojson, tilesUrl, style, options) {
       attachDynamicLayer(layerId, geojson, tilesUrl, style, options);
+    },
+    fitBounds(bounds, options = {}) {
+      if (!Array.isArray(bounds) || bounds.length < 4) {
+        return;
+      }
+      const [minLon, minLat, maxLon, maxLat] = bounds.map(Number);
+      if (![minLon, minLat, maxLon, maxLat].every(Number.isFinite)) {
+        return;
+      }
+      map.fitBounds(
+        [[minLon, minLat], [maxLon, maxLat]],
+        {
+          padding: 72,
+          maxZoom: 9,
+          duration: 900,
+          ...options,
+        },
+      );
     },
     setDynamicLayerFeatureFilter(layerId, featureFilter) {
       return setDynamicLayerFeatureFilter(layerId, featureFilter);

@@ -41,6 +41,7 @@ coverage/
 # Temporary folders
 tmp/
 temp/
+.cache/
 tmp_biomes_parts/
 .tmp-tippecanoe/
 .tmp-tippecanoe-felt/

@@ -235,6 +235,26 @@ export async function updateLayerName(layerId, name) {
   return { id: layerId, name: nextName };
 }
 
+export async function deleteLayer(layerId) {
+  const supabase = requireSupabase();
+  const normalizedLayerId = String(layerId ?? "").trim();
+  if (!normalizedLayerId) {
+    throw new Error("Layer is required.");
+  }
+
+  const { error } = await supabase
+    .from("layers")
+    .delete()
+    .eq("id", normalizedLayerId);
+
+  if (error) {
+    throw new Error(`Failed to delete layer: ${error.message}`);
+  }
+
+  invalidateSupabaseCatalogCache();
+  return { id: normalizedLayerId };
+}
+
 export function invalidateSupabaseCatalogCache() {
   catalogCache = null;
   catalogRequest = null;
@@ -665,6 +685,7 @@ export async function loadLayerFromSupabase(layerId) {
         geojson: null,
         tilesUrl: dataset.artifact_url,
         sourceLayerId: dataset.source_layer ?? DEFAULT_PMTILES_SOURCE_LAYER,
+        bounds: Array.isArray(dataset.bounds) ? dataset.bounds : null,
       };
     }
 

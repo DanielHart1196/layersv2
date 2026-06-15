@@ -381,6 +381,24 @@ async function bootstrapApplication() {
             throw err;
           }
         },
+        onLayerDeleted: async (layer) => {
+          const layerId = String(layer?.id ?? "").trim();
+          if (!SUPABASE_UUID.test(layerId)) {
+            throw new Error("Only uploaded layers can be deleted here.");
+          }
+          const { deleteLayer } = await import("../sources/supabase/layer-loader.js");
+          await deleteLayer(layerId);
+          const matchingRows = layerModel.getSupabaseLayers().filter((entry) => entry.layerId === layerId);
+          matchingRows.forEach(({ rowId }) => {
+            const row = layerModel.getRowById(rowId);
+            const parentId = layerModel.getState()?.[rowId]?.parentRowId ?? layerModel.getRootParentId();
+            layerModel.removeRow(rowId, parentId);
+            screenRuntime.detachDynamicLayer(layerId);
+            detachDynamicFilterRowsRecursively(screenRuntime, row);
+          });
+          supabaseLayerDataCache.delete(layerId);
+          rerenderLayerMenu();
+        },
       }));
     }
     return createLayerPanelPromise;
@@ -835,6 +853,9 @@ function createDeferredScreenRuntime() {
     },
     loadDynamicLayer(args) {
       withRuntime((target) => target.loadDynamicLayer?.(args));
+    },
+    fitBounds(bounds, options = {}) {
+      withRuntime((target) => target.fitBounds?.(bounds, options));
     },
     setDynamicLayerFeatureFilter(layerId, featureFilter) {
       withRuntime((target) => target.setDynamicLayerFeatureFilter?.(layerId, featureFilter));
@@ -1680,7 +1701,7 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
     }
     throw err;
   }
-  const { layer, geojson, tilesUrl, sourceLayerId } = layerResult;
+  const { layer, geojson, tilesUrl, sourceLayerId, bounds } = layerResult;
   supabaseLayerDataCache.set(layerRef, layerResult);
   const added = layerModel.addDataRow(resolvedParentId, {
     name,
@@ -1713,6 +1734,9 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
   const visible = layerModel.getState()?.[stateKey]?.visible;
   if (runtimeTargetId && typeof visible === "boolean") {
     screenRuntime.setLayerStyleValue(runtimeTargetId, "visible", visible);
+  }
+  if (Array.isArray(bounds)) {
+    screenRuntime.fitBounds(bounds);
   }
 
   return { row: added, duplicate: false };

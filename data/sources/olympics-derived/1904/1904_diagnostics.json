@@ -1,0 +1,18 @@
+{
+  "year": 1904,
+  "generatedAt": "2026-06-13T14:51:27.891Z",
+  "sourcePage": "https://en.wikipedia.org/wiki/List_of_1904_Summer_Olympics_medal_winners",
+  "sourceRevisionEndpoint": "https://en.wikipedia.org/api/rest_v1/page/html/List_of_1904_Summer_Olympics_medal_winners",
+  "sourceKind": "layers-derived-wikipedia-wikidata",
+  "parsedMedalCells": 275,
+  "athleteMedalRecords": 474,
+  "mappedAthleteMedalRecords": 442,
+  "missingBirthplaceCoordinates": 32,
+  "unresolvedMedalCells": 0,
+  "medals": {
+    "gold": 168,
+    "silver": 158,
+    "bronze": 148
+  },
+  "unresolvedCells": []
+}

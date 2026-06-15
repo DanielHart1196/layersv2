@@ -165,6 +165,9 @@ function createMaplibreScreenRuntime({
         childRows,
       });
     },
+    fitBounds(bounds, options = {}) {
+      mapInstance?.fitBounds?.(bounds, options);
+    },
     setDynamicLayerFeatureFilter(layerId, featureFilter) {
       return mapInstance?.setDynamicLayerFeatureFilter?.(layerId, featureFilter) ?? false;
     },

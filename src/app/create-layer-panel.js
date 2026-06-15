@@ -415,7 +415,7 @@ function comparePreviewRows(leftRow, rightRow, columnName, direction) {
   return direction === "desc" ? -result : result;
 }
 
-export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
+export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLayerDeleted }) {
   const panel = createPanelShell();
   document.body.appendChild(panel);
 
@@ -455,6 +455,57 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
       error: "",
       ...overrides,
     };
+  }
+
+  function createDeleteConfirmPanel(layer, anchor, onCancel, onConfirm) {
+    const panelEl = document.createElement("div");
+    panelEl.className = "layer-menu-delete-confirm";
+
+    const label = document.createElement("span");
+    label.className = "layer-menu-delete-confirm-label";
+    label.textContent = `Remove ${layer?.label ?? layer?.name ?? "layer"}?`;
+
+    const actions = document.createElement("div");
+    actions.className = "layer-menu-delete-confirm-actions";
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "layer-menu-delete-confirm-cancel";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onCancel?.();
+    });
+
+    const confirm = document.createElement("button");
+    confirm.type = "button";
+    confirm.className = "layer-menu-delete-confirm-remove";
+    confirm.textContent = "Remove";
+    confirm.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onConfirm?.();
+    });
+
+    actions.append(cancel, confirm);
+    panelEl.append(label, actions);
+    document.body.append(panelEl);
+
+    const anchorRect = anchor?.getBoundingClientRect?.() ?? null;
+    const panelRect = panelEl.getBoundingClientRect();
+    const viewportMargin = 12;
+    const top = anchorRect
+      ? Math.max(viewportMargin, anchorRect.top - panelRect.height - 8)
+      : viewportMargin;
+    const left = anchorRect
+      ? Math.min(
+        window.innerWidth - panelRect.width - viewportMargin,
+        Math.max(viewportMargin, anchorRect.left + (anchorRect.width - panelRect.width) / 2),
+      )
+      : viewportMargin;
+    panelEl.style.top = `${top}px`;
+    panelEl.style.left = `${left}px`;
+
+    return panelEl;
   }
 
   function render() {
@@ -604,6 +655,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
 
   function bindExistingLayerList(root) {
     root.querySelectorAll(".clp-existing-item").forEach((button) => {
+      enableExistingLayerDeleteLongPress(button);
       button.addEventListener("click", () => {
         const layerId = button.getAttribute("data-layer-id") ?? "";
         if (!layerId) {
@@ -613,6 +665,117 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated }) {
         void submitExistingLayer();
       });
     });
+  }
+
+  function enableExistingLayerDeleteLongPress(button) {
+    if (!button || !onLayerDeleted) {
+      return;
+    }
+
+    const longPressDelayMs = 300;
+    const moveTolerancePx = 8;
+    let timer = null;
+    let startX = 0;
+    let startY = 0;
+    let suppressClick = false;
+    let confirmPanel = null;
+    let outsideHandler = null;
+
+    const clearTimer = () => {
+      if (timer) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+    };
+
+    const closeConfirm = () => {
+      if (outsideHandler) {
+        document.removeEventListener("pointerdown", outsideHandler, true);
+      }
+      outsideHandler = null;
+      confirmPanel?.remove();
+      confirmPanel = null;
+      button.classList.remove("is-delete-armed");
+    };
+
+    const deleteLayer = async (layer) => {
+      closeConfirm();
+      state.error = "";
+      state.existingLayersLoading = true;
+      render();
+      try {
+        await onLayerDeleted(layer);
+        state.existingLayers = state.existingLayers.filter((entry) => entry.id !== layer.id);
+        if (state.selectedExistingLayerId === layer.id) {
+          state.selectedExistingLayerId = "";
+        }
+      } catch (error) {
+        state.error = error?.message ?? "Failed to delete layer.";
+      } finally {
+        state.existingLayersLoading = false;
+        render();
+      }
+    };
+
+    const openConfirm = () => {
+      clearTimer();
+      const layerId = button.getAttribute("data-layer-id") ?? "";
+      const layer = state.existingLayers.find((entry) => entry.id === layerId);
+      if (!layer) {
+        return;
+      }
+      navigator.vibrate?.(20);
+      closeConfirm();
+      suppressClick = true;
+      button.classList.add("is-delete-armed");
+      confirmPanel = createDeleteConfirmPanel(
+        layer,
+        button,
+        closeConfirm,
+        () => void deleteLayer(layer),
+      );
+      outsideHandler = (event) => {
+        if (confirmPanel?.contains(event.target) || button.contains(event.target)) {
+          return;
+        }
+        closeConfirm();
+      };
+      window.setTimeout(() => {
+        if (outsideHandler) {
+          document.addEventListener("pointerdown", outsideHandler, true);
+        }
+      }, 0);
+    };
+
+    button.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 || event.target?.closest?.("input, select, textarea")) {
+        return;
+      }
+      startX = event.clientX;
+      startY = event.clientY;
+      clearTimer();
+      timer = window.setTimeout(openConfirm, longPressDelayMs);
+    });
+    button.addEventListener("pointermove", (event) => {
+      if (!timer) {
+        return;
+      }
+      const moved = Math.hypot(event.clientX - startX, event.clientY - startY);
+      if (moved > moveTolerancePx) {
+        clearTimer();
+      }
+    });
+    button.addEventListener("pointerup", clearTimer);
+    button.addEventListener("pointercancel", clearTimer);
+    button.addEventListener("contextmenu", (event) => event.preventDefault());
+    button.addEventListener("click", (event) => {
+      if (!suppressClick) {
+        return;
+      }
+      suppressClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
   }
 
   async function submitExistingLayer() {

@@ -1687,7 +1687,72 @@ function enableFilterRowLongPressActions(rowElement, { row, parentId, onEdit, on
   }, true);
 }
 
-function createLayerRow(definition, state, parentId, inheritedHidden, onToggleExpanded, onToggleVisibility, reorderApi, dragState, childRows = [], legendSpec = null, onDataAction = null, onFilterAction = null, onEditFilterAction = null, onRequestDeleteFilter = null) {
+function enableLayerRowLongPressDelete(rowElement, { row, parentId, onDelete }) {
+  if (!rowElement || !row || !onDelete) {
+    return;
+  }
+
+  const longPressDelayMs = 300;
+  const moveTolerancePx = 8;
+  let timer = null;
+  let startX = 0;
+  let startY = 0;
+  let suppressClick = false;
+
+  const clearTimer = () => {
+    if (timer) {
+      window.clearTimeout(timer);
+      timer = null;
+    }
+  };
+
+  const openDeleteConfirm = () => {
+    clearTimer();
+    navigator.vibrate?.(20);
+    suppressClick = true;
+    onDelete(parentId, row);
+  };
+
+  rowElement.addEventListener("pointerdown", (event) => {
+    if (
+      event.button !== 0
+      || event.target?.closest?.(".layer-menu-row-grabber")
+      || event.target?.closest?.(".layer-menu-row-action")
+      || event.target?.closest?.(".layer-menu-row-chevron-button")
+      || event.target?.closest?.(".layer-menu-delete-confirm")
+      || event.target?.closest?.("input, select, textarea")
+    ) {
+      return;
+    }
+    startX = event.clientX;
+    startY = event.clientY;
+    clearTimer();
+    timer = window.setTimeout(openDeleteConfirm, longPressDelayMs);
+  });
+
+  rowElement.addEventListener("pointermove", (event) => {
+    if (!timer) {
+      return;
+    }
+    const moved = Math.hypot(event.clientX - startX, event.clientY - startY);
+    if (moved > moveTolerancePx) {
+      clearTimer();
+    }
+  });
+  rowElement.addEventListener("pointerup", clearTimer);
+  rowElement.addEventListener("pointercancel", clearTimer);
+  rowElement.addEventListener("contextmenu", (event) => event.preventDefault());
+  rowElement.addEventListener("click", (event) => {
+    if (!suppressClick) {
+      return;
+    }
+    suppressClick = false;
+    event.preventDefault();
+    event.stopPropagation();
+  }, true);
+}
+
+function createLayerRow(definition, state, parentId, inheritedHidden, onToggleExpanded, onToggleVisibility, reorderApi, dragState, childRows = [], legendSpec = null, onDataAction = null, onFilterAction = null, onEditFilterAction = null, onRequestDeleteFilter = null, onRequestDeleteLayer = null) {
   const row = document.createElement("div");
   row.className = "layer-menu-row layer-menu-row-layer";
   row.dataset.rowId = definition.id;
@@ -1814,6 +1879,12 @@ function createLayerRow(definition, state, parentId, inheritedHidden, onToggleEx
       parentId,
       onEdit: onEditFilterAction,
       onDelete: onRequestDeleteFilter,
+    });
+  } else if (onRequestDeleteLayer) {
+    enableLayerRowLongPressDelete(row, {
+      row: definition,
+      parentId,
+      onDelete: onRequestDeleteLayer,
     });
   }
 
@@ -2763,7 +2834,7 @@ function createRowGroup(row, depth, parentId, children = null) {
   return group;
 }
 
-function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth = 0, parentId = null, inheritedHidden = false, onAddRow = null, onRemoveRow = null, onDataAction = null, onFilterAction = null, onEditFilterAction = null, onRequestDeleteFilter = null) {
+function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth = 0, parentId = null, inheritedHidden = false, onAddRow = null, onRemoveRow = null, onDataAction = null, onFilterAction = null, onEditFilterAction = null, onRequestDeleteFilter = null, onRequestDeleteLayer = null) {
   const fragment = document.createDocumentFragment();
   const state = layerModel.getState();
 
@@ -2966,6 +3037,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
       onFilterAction,
       onEditFilterAction,
       onRequestDeleteFilter,
+      isDynamic ? onRequestDeleteLayer : null,
     );
     applyRowDepth(layerRow, depth);
 
@@ -2978,7 +3050,7 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
         ? orderedChildRows
         : orderedChildRows.filter((childRow) => !isLayerExpansionChildRow(childRow) || layerModel.isExpanded(rowStateKey));
       if (visibleChildRows.length) {
-        childFragment = buildRows(visibleChildRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden, onAddRow, onRemoveRow, onDataAction, onFilterAction, onEditFilterAction, onRequestDeleteFilter);
+        childFragment = buildRows(visibleChildRows, layerModel, onToggleExpanded, onToggleVisibility, reorderApi, onRowInput, appearanceState, depth + 1, row.id, nextInheritedHidden, onAddRow, onRemoveRow, onDataAction, onFilterAction, onEditFilterAction, onRequestDeleteFilter, onRequestDeleteLayer);
       }
     }
     fragment.append(createRowGroup(layerRow, depth, parentId, childFragment));
@@ -3071,6 +3143,37 @@ function renderLayerMenuRows({
   }
 
   function showFilterDeleteConfirm(parentId, row) {
+    if (!row || !onRemoveRow) {
+      return;
+    }
+
+    dismissDeleteConfirmPanel();
+    const anchor = row.id
+      ? panel.querySelector(`[data-row-id="${CSS.escape(row.id)}"]`)
+      : null;
+    deleteConfirmPanel = createDeleteConfirmPanel(
+      row,
+      anchor,
+      dismissDeleteConfirmPanel,
+      () => {
+        dismissDeleteConfirmPanel();
+        onRemoveRow(row.id, parentId, row);
+      },
+    );
+    deleteConfirmOutsideHandler = (event) => {
+      if (deleteConfirmPanel?.contains(event.target)) {
+        return;
+      }
+      dismissDeleteConfirmPanel();
+    };
+    window.setTimeout(() => {
+      if (deleteConfirmOutsideHandler) {
+        document.addEventListener("pointerdown", deleteConfirmOutsideHandler, true);
+      }
+    }, 0);
+  }
+
+  function showLayerDeleteConfirm(parentId, row) {
     if (!row || !onRemoveRow) {
       return;
     }
@@ -3437,6 +3540,7 @@ function renderLayerMenuRows({
           onFilterAction ?? null,
           onEditFilterAction ?? null,
           showFilterDeleteConfirm,
+          null,
         ),
       );
     }
@@ -3461,6 +3565,7 @@ function renderLayerMenuRows({
           onFilterAction ?? null,
           onEditFilterAction ?? null,
           showFilterDeleteConfirm,
+          null,
         ),
       );
     }
@@ -3483,6 +3588,7 @@ function renderLayerMenuRows({
         onFilterAction ?? null,
         onEditFilterAction ?? null,
         showFilterDeleteConfirm,
+        showLayerDeleteConfirm,
       ),
     );
 

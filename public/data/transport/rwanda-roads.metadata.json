@@ -1,0 +1,34 @@
+{
+  "id": "rwanda-roads",
+  "label": "Rwanda Roads",
+  "source": {
+    "provider": "Geofabrik",
+    "url": "https://download.geofabrik.de/africa/rwanda-latest.osm.pbf",
+    "format": "OpenStreetMap PBF extract"
+  },
+  "output": {
+    "path": "/pmtiles/rwanda-roads.pmtiles",
+    "sourceLayer": "roads",
+    "format": "PMTiles vector archive"
+  },
+  "filters": {
+    "osmLayer": "lines",
+    "include": "highway IS NOT NULL",
+    "excludeHighwayValues": [
+      "construction",
+      "proposed",
+      "raceway",
+      "services"
+    ]
+  },
+  "fields": [
+    "osm_id",
+    "name",
+    "highway",
+    "z_order",
+    "other_tags",
+    "road_class"
+  ],
+  "attribution": "OpenStreetMap contributors; Geofabrik extract",
+  "generatedAt": "2026-06-07T17:14:21.620Z"
+}

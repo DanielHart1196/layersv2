@@ -114,7 +114,7 @@ async function copyShareUrl(args) {
   return shareUrl;
 }
 
-function bindShareControls({ layerModel, screenRuntime, viewModel }) {
+function bindShareControls({ getPrintDynamicLayerData = null, layerModel, printRenderer = null, screenRuntime, viewModel }) {
   const printButton = document.getElementById("printModeBtn");
   const shareButton = document.getElementById("shareBtn");
   const sharePopup = document.getElementById("sharePopup");
@@ -124,6 +124,15 @@ function bindShareControls({ layerModel, screenRuntime, viewModel }) {
   if (!shareButton || !sharePopup || !sharePopupUrl || !sharePopupTitle || !sharePopupHint) {
     return;
   }
+
+  printRenderer?.bind?.({
+    printButton,
+    contextProvider: () => ({
+      title: viewModel.getTitle?.() ?? viewModel.getState().title ?? document.title ?? "Layers",
+      layerModel,
+      dynamicLayerData: typeof getPrintDynamicLayerData === "function" ? getPrintDynamicLayerData() : [],
+    }),
+  });
 
   printButton?.addEventListener("click", () => {
     sharePopup.hidden = true;

@@ -100,16 +100,37 @@ function sanitizePosition(value) {
     && Number.isFinite(value[1]);
 }
 
-function sanitizeLineStringCoordinates(value) {
+function getPositionZ(value) {
+  if (!Array.isArray(value) || value.length < 3) {
+    return null;
+  }
+  const z = Number(value[2]);
+  return Number.isFinite(z) ? z : null;
+}
+
+function sanitizePositionCoordinates(value, zValues) {
+  if (!sanitizePosition(value)) {
+    return null;
+  }
+  const z = getPositionZ(value);
+  if (z !== null) {
+    zValues.push(z);
+  }
+  return [value[0], value[1]];
+}
+
+function sanitizeLineStringCoordinates(value, zValues) {
   if (!Array.isArray(value)) return null;
-  const coords = value.filter(sanitizePosition);
+  const coords = value
+    .map((position) => sanitizePositionCoordinates(position, zValues))
+    .filter(Boolean);
   return coords.length >= 2 ? coords : null;
 }
 
-function sanitizePolygonCoordinates(value) {
+function sanitizePolygonCoordinates(value, zValues) {
   if (!Array.isArray(value)) return null;
   const rings = value
-    .map((ring) => sanitizeLineStringCoordinates(ring))
+    .map((ring) => sanitizeLineStringCoordinates(ring, zValues))
     .filter(Boolean);
   return rings.length ? rings : null;
 }
@@ -119,60 +140,116 @@ function sanitizeGeometry(geometry) {
     return null;
   }
 
+  const zValues = [];
+  const result = (sanitizedGeometry) => sanitizedGeometry
+    ? { geometry: sanitizedGeometry, zValues }
+    : null;
+
   switch (geometry.type) {
-    case "Point":
-      return sanitizePosition(geometry.coordinates)
-        ? { type: "Point", coordinates: geometry.coordinates }
-        : null;
+    case "Point": {
+      const coordinates = sanitizePositionCoordinates(geometry.coordinates, zValues);
+      return result(coordinates ? { type: "Point", coordinates } : null);
+    }
     case "MultiPoint": {
       const coordinates = Array.isArray(geometry.coordinates)
-        ? geometry.coordinates.filter(sanitizePosition)
+        ? geometry.coordinates
+          .map((position) => sanitizePositionCoordinates(position, zValues))
+          .filter(Boolean)
         : null;
-      return coordinates?.length ? { type: "MultiPoint", coordinates } : null;
+      return result(coordinates?.length ? { type: "MultiPoint", coordinates } : null);
     }
     case "LineString": {
-      const coordinates = sanitizeLineStringCoordinates(geometry.coordinates);
-      return coordinates ? { type: "LineString", coordinates } : null;
+      const coordinates = sanitizeLineStringCoordinates(geometry.coordinates, zValues);
+      return result(coordinates ? { type: "LineString", coordinates } : null);
     }
     case "MultiLineString": {
       const coordinates = Array.isArray(geometry.coordinates)
-        ? geometry.coordinates.map((line) => sanitizeLineStringCoordinates(line)).filter(Boolean)
+        ? geometry.coordinates.map((line) => sanitizeLineStringCoordinates(line, zValues)).filter(Boolean)
         : null;
-      return coordinates?.length ? { type: "MultiLineString", coordinates } : null;
+      return result(coordinates?.length ? { type: "MultiLineString", coordinates } : null);
     }
     case "Polygon": {
-      const coordinates = sanitizePolygonCoordinates(geometry.coordinates);
-      return coordinates ? { type: "Polygon", coordinates } : null;
+      const coordinates = sanitizePolygonCoordinates(geometry.coordinates, zValues);
+      return result(coordinates ? { type: "Polygon", coordinates } : null);
     }
     case "MultiPolygon": {
       const coordinates = Array.isArray(geometry.coordinates)
-        ? geometry.coordinates.map((polygon) => sanitizePolygonCoordinates(polygon)).filter(Boolean)
+        ? geometry.coordinates.map((polygon) => sanitizePolygonCoordinates(polygon, zValues)).filter(Boolean)
         : null;
-      return coordinates?.length ? { type: "MultiPolygon", coordinates } : null;
+      return result(coordinates?.length ? { type: "MultiPolygon", coordinates } : null);
     }
     case "GeometryCollection": {
-      const geometries = Array.isArray(geometry.geometries)
+      const sanitizedChildren = Array.isArray(geometry.geometries)
         ? geometry.geometries.map(sanitizeGeometry).filter(Boolean)
         : null;
-      return geometries?.length ? { type: "GeometryCollection", geometries } : null;
+      if (!sanitizedChildren?.length) {
+        return null;
+      }
+      sanitizedChildren.forEach((child) => zValues.push(...child.zValues));
+      return result({
+        type: "GeometryCollection",
+        geometries: sanitizedChildren.map((child) => child.geometry),
+      });
     }
     default:
       return null;
   }
 }
 
+function getAvailablePropertyKey(properties, preferredKey) {
+  if (!(preferredKey in properties)) {
+    return preferredKey;
+  }
+  let index = 2;
+  let candidate = `${preferredKey}_${index}`;
+  while (candidate in properties) {
+    index += 1;
+    candidate = `${preferredKey}_${index}`;
+  }
+  return candidate;
+}
+
+function addElevationProperties(properties, geometryType, zValues) {
+  if (!zValues.length) {
+    return properties;
+  }
+  const nextProperties = { ...properties };
+  const min = Math.min(...zValues);
+  const max = Math.max(...zValues);
+  const mean = zValues.reduce((sum, value) => sum + value, 0) / zValues.length;
+  const add = (key, value) => {
+    nextProperties[getAvailablePropertyKey(nextProperties, key)] = value;
+  };
+
+  if (geometryType === "Point" && zValues.length === 1) {
+    add("geometry_z", zValues[0]);
+  } else {
+    add("geometry_z_min", min);
+    add("geometry_z_max", max);
+    add("geometry_z_mean", mean);
+    add("geometry_z_values", JSON.stringify(zValues));
+  }
+
+  return nextProperties;
+}
+
 // Ensure every feature has a proper properties object and pull out time fields
 function normaliseFeatures(features) {
   return features
     .map((f) => {
-      const geometry = sanitizeGeometry(f?.geometry);
-      if (!geometry) {
+      const sanitized = sanitizeGeometry(f?.geometry);
+      if (!sanitized) {
         return null;
       }
+      const properties = addElevationProperties(
+        f.properties ?? {},
+        sanitized.geometry.type,
+        sanitized.zValues,
+      );
       return {
         type: "Feature",
-        geometry,
-        properties: f.properties ?? {},
+        geometry: sanitized.geometry,
+        properties,
         valid_from: f.properties?.valid_from ?? f.properties?.time ?? f.properties?.start ?? null,
         valid_to:   f.properties?.valid_to   ?? f.properties?.end  ?? null,
       };

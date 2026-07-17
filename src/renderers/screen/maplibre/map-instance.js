@@ -511,39 +511,56 @@ function applyRuntimeTargetStyle(runtimeTargetId, key, value, map, layerState) {
   return false;
 }
 
-function reapplyStoredDynamicRuntimeStyles(baseLayerId, map, layerState) {
-  const stored = layerState?.[baseLayerId];
-  if (!stored || typeof stored !== "object") {
+function getStoredRuntimeTargetStyle(layerState, runtimeTargetId, key) {
+  const directValue = layerState?.[runtimeTargetId]?.[key];
+  if (directValue !== undefined) {
+    return directValue;
+  }
+
+  const rowStateKey = findRowStateKeyForRuntimeTarget(layerState, runtimeTargetId);
+  if (rowStateKey && rowStateKey !== runtimeTargetId) {
+    const rowValue = layerState?.[rowStateKey]?.[key];
+    if (rowValue !== undefined) {
+      return rowValue;
+    }
+  }
+
+  const runtimeTarget = parseRuntimeTarget(runtimeTargetId);
+  if (runtimeTarget?.baseLayerId) {
+    const inheritedValue = layerState?.[runtimeTarget.baseLayerId]?.[key];
+    if (inheritedValue !== undefined) {
+      return inheritedValue;
+    }
+  }
+
+  return undefined;
+}
+
+function reapplyStoredDynamicRuntimeStyle(baseLayerId, subtarget, key, alternateSubtarget, map, layerState) {
+  const runtimeTargetId = `${baseLayerId}::${subtarget}`;
+  const storedValue = getStoredRuntimeTargetStyle(layerState, runtimeTargetId, key);
+  if (storedValue === undefined) {
     return;
   }
 
-  if (stored.fillColor !== undefined) {
-    applyRuntimeTargetStyle(`${baseLayerId}::fill`, "fillColor", stored.fillColor, map, layerState);
+  applyRuntimeTargetStyle(runtimeTargetId, key, storedValue, map, layerState);
+  if (alternateSubtarget) {
+    applyRuntimeTargetStyle(`${baseLayerId}::${alternateSubtarget}`, key, storedValue, map, layerState);
   }
-  if (stored.fillOpacity !== undefined) {
-    applyRuntimeTargetStyle(`${baseLayerId}::fill`, "fillOpacity", stored.fillOpacity, map, layerState);
-  }
-  if (stored.lineColor !== undefined) {
-    applyRuntimeTargetStyle(`${baseLayerId}::line`, "lineColor", stored.lineColor, map, layerState);
-    applyRuntimeTargetStyle(`${baseLayerId}::point-stroke`, "lineColor", stored.lineColor, map, layerState);
-  }
-  if (stored.lineOpacity !== undefined) {
-    applyRuntimeTargetStyle(`${baseLayerId}::line`, "lineOpacity", stored.lineOpacity, map, layerState);
-    applyRuntimeTargetStyle(`${baseLayerId}::point-stroke`, "lineOpacity", stored.lineOpacity, map, layerState);
-  }
-  if (stored.lineWeight !== undefined) {
-    applyRuntimeTargetStyle(`${baseLayerId}::line`, "lineWeight", stored.lineWeight, map, layerState);
-    applyRuntimeTargetStyle(`${baseLayerId}::point-stroke`, "lineWeight", stored.lineWeight, map, layerState);
-  }
-  if (stored.pointColor !== undefined) {
-    applyRuntimeTargetStyle(`${baseLayerId}::point-fill`, "pointColor", stored.pointColor, map, layerState);
-  }
-  if (stored.pointOpacity !== undefined) {
-    applyRuntimeTargetStyle(`${baseLayerId}::point-fill`, "pointOpacity", stored.pointOpacity, map, layerState);
-  }
-  if (stored.pointRadius !== undefined) {
-    applyRuntimeTargetStyle(`${baseLayerId}::point-fill`, "pointRadius", stored.pointRadius, map, layerState);
-  }
+}
+
+function reapplyStoredDynamicRuntimeStyles(baseLayerId, map, layerState) {
+  reapplyStoredDynamicRuntimeStyle(baseLayerId, "fill", "fillColor", null, map, layerState);
+  reapplyStoredDynamicRuntimeStyle(baseLayerId, "fill", "fillOpacity", null, map, layerState);
+  reapplyStoredDynamicRuntimeStyle(baseLayerId, "line", "lineColor", "point-stroke", map, layerState);
+  reapplyStoredDynamicRuntimeStyle(baseLayerId, "line", "lineOpacity", "point-stroke", map, layerState);
+  reapplyStoredDynamicRuntimeStyle(baseLayerId, "line", "lineWeight", "point-stroke", map, layerState);
+  reapplyStoredDynamicRuntimeStyle(baseLayerId, "point-fill", "pointColor", null, map, layerState);
+  reapplyStoredDynamicRuntimeStyle(baseLayerId, "point-fill", "pointOpacity", null, map, layerState);
+  reapplyStoredDynamicRuntimeStyle(baseLayerId, "point-fill", "pointRadius", "point-stroke", map, layerState);
+  reapplyStoredDynamicRuntimeStyle(baseLayerId, "point-stroke", "lineColor", null, map, layerState);
+  reapplyStoredDynamicRuntimeStyle(baseLayerId, "point-stroke", "lineOpacity", null, map, layerState);
+  reapplyStoredDynamicRuntimeStyle(baseLayerId, "point-stroke", "lineWeight", null, map, layerState);
 }
 
 function applyDynamicPointLayerState(baseLayerId, map, layerState) {

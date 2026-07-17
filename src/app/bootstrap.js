@@ -4,7 +4,6 @@ import { createStyleModel } from "../core/style-model.js";
 import { createViewModel } from "../core/view-model.js";
 import { enableLayerMenuControls } from "./layer-menu-controls.js";
 import { renderLayerMenuRows } from "./layer-menu-renderer.js";
-import { createPrintRendererAdapter } from "../renderers/print/print-renderer.js";
 import { createScreenRendererAdapter } from "../renderers/screen/screen-renderer.js";
 import { createEditableRuntimeStore } from "../sources/editable/runtime-store.js";
 import { createPmtilesManifest } from "../sources/pmtiles/source-manifest.js";
@@ -19,6 +18,71 @@ import { createFeatureInspector } from "./feature-inspector.js";
 
 const supabaseLayerDataCache = new Map();
 
+function createLazyPrintRendererAdapter() {
+  const contract = {
+    primaryRenderer: "earthlab-print-view",
+    responsibilities: [
+      "print-specific projection render",
+      "custom multi-projection layout",
+      "projection lock, pan, zoom, and reset",
+      "movable print title",
+      "snapshot undo for print state",
+      "worker-assisted flat projection rendering",
+    ],
+    nonGoals: [
+      "screen-hot-path animation",
+    ],
+  };
+  let rendererPromise = null;
+  let renderer = null;
+
+  async function loadRenderer() {
+    if (!rendererPromise) {
+      rendererPromise = import("../renderers/print/print-renderer.js")
+        .then(({ createPrintRendererAdapter }) => {
+          renderer = createPrintRendererAdapter();
+          return renderer;
+        });
+    }
+    return rendererPromise;
+  }
+
+  return {
+    bind({ printButton, contextProvider }) {
+      if (!printButton) {
+        return;
+      }
+      const handleFirstOpen = async (event) => {
+        event.preventDefault();
+        printButton.disabled = true;
+        try {
+          const loadedRenderer = await loadRenderer();
+          printButton.removeEventListener("click", handleFirstOpen);
+          loadedRenderer.bind({ printButton, contextProvider });
+          loadedRenderer.open(contextProvider?.() ?? {});
+        } catch (error) {
+          console.warn("[layers] Failed to load print mode.", error);
+        } finally {
+          printButton.disabled = false;
+        }
+      };
+      printButton.addEventListener("click", handleFirstOpen);
+    },
+    close() {
+      renderer?.close?.();
+    },
+    getContract() {
+      return renderer?.getContract?.() ?? structuredClone(contract);
+    },
+    open(context) {
+      return loadRenderer().then((loadedRenderer) => loadedRenderer.open(context));
+    },
+    sync(context) {
+      renderer?.sync?.(context);
+    },
+  };
+}
+
 async function bootstrapApplication() {
   const styleModel = createStyleModel();
   const sharedSnapshot = await readShareSnapshotFromLocation();
@@ -30,7 +94,7 @@ async function bootstrapApplication() {
   const pmtilesManifest = createPmtilesManifest();
   const editableStore = createEditableRuntimeStore();
   const screenRenderer = createScreenRendererAdapter();
-  const printRenderer = createPrintRendererAdapter();
+  const printRenderer = createLazyPrintRendererAdapter();
   const projections = getProjectionRegistry();
   const featureInspector = createFeatureInspector();
   const viewState = {
@@ -321,10 +385,10 @@ async function bootstrapApplication() {
       addDataPanelPromise = import("./add-data-panel.js").then(({ mountAddDataPanel }) => mountAddDataPanel({
         getAppearanceState: () => layerModel.getAppearanceState(),
         getLayerDatasets,
-        onViewLocalDraft: viewLocalUploadDraft,
-        async onDataAdded({ layerId, datasetId }) {
+        async onDataAdded({ layerId, datasetId, displayGeometryTypes = [] }) {
           const dataTablePanel = await getDataTablePanel();
           await dataTablePanel?.reloadLayerData?.({ layerId, datasetId });
+          await reloadSupabaseLayer(layerId, layerModel, screenRuntime, { displayGeometryTypes });
         },
       }));
     }
@@ -635,8 +699,17 @@ async function bootstrapApplication() {
     shareUrl: null,
     rerenderLayerMenu,
   };
+  const getPrintDynamicLayerData = () => [...supabaseLayerDataCache.entries()]
+    .map(([layerId, cached]) => ({
+      layerId,
+      geojson: cached?.geojson ?? null,
+      style: cached?.layer?.default_style ?? null,
+    }))
+    .filter((entry) => entry.geojson?.features?.length);
   bindShareControls({
+    getPrintDynamicLayerData,
     layerModel,
+    printRenderer,
     screenRuntime,
     viewModel,
   });
@@ -1742,9 +1815,12 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
   return { row: added, duplicate: false };
 }
 
-async function reloadSupabaseLayer(layerId, layerModel, screenRuntime) {
+async function reloadSupabaseLayer(layerId, layerModel, screenRuntime, { displayGeometryTypes = [] } = {}) {
   const layerResult = await loadLayerFromSupabaseLazy(layerId);
   const { layer, geojson, tilesUrl, sourceLayerId } = layerResult;
+  const runtimeGeometryTypes = Array.isArray(displayGeometryTypes) && displayGeometryTypes.length
+    ? displayGeometryTypes
+    : Array.isArray(layer.geometry_types) ? layer.geometry_types : [];
   supabaseLayerDataCache.set(layerId, layerResult);
   screenRuntime.detachDynamicLayer(layerId);
   if (geojson || tilesUrl) {
@@ -1760,8 +1836,8 @@ async function reloadSupabaseLayer(layerId, layerModel, screenRuntime) {
       tilesUrl,
       style: layer.default_style,
       options: {
-        geometryTypes: Array.isArray(layer.geometry_types) ? layer.geometry_types : [],
-        geometryType: layer.geometry_type ?? null,
+        geometryTypes: runtimeGeometryTypes,
+        geometryType: runtimeGeometryTypes.length === 1 ? runtimeGeometryTypes[0] : layer.geometry_type ?? null,
         sourceLayerId,
       },
     });

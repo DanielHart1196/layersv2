@@ -16,6 +16,12 @@ const PREVIEW_PAGE_SIZE = 50;
 
 const CREATE_LAYER_MODE_NEW = "new";
 const CREATE_LAYER_MODE_EXISTING = "existing";
+const DISPLAY_GEOMETRY_AUTO = "auto";
+const DISPLAY_GEOMETRY_LABELS = {
+  point: "Point",
+  line: "Line",
+  polygon: "Polygon",
+};
 const LICENSE_PRESETS = [
   { id: "", label: "Select license", license: "", licenseUrl: "" },
   { id: "none", label: "None", license: "", licenseUrl: "" },
@@ -85,6 +91,32 @@ function getPreviewHeaderBackground(state) {
 
 function inferGeometryTypes(features = []) {
   return inferGeometryFamilies(features);
+}
+
+function normalizeDisplayGeometryType(value) {
+  if (value === "point" || value === "line" || value === "polygon") {
+    return value;
+  }
+  return DISPLAY_GEOMETRY_AUTO;
+}
+
+function getPreviewGeometryTypes(preview) {
+  const types = preview?.kind === "pmtiles"
+    ? preview.pmtiles?.geometryTypes
+    : inferGeometryTypes(preview?.features ?? []);
+  const normalized = (Array.isArray(types) ? types : [])
+    .map(normalizeDisplayGeometryType)
+    .filter((value) => value !== DISPLAY_GEOMETRY_AUTO);
+  return ["point", "line", "polygon"].filter((type) => normalized.includes(type));
+}
+
+function getSelectedDisplayGeometryTypes(state) {
+  const selected = normalizeDisplayGeometryType(state.displayGeometryType);
+  if (selected === DISPLAY_GEOMETRY_AUTO) {
+    return [];
+  }
+  const available = getPreviewGeometryTypes(state.preview);
+  return available.includes(selected) ? [selected] : [];
 }
 
 function formatGeometryTypes(geometryTypes = [], fallback = "mixed") {
@@ -445,11 +477,13 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
       previewScrollTop: 0,
       previewPageOffset: 0,
       usePmtiles: false,
+      displayGeometryType: DISPLAY_GEOMETRY_AUTO,
       license: "",
       licenseUrl: "",
       attribution: "",
       uploadingLabel: "0%",
       uploadingPct: 0,
+      uploadError: "",
       layerId: null,
       doneMessage: "Layer added to map",
       error: "",
@@ -835,6 +869,20 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
     syncPreviewPageRows();
   }
 
+  function hasNonEmptyPropertyValue(value) {
+    if (value === null || value === undefined) return false;
+    if (typeof value === "string") return value.trim() !== "";
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === "object") return Object.values(value).some(hasNonEmptyPropertyValue);
+    return true;
+  }
+
+  function getUploadFeatures() {
+    return (state.preview?.features ?? []).filter((feature) => (
+      Object.values(feature?.properties ?? {}).some(hasNonEmptyPropertyValue)
+    ));
+  }
+
   function syncPreviewPageRows() {
     if (!state.preview) {
       return;
@@ -951,6 +999,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
       state.parsed = parsed;
       rebuildPreview({});
       state.usePmtiles = parsed.type === "pmtiles";
+      state.displayGeometryType = DISPLAY_GEOMETRY_AUTO;
       state.error = "";
       if (!state.name.trim()) {
         state.name = file.name.replace(/\.[^.]+$/, "");
@@ -965,7 +1014,8 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
 
   async function submitLayer() {
     const isPmtilesUpload = state.parsed?.type === "pmtiles";
-    if (!isPmtilesUpload && !state.preview?.features?.length) {
+    const uploadFeatures = isPmtilesUpload ? [] : getUploadFeatures();
+    if (!isPmtilesUpload && !uploadFeatures.length) {
       state.error = "This file did not produce any usable features yet.";
       state.step = "preview";
       render();
@@ -982,6 +1032,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
     state.step = "uploading";
     state.uploadingPct = 0;
     state.uploadingLabel = "0%";
+    state.uploadError = "";
     render();
 
     try {
@@ -992,8 +1043,8 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
         licenseUrl: state.licenseUrl.trim(),
         attribution: state.attribution.trim(),
         viewAccess: "unlisted",
-        features: state.preview.features,
-        fieldSchema: state.preview.fieldSchema,
+        features: uploadFeatures,
+        fieldSchema: inferFieldSchemaFromFeatures(uploadFeatures),
         rawFile: state.file,
         usePmtiles: isPmtilesUpload || state.usePmtiles,
         pmtilesMetadata: isPmtilesUpload ? state.preview.pmtiles : null,
@@ -1012,23 +1063,25 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
       render();
       const geometryTypes = isPmtilesUpload
         ? state.preview.pmtiles?.geometryTypes ?? []
-        : inferGeometryTypes(state.preview.features);
+        : inferGeometryTypes(uploadFeatures);
+      const displayGeometryTypes = getSelectedDisplayGeometryTypes(state);
+      const rowGeometryTypes = displayGeometryTypes.length ? displayGeometryTypes : geometryTypes;
       const result = await onLayerCreated?.({
         layerId,
         name: state.name.trim() || state.file?.name?.replace(/\.[^.]+$/, "") || "Layer",
         parentId: state.parentId ?? null,
-        geometryTypes,
+        geometryTypes: rowGeometryTypes,
         geometryType: isPmtilesUpload
-          ? state.preview.pmtiles?.geometryType ?? geometryTypes[0] ?? "mixed"
-          : geometryTypes[0] ?? "mixed",
+          ? displayGeometryTypes[0] ?? state.preview.pmtiles?.geometryType ?? geometryTypes[0] ?? "mixed"
+          : displayGeometryTypes[0] ?? geometryTypes[0] ?? "mixed",
       });
       const layerLabel = state.name.trim() || state.file?.name?.replace(/\.[^.]+$/, "") || "This";
       state.doneMessage = result?.duplicate
         ? `${layerLabel} layer has already been added`
         : "Layer added to map";
     } catch (error) {
-      state.error = error?.message ?? "Failed to create layer.";
-      state.step = "preview";
+      state.uploadError = error?.message ?? "Failed to create layer.";
+      state.uploadingLabel = "Upload failed";
       render();
     }
   }
@@ -1881,6 +1934,20 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
             <input type="checkbox" id="clpUsePmtiles" ${state.usePmtiles ? "checked" : ""} />
             Generate PMTiles
           </label>`;
+    const previewGeometryTypes = getPreviewGeometryTypes(state.preview);
+    const displayGeometrySelect = previewGeometryTypes.length > 1
+      ? `<label class="upload-field-label upload-field-label-tight">
+            <span>Display</span>
+            <select class="clp-field-input" id="clpDisplayGeometryType">
+              <option value="${DISPLAY_GEOMETRY_AUTO}" ${normalizeDisplayGeometryType(state.displayGeometryType) === DISPLAY_GEOMETRY_AUTO ? "selected" : ""}>Auto</option>
+              ${previewGeometryTypes.map((type) => `
+                <option value="${escapeHtml(type)}" ${normalizeDisplayGeometryType(state.displayGeometryType) === type ? "selected" : ""}>
+                  ${escapeHtml(DISPLAY_GEOMETRY_LABELS[type] ?? type)}
+                </option>
+              `).join("")}
+            </select>
+          </label>`
+      : "";
     const { head, body } = buildPreviewTableMarkup({
       headers,
       rows,
@@ -1893,10 +1960,13 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
 
     const el = html(`
       <div class="clp-preview">
-        <label class="clp-field">
-          <span class="clp-field-label">Layer name</span>
-          <input class="clp-field-input clp-name-input" type="text" value="${escapeHtml(state.name)}" placeholder="Layer name" />
-        </label>
+        <div class="upload-field-row clp-metadata-row">
+          <label class="upload-field-label upload-field-label-tight">
+            <span>Layer name</span>
+            <input class="clp-field-input clp-name-input" type="text" value="${escapeHtml(state.name)}" placeholder="Layer name" />
+          </label>
+          ${displayGeometrySelect}
+        </div>
         ${renderLicenseMetadataFields(state)}
         <h3 class="upload-step-title">${escapeHtml(state.file?.name ?? "Uploaded file")}</h3>
         <div class="clp-preview-summary-row">
@@ -1932,6 +2002,9 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
     });
     el.querySelector(".clp-name-input")?.addEventListener("input", (event) => {
       state.name = event.target.value;
+    });
+    el.querySelector("#clpDisplayGeometryType")?.addEventListener("change", (event) => {
+      state.displayGeometryType = normalizeDisplayGeometryType(event.target.value);
     });
     bindLicenseMetadataFields(el, state, render);
     el.querySelector("#clpUsePmtiles")?.addEventListener("change", (event) => {
@@ -2189,15 +2262,34 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
   }
 
   function renderUploading() {
-    return html(`
+    const el = html(`
       <div class="clp-uploading">
-        <p class="clp-uploading-label">Adding layer...</p>
+        <p class="clp-uploading-label">${state.uploadError ? "Could not add layer" : "Adding layer..."}</p>
         <div class="clp-progress-track">
           <div class="clp-progress-bar" style="width:${state.uploadingPct}%"></div>
         </div>
         <p class="clp-progress-label">${escapeHtml(state.uploadingLabel)}</p>
+        ${state.uploadError ? `
+          <p class="clp-error">${escapeHtml(state.uploadError)}</p>
+          <div class="clp-actions">
+            <button class="clp-btn clp-btn-secondary" id="clpUploadBack">Back to preview</button>
+            <button class="clp-btn clp-btn-primary" id="clpUploadRetry">Try again</button>
+          </div>
+        ` : ""}
       </div>
     `);
+    el.querySelector("#clpUploadBack")?.addEventListener("click", () => {
+      state.uploadError = "";
+      state.error = "";
+      state.step = "preview";
+      render();
+    });
+    el.querySelector("#clpUploadRetry")?.addEventListener("click", () => {
+      state.uploadError = "";
+      state.error = "";
+      void submitLayer();
+    });
+    return el;
   }
 
   function renderDone() {

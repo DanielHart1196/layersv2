@@ -49,6 +49,7 @@ export function createPrintView({
   const PRINT_ALIGNMENT_CENTER_MAX_ALPHA = 0.95;
   const PRINT_ALIGNMENT_CENTER_FADE_MS = 800;
   const PRINT_ALIGNMENT_EDGE_COLOR = "rgba(32, 170, 80, 0.95)";
+  const PROJECTION_PREVIEW_BASE_URL = "/projection-previews";
   const DEFAULT_PRINT_TITLE = {
     text: "",
     x: 0.04,
@@ -203,12 +204,7 @@ export function createPrintView({
   projectionDropdown.className = "earthlab-projection-dropdown";
   projectionDropdown.hidden = true;
   for (const { id, name } of PROJECTIONS) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "earthlab-projection-option";
-    item.dataset.projId = id;
-    item.textContent = name;
-    projectionDropdown.appendChild(item);
+    projectionDropdown.appendChild(createProjectionOption(id, name, "projId"));
   }
 
   const customAddDropdown = document.createElement("div");
@@ -218,12 +214,7 @@ export function createPrintView({
     if (id === "custom") {
       continue;
     }
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "earthlab-projection-option";
-    item.dataset.customAddProjId = id;
-    item.textContent = name;
-    customAddDropdown.appendChild(item);
+    customAddDropdown.appendChild(createProjectionOption(id, name, "customAddProjId"));
   }
 
   const debugPanel = document.createElement("details");
@@ -339,6 +330,30 @@ export function createPrintView({
 
   function getSceneProps() {
     return sceneModel.get();
+  }
+
+  function createProjectionOption(id, name, datasetKey) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "earthlab-projection-option";
+    item.dataset[datasetKey] = id;
+
+    const thumbnail = document.createElement(id === "custom" ? "span" : "img");
+    thumbnail.className = "earthlab-projection-option-thumb";
+    thumbnail.setAttribute("aria-hidden", "true");
+    if (id !== "custom") {
+      thumbnail.alt = "";
+      thumbnail.decoding = "async";
+      thumbnail.loading = "eager";
+      thumbnail.src = `${PROJECTION_PREVIEW_BASE_URL}/${id}.svg`;
+    }
+
+    const label = document.createElement("span");
+    label.className = "earthlab-projection-option-label";
+    label.textContent = name;
+
+    item.append(thumbnail, label);
+    return item;
   }
 
   function getStylePreviewSceneProps() {

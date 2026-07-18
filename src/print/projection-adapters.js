@@ -1,4 +1,4 @@
-import { geoAzimuthalEqualArea, geoGnomonic, geoOrthographic, geoPath, geoStream, geoTransverseMercator } from "d3-geo";
+import { geoAzimuthalEqualArea, geoEqualEarth, geoGnomonic, geoOrthographic, geoPath, geoStream, geoTransverseMercator } from "d3-geo";
 import { geoAirocean, geoCahillKeyes, geoImago } from "d3-geo-polygon";
 import { geoInterruptedHomolosine, geoInterruptedSinuMollweide, geoLarrivee, geoMollweide, geoNaturalEarth2, geoPeirceQuincuncial, geoPolyhedralWaterman, geoRobinson, geoSinusoidal, geoSinuMollweide, geoWinkel3 } from "d3-geo-projection";
 
@@ -963,6 +963,12 @@ const PROJECTION_DEFINITIONS = {
     id: "naturalEarth",
     name: "Natural Earth II",
     factory: geoNaturalEarth2,
+    resetFrameStateOnUnlockTransfer: true,
+  }),
+  equalEarth: createFlatDefinition({
+    id: "equalEarth",
+    name: "Equal Earth",
+    factory: geoEqualEarth,
     resetFrameStateOnUnlockTransfer: true,
   }),
   robinson: createFlatDefinition({

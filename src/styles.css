@@ -4523,11 +4523,13 @@ textarea.arp-field-input {
   position: absolute;
   bottom: calc(var(--share-bottom-inset) + var(--kicker-height) + 6px);
   right: 18px;
+  box-sizing: border-box;
   background: var(--screen-bg);
   border-radius: var(--radius);
   overflow-y: auto;
   max-height: 240px;
   min-width: 180px;
+  max-width: calc(100% - 36px);
   z-index: 10;
 }
 
@@ -4537,6 +4539,7 @@ textarea.arp-field-input {
 }
 
 .earthlab-projection-option {
+  position: relative;
   display: block;
   width: 100%;
   text-align: left;
@@ -4550,6 +4553,24 @@ textarea.arp-field-input {
   padding: 5px 8px;
   cursor: pointer;
   touch-action: manipulation;
+}
+
+.earthlab-projection-option-thumb {
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  width: 42px;
+  height: 26px;
+  transform: translateY(-50%);
+}
+
+.earthlab-projection-option-label {
+  display: block;
+  padding-left: 50px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .earthlab-projection-option:not(:last-child) {

@@ -1,5 +1,10 @@
 import { requireSupabase } from "../../lib/supabase.js";
-import { evaluatePropertyExpression } from "../../core/filter-expressions.js";
+import {
+  DATASET_FILTER_FIELD,
+  DATASET_FILTER_LABEL,
+  DATASET_FILTER_PROPERTY,
+  evaluatePropertyExpression,
+} from "../../core/filter-expressions.js";
 
 const LOCAL_BORDERS_PMTILES_URL = "/data/world-atlas/ne_10m_admin_0_boundary_lines_land.pmtiles";
 const DEFAULT_PMTILES_SOURCE_LAYER = "layer";
@@ -397,10 +402,16 @@ export async function getLayerDatasets(layerId) {
 export async function getLayerFields(layerId) {
   const supabase = requireSupabase();
   const datasets = await loadLayerDatasets(layerId);
+  const datasetField = datasets.length
+    ? [{ value: DATASET_FILTER_FIELD, label: DATASET_FILTER_LABEL }]
+    : [];
   const { fields } = mergeSchemaFields(datasets);
 
   if (fields.length) {
-    return fields.map((field) => field.key);
+    return [
+      ...datasetField,
+      ...fields.map((field) => field.key),
+    ];
   }
 
   const datasetIds = datasets.map((dataset) => dataset.id);
@@ -442,7 +453,10 @@ export async function getLayerFields(layerId) {
     offset += pageSize;
   }
 
-  return [...keys].filter((key) => !key.startsWith("_")).sort();
+  return [
+    ...datasetField,
+    ...[...keys].filter((key) => !key.startsWith("_")).sort(),
+  ];
 }
 
 export async function getLayerFieldValues(layerId, fieldKey, { limit = FIELD_VALUE_PAGE_SIZE, filterExpression = null } = {}) {
@@ -450,6 +464,61 @@ export async function getLayerFieldValues(layerId, fieldKey, { limit = FIELD_VAL
   const key = String(fieldKey ?? "").trim();
   if (!layerId || !key) {
     return [];
+  }
+
+  const datasets = await loadLayerDatasets(layerId);
+  const datasetIds = datasets.map((dataset) => dataset.id);
+  if (key === DATASET_FILTER_FIELD || key === DATASET_FILTER_PROPERTY) {
+    let matchingDatasetIds = null;
+    if (filterExpression && datasetIds.length) {
+      matchingDatasetIds = new Set();
+      let datasetOffset = 0;
+      while (datasetOffset < CLIENT_VALUE_SCAN_LIMIT) {
+        const end = Math.min(datasetOffset + pageSize - 1, CLIENT_VALUE_SCAN_LIMIT - 1);
+        const { data, error } = await supabase
+          .from("features")
+          .select("dataset_id, properties")
+          .in("dataset_id", datasetIds)
+          .order("dataset_id", { ascending: true })
+          .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
+          .range(datasetOffset, end);
+
+        if (error) {
+          console.warn("Failed to load dataset filter values.", error);
+          matchingDatasetIds = null;
+          break;
+        }
+        if (!data?.length) {
+          break;
+        }
+
+        data.forEach((row) => {
+          const properties = row?.properties && typeof row.properties === "object" ? {
+            ...row.properties,
+            [DATASET_FILTER_PROPERTY]: row.dataset_id ?? row.properties?.[DATASET_FILTER_PROPERTY],
+          } : {
+            [DATASET_FILTER_PROPERTY]: row?.dataset_id,
+          };
+          if (evaluatePropertyExpression(filterExpression, properties) && row?.dataset_id) {
+            matchingDatasetIds.add(row.dataset_id);
+          }
+        });
+
+        if (data.length < pageSize) {
+          break;
+        }
+        datasetOffset += pageSize;
+      }
+    }
+
+    return datasets
+      .filter((dataset) => dataset?.id && (!matchingDatasetIds || matchingDatasetIds.has(dataset.id)))
+      .map((dataset) => ({
+        value: String(dataset.id),
+        label: String(dataset.name || "Dataset"),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
   }
 
   const values = new Set();
@@ -487,8 +556,6 @@ export async function getLayerFieldValues(layerId, fieldKey, { limit = FIELD_VAL
     return sortFieldValues(values);
   }
 
-  const datasets = await loadLayerDatasets(layerId);
-  const datasetIds = datasets.map((dataset) => dataset.id);
   if (!datasetIds.length) {
     return [];
   }
@@ -498,7 +565,7 @@ export async function getLayerFieldValues(layerId, fieldKey, { limit = FIELD_VAL
     const end = Math.min(offset + pageSize - 1, CLIENT_VALUE_SCAN_LIMIT - 1);
     const { data, error } = await supabase
       .from("features")
-      .select("properties")
+      .select("dataset_id, properties")
       .in("dataset_id", datasetIds)
       .order("dataset_id", { ascending: true })
       .order("created_at", { ascending: true })
@@ -514,13 +581,19 @@ export async function getLayerFieldValues(layerId, fieldKey, { limit = FIELD_VAL
     }
 
     data.forEach((row) => {
-      if (filterExpression && !evaluatePropertyExpression(filterExpression, row?.properties ?? {})) {
+      const properties = row?.properties && typeof row.properties === "object" ? {
+        ...row.properties,
+        [DATASET_FILTER_PROPERTY]: row.dataset_id ?? row.properties?.[DATASET_FILTER_PROPERTY],
+      } : {
+        [DATASET_FILTER_PROPERTY]: row?.dataset_id,
+      };
+      if (filterExpression && !evaluatePropertyExpression(filterExpression, properties)) {
         return;
       }
-      if (!row?.properties || typeof row.properties !== "object" || !Object.hasOwn(row.properties, key)) {
+      if (!Object.hasOwn(properties, key)) {
         return;
       }
-      const value = row.properties[key];
+      const value = properties[key];
       if (value === null || value === undefined) {
         return;
       }

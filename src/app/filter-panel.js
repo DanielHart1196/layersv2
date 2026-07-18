@@ -1,4 +1,5 @@
 import { closeOpenSelect, createCustomSelect } from "./shared/custom-select.js";
+import { DATASET_FILTER_FIELD, DATASET_FILTER_LABEL } from "../core/filter-expressions.js";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -19,7 +20,7 @@ function slugifyVariableId(value) {
 
 function getNumericValueStats(values) {
   const numbers = (Array.isArray(values) ? values : [])
-    .map((value) => Number(value))
+    .map((value) => Number(getOptionValue(value)))
     .filter((value) => Number.isFinite(value));
   if (!numbers.length) {
     return null;
@@ -28,6 +29,47 @@ function getNumericValueStats(values) {
     min: Math.min(...numbers),
     max: Math.max(...numbers),
   };
+}
+
+function getOptionValue(option) {
+  return typeof option === "object" && option !== null ? option.value : option;
+}
+
+function getOptionLabel(option) {
+  return typeof option === "object" && option !== null ? option.label : option;
+}
+
+function normalizeOptions(options = []) {
+  return (Array.isArray(options) ? options : [])
+    .map((option) => {
+      const value = String(getOptionValue(option) ?? "");
+      const label = String(getOptionLabel(option) ?? value);
+      return value ? { value, label } : null;
+    })
+    .filter(Boolean);
+}
+
+function getSelectedOptionLabel(options = [], value = "") {
+  const selected = normalizeOptions(options).find((option) => String(option.value) === String(value));
+  return selected?.label ?? String(value ?? "");
+}
+
+function getResolvedOptionLabel(options = [], value = "") {
+  return normalizeOptions(options).find((option) => String(option.value) === String(value))?.label ?? "";
+}
+
+function formatColumnLabel(columnName, fields = []) {
+  if (columnName === DATASET_FILTER_FIELD) {
+    return DATASET_FILTER_LABEL;
+  }
+  return getSelectedOptionLabel(fields, columnName) || columnName;
+}
+
+function formatValueLabel(value, values = []) {
+  if (value === "") {
+    return "Empty value";
+  }
+  return getSelectedOptionLabel(values, value) || String(value ?? "");
 }
 
 const OPERATOR_PARTS = ["lt", "eq", "gt"];
@@ -151,6 +193,11 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
     const variableDefault = state.variableDefault || (valueStats ? String(valueStats.min) : "0");
     const title = state.panelMode === "edit" ? "Edit filter" : "Add filter";
     const submitLabel = state.panelMode === "edit" ? "Save filter" : "Add filter";
+    const columnLabel = formatColumnLabel(state.columnName, state.fields);
+    const isDatasetColumn = state.columnName === DATASET_FILTER_FIELD;
+    const displayedValue = isDatasetColumn
+      ? (state.valuesLoading ? "Loading values..." : getResolvedOptionLabel(state.values, state.value))
+      : state.value;
 
     panel.querySelector(".clp-title").textContent = title;
 
@@ -162,7 +209,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         </label>
         <div class="clp-mode-selector" role="radiogroup" aria-label="Filter type">
           <button class="clp-mode-option filter-panel-mode-option ${state.filterMode === "fixed" ? "is-selected" : ""}" type="button" data-filter-mode="fixed" aria-pressed="${state.filterMode === "fixed"}" ${modeLocked ? "disabled" : ""}>Fixed</button>
-          <button class="clp-mode-option filter-panel-mode-option ${state.filterMode === "variable" ? "is-selected" : ""}" type="button" data-filter-mode="variable" aria-pressed="${state.filterMode === "variable"}" ${modeLocked ? "disabled" : ""}>Variable</button>
+          <button class="clp-mode-option filter-panel-mode-option ${state.filterMode === "variable" ? "is-selected" : ""}" type="button" data-filter-mode="variable" aria-pressed="${state.filterMode === "variable"}" ${modeLocked || isDatasetColumn ? "disabled" : ""}>Variable</button>
         </div>
         ${isVariableMode ? `
           <label class="clp-field">
@@ -177,7 +224,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
           <span class="clp-field-label">Column</span>
           <div class="filter-panel-select-combo">
             <div class="clp-field-input filter-panel-column-display" aria-hidden="true">
-              <span>${escapeHtml(state.columnName || (state.loading ? "Loading columns..." : "Column"))}</span>
+              <span>${escapeHtml(columnLabel || (state.loading ? "Loading columns..." : "Column"))}</span>
             </div>
             <button class="filter-panel-select-menu-btn" type="button" aria-label="Choose column" title="Choose column" aria-haspopup="listbox" ${controlsDisabled ? "disabled" : ""}>
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -197,7 +244,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         ${!isVariableMode ? `<div class="clp-field">
           <span class="clp-field-label">Value</span>
           <div class="filter-panel-value-combo">
-            <input class="clp-field-input filter-panel-value filter-panel-value-input" type="text" value="${escapeHtml(state.value)}" placeholder="Value" ${controlsDisabled ? "disabled" : ""} />
+            <input class="clp-field-input filter-panel-value filter-panel-value-input" type="text" value="${escapeHtml(displayedValue)}" placeholder="Value" ${controlsDisabled ? "disabled" : ""} ${isDatasetColumn ? "readonly" : ""} />
             <button class="filter-panel-value-menu-btn" type="button" aria-label="Choose existing value" title="Choose existing value" aria-haspopup="listbox" ${controlsDisabled || state.valuesLoading || !state.values.length ? "disabled" : ""}>
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M6 9l6 6 6-6"></path>
@@ -261,6 +308,9 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         onSelect(nextValue) {
           state.columnName = String(nextValue ?? "");
           state.value = "";
+          if (state.columnName === DATASET_FILTER_FIELD) {
+            state.filterMode = "fixed";
+          }
           render();
           void loadValues();
         },
@@ -279,8 +329,8 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
       createCustomSelect({
         anchor,
         options: state.values.map((value) => ({
-          value,
-          label: value === "" ? "Empty value" : value,
+          value: getOptionValue(value),
+          label: getOptionValue(value) === "" ? "Empty value" : getOptionLabel(value),
         })),
         value: state.value,
         label: "Choose existing value",
@@ -295,6 +345,10 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
       openValueSelect();
     });
     content.querySelector(".filter-panel-value-input")?.addEventListener("input", (event) => {
+      if (isDatasetColumn) {
+        event.target.value = getResolvedOptionLabel(state.values, state.value);
+        return;
+      }
       closeOpenSelect();
       state.value = event.target.value;
     });
@@ -325,6 +379,9 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
     content.querySelectorAll(".filter-panel-mode-option").forEach((button) => {
       button.addEventListener("click", () => {
         if (modeLocked) {
+          return;
+        }
+        if (button.dataset.filterMode === "variable" && state.columnName === DATASET_FILTER_FIELD) {
           return;
         }
         state.filterMode = button.dataset.filterMode === "variable" ? "variable" : "fixed";
@@ -358,6 +415,8 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
       state.variableDefault = content.querySelector(".filter-panel-variable-default")?.value ?? state.variableDefault;
       const columnName = String(state.columnName ?? "").trim();
       const filterLabel = String(state.filterLabel ?? "").trim();
+      const columnLabel = formatColumnLabel(columnName, state.fields);
+      const valueLabel = formatValueLabel(state.value, state.values);
       if (!columnName) {
         state.error = "Choose a column.";
         render();
@@ -388,6 +447,8 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
           layerId: state.layerId,
           parentRowId: state.parentRowId,
           label: filterLabel,
+          columnLabel,
+          valueLabel,
           columnName,
           value: state.value,
           op: state.filterOperator,
@@ -400,13 +461,13 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
             max: Number(state.variableMax || variableMax),
             step: Number(state.variableStep) || 1,
             initialValue: state.variableControlType === "dropdown"
-              ? String(state.values[0] ?? "")
+              ? String(getOptionValue(state.values[0]) ?? "")
               : Number(state.variableDefault || variableDefault),
             options: state.values.map((optionValue) => ({
-              label: optionValue === "" ? "Empty value" : String(optionValue),
-              value: String(optionValue),
+              label: getOptionValue(optionValue) === "" ? "Empty value" : String(getOptionLabel(optionValue)),
+              value: String(getOptionValue(optionValue) ?? ""),
             })),
-            filterLabel: filterLabel || `${columnName} variable`,
+            filterLabel: filterLabel || `${columnLabel} variable`,
             combinator: "all",
             conditions: [{ field: columnName, op: state.filterOperator, valueRef: variableId }],
           } : null,
@@ -435,10 +496,14 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
     render();
     try {
       const fields = await getLayerFields?.(state.layerId, getLoaderContext());
-      state.fields = Array.isArray(fields) ? fields : [];
-      state.columnName = state.fields.includes(state.columnName)
+      state.fields = normalizeOptions(fields);
+      const fieldValues = state.fields.map((field) => field.value);
+      state.columnName = fieldValues.includes(state.columnName)
         ? state.columnName
-        : state.fields[0] ?? "";
+        : state.fields[0]?.value ?? "";
+      if (state.columnName === DATASET_FILTER_FIELD) {
+        state.filterMode = "fixed";
+      }
       if (!state.fields.length) {
         state.error = "No filterable columns found.";
       }

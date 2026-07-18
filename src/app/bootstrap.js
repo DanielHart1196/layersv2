@@ -9,6 +9,8 @@ import { createEditableRuntimeStore } from "../sources/editable/runtime-store.js
 import { createPmtilesManifest } from "../sources/pmtiles/source-manifest.js";
 import { getRowRuntimeTargetId, getRowStateKey } from "../core/layer-definitions.js";
 import {
+  DATASET_FILTER_FIELD,
+  DATASET_FILTER_LABEL,
   buildExactMatchFilterExpression,
   buildStringComparisonFilterExpression,
 } from "../core/filter-expressions.js";
@@ -113,7 +115,7 @@ async function bootstrapApplication() {
     const { getLayerDatasets: loadDatasets } = await import("../sources/supabase/layer-loader.js");
     return loadDatasets(layerId);
   };
-  const createFilterFromTableSelection = async ({ layerId, parentRowId = "", label = "", columnName, value, op = "==", mode = "fixed", variableConfig = null }) => {
+  const createFilterFromTableSelection = async ({ layerId, parentRowId = "", label = "", columnLabel = "", valueLabel = "", columnName, value, op = "==", mode = "fixed", variableConfig = null }) => {
     const parentRow = parentRowId
       ? layerModel.getRowById(parentRowId)
       : findLayerRowByLayerRef(layerModel, layerId);
@@ -159,7 +161,7 @@ async function bootstrapApplication() {
       return;
     }
 
-    const generatedLabel = `${columnName} ${formatFilterOperatorLabel(op)} ${value === "" ? "Empty value" : value}`;
+    const generatedLabel = `${formatFilterColumnLabel(columnName, columnLabel)} ${formatFilterOperatorLabel(op)} ${formatFilterValueLabel(value, valueLabel)}`;
     const filterLabel = String(label ?? "").trim() || generatedLabel;
     const existingFilterRow = layerModel.getChildRows(parentRow.id).find((row) => (
       row?.type === "layer"
@@ -185,14 +187,17 @@ async function bootstrapApplication() {
       throw new Error("Failed to create filter row.");
     }
 
-    inheritParentStyleForFixedFilter(layerModel, nextRow, parentRow);
+    const inheritedStyleUpdates = inheritParentStyleForFixedFilter(layerModel, nextRow, parentRow);
+    inheritedStyleUpdates.forEach((update) => {
+      screenRuntime.setLayerStyleValue(update.layerId, update.key, update.value);
+    });
     attachDynamicFilterRow(layerModel, screenRuntime, nextRow);
     applyPersistedRowVisibility(layerModel, screenRuntime, nextRow);
     syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow);
     screenRuntime.reapplyFullOrder?.();
     rerenderLayerMenu();
   };
-  const updateFilterFromPanel = async ({ editFilter, label = "", columnName, value, op = "==", mode = "fixed", variableConfig = null }) => {
+  const updateFilterFromPanel = async ({ editFilter, label = "", columnLabel = "", valueLabel = "", columnName, value, op = "==", mode = "fixed", variableConfig = null }) => {
     if (!editFilter) {
       throw new Error("No filter was selected for editing.");
     }
@@ -228,7 +233,7 @@ async function bootstrapApplication() {
       return;
     }
 
-    const generatedLabel = `${columnName} ${formatFilterOperatorLabel(op)} ${value === "" ? "Empty value" : value}`;
+    const generatedLabel = `${formatFilterColumnLabel(columnName, columnLabel)} ${formatFilterOperatorLabel(op)} ${formatFilterValueLabel(value, valueLabel)}`;
     const filterLabel = String(label ?? "").trim() || generatedLabel;
     const updatedRow = layerModel.updateFixedFilterRow(editFilter.rowId, {
       name: filterLabel,
@@ -1413,6 +1418,20 @@ function formatFilterOperatorLabel(op) {
   if (op === "==") return "=";
   if (op === "all") return "any";
   return op || "=";
+}
+
+function formatFilterColumnLabel(columnName, columnLabel = "") {
+  if (columnName === DATASET_FILTER_FIELD) {
+    return DATASET_FILTER_LABEL;
+  }
+  return String(columnLabel || columnName || "Column");
+}
+
+function formatFilterValueLabel(value, valueLabel = "") {
+  if (value === "") {
+    return "Empty value";
+  }
+  return String(valueLabel || (value ?? ""));
 }
 
 function resolveFeatureDataset(layerDataCache, feature, sourceLayerId = feature?.layerId) {

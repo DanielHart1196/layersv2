@@ -1,17 +1,27 @@
+const DATASET_FILTER_FIELD = "__dataset";
+const DATASET_FILTER_PROPERTY = "_dataset_id";
+const DATASET_FILTER_LABEL = "Dataset";
+
+function resolveFilterExpressionField(field) {
+  return field === DATASET_FILTER_FIELD ? DATASET_FILTER_PROPERTY : field;
+}
+
 function buildExactMatchFilterExpression(field, value) {
+  const expressionField = resolveFilterExpressionField(field);
   return [
     "==",
-    ["to-string", ["coalesce", ["get", field], ""]],
+    ["to-string", ["coalesce", ["get", expressionField], ""]],
     value == null ? "" : String(value),
   ];
 }
 
 function buildStringComparisonFilterExpression(op, field, value) {
+  const expressionField = resolveFilterExpressionField(field);
   const comparisonValue = value == null ? "" : String(value);
   if (op === "!=") {
     return [
       "!=",
-      ["to-string", ["coalesce", ["get", field], ""]],
+      ["to-string", ["coalesce", ["get", expressionField], ""]],
       comparisonValue,
     ];
   }
@@ -106,6 +116,9 @@ function evaluatePropertyExpression(expression, properties = {}) {
 }
 
 export {
+  DATASET_FILTER_FIELD,
+  DATASET_FILTER_LABEL,
+  DATASET_FILTER_PROPERTY,
   buildExactMatchFilterExpression,
   buildStringComparisonFilterExpression,
   evaluateExpressionValue,

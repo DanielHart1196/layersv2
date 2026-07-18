@@ -29,7 +29,8 @@
     "build:osm-outline:japan:pmtiles": "node ./scripts/build-osm-outline-japan-pmtiles.mjs",
     "build:osm-outline:australia:pmtiles": "node ./scripts/build-osm-outline-australia-pmtiles.mjs",
     "build:osm-outline:australia:sliced:pmtiles": "node ./scripts/build-osm-outline-australia-sliced-pmtiles.mjs",
-    "build:osm-outline:victoria:pmtiles": "node ./scripts/build-osm-outline-victoria-pmtiles.mjs"
+    "build:osm-outline:victoria:pmtiles": "node ./scripts/build-osm-outline-victoria-pmtiles.mjs",
+    "build:projection-previews": "node ./scripts/generate-projection-previews.mjs"
   },
   "dependencies": {
     "@loaders.gl/gis": "^4.4.1",

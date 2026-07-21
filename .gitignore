@@ -58,8 +58,6 @@ public/data/world-atlas/australia-land-*.geojson
 public/data/world-atlas/victoria-land*.geojson
 public/data/world-atlas/ne_10m_admin_1_states_provinces.*
 public/data/external-countries.geojson
-public/data/world-atlas/land-110m.geojson
-public/data/world-atlas/land-50m.geojson
 public/data/world-atlas/land-10m.geojson
 public/data/world-atlas/land-*-outline.geojson
 public/data/world-atlas/land-polygons-split-4326.zip

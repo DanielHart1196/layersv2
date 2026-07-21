@@ -468,6 +468,7 @@ export async function getLayerFieldValues(layerId, fieldKey, { limit = FIELD_VAL
 
   const datasets = await loadLayerDatasets(layerId);
   const datasetIds = datasets.map((dataset) => dataset.id);
+  const pageSize = Math.max(1, Math.min(1000, Number(limit) || FIELD_VALUE_PAGE_SIZE));
   if (key === DATASET_FILTER_FIELD || key === DATASET_FILTER_PROPERTY) {
     let matchingDatasetIds = null;
     if (filterExpression && datasetIds.length) {
@@ -522,7 +523,6 @@ export async function getLayerFieldValues(layerId, fieldKey, { limit = FIELD_VAL
   }
 
   const values = new Set();
-  const pageSize = Math.max(1, Math.min(1000, Number(limit) || FIELD_VALUE_PAGE_SIZE));
   let offset = 0;
   let rpcUnavailable = !!filterExpression;
 
@@ -703,6 +703,15 @@ export function getLayerTablePreviewFromLoadedData(loadedLayer, { limit = 50, of
 }
 
 const MAX_GEOJSON_FEATURES = 10_000;
+const FILTERED_GEOJSON_FEATURES_MAX = 10_000;
+
+function createLayerLoadWarning(code, message, details = {}) {
+  return {
+    code,
+    message,
+    details,
+  };
+}
 
 async function loadGeojsonArtifact(url) {
   const response = await fetch(url);
@@ -712,8 +721,67 @@ async function loadGeojsonArtifact(url) {
   return response.json();
 }
 
-export async function loadLayerFromSupabase(layerId) {
+function featureFromRow(row, datasetById) {
+  const dataset = datasetById.get(row?.dataset_id) ?? null;
+  return {
+    type: "Feature",
+    id: row?.id,
+    geometry: row?.geometry,
+    properties: {
+      ...(row?.properties && typeof row.properties === "object" ? row.properties : {}),
+      _dataset_id: row?.dataset_id ?? "",
+      _dataset_name: dataset?.name ?? "",
+    },
+  };
+}
+
+async function loadFilteredLayerGeojson(supabase, datasets, filter, { onProgress = null } = {}) {
+  const field = String(filter?.field ?? "").trim();
+  const value = filter?.value;
+  const datasetIds = datasets.map((dataset) => dataset.id).filter(Boolean);
+  if (!field || value === undefined || value === null || !datasetIds.length) {
+    return null;
+  }
+
+  const datasetById = new Map(datasets.map((dataset) => [dataset.id, dataset]));
+  const pageSize = 1000;
+  const features = [];
+  let offset = 0;
+  onProgress?.(35, `Loading scoped features for ${field} = ${value}`);
+
+  while (features.length <= FILTERED_GEOJSON_FEATURES_MAX) {
+    const { data, error } = await supabase
+      .from("features")
+      .select("id, dataset_id, geometry, properties")
+      .in("dataset_id", datasetIds)
+      .filter(`properties->>${field}`, "eq", String(value))
+      .order("dataset_id", { ascending: true })
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1);
+
+    if (error) {
+      throw new Error(`Failed to load filtered features: ${error.message}`);
+    }
+
+    const rows = Array.isArray(data) ? data : [];
+    features.push(...rows.map((row) => featureFromRow(row, datasetById)).filter((feature) => feature.geometry));
+    onProgress?.(45, `Loaded ${features.length.toLocaleString()} scoped features`);
+    if (rows.length < pageSize) {
+      return {
+        type: "FeatureCollection",
+        features,
+      };
+    }
+    offset += rows.length;
+  }
+
+  throw new Error(`Filtered layer still has more than ${FILTERED_GEOJSON_FEATURES_MAX.toLocaleString()} features. Choose a narrower filter or use PMTiles.`);
+}
+
+export async function loadLayerFromSupabase(layerId, { propertyFilter = null, onProgress = null } = {}) {
   const supabase = requireSupabase();
+  onProgress?.(15, "Loading layer metadata");
   const { data: layer, error: layerError } = await supabase
     .from("layers")
     .select("id, name, geometry_type, geometry_types, default_style, feature_count")
@@ -728,8 +796,26 @@ export async function loadLayerFromSupabase(layerId) {
     throw error;
   }
 
+  onProgress?.(28, "Loading datasets");
   const datasets = await loadLayerDatasets(layerId);
+  onProgress?.(32, `Found ${datasets.length.toLocaleString()} datasets`);
+  const filteredGeojson = await loadFilteredLayerGeojson(supabase, datasets, propertyFilter, { onProgress });
+  if (filteredGeojson) {
+    onProgress?.(62, `Loaded ${filteredGeojson.features.length.toLocaleString()} scoped features`);
+    return {
+      layer: {
+        ...layer,
+        geometryTypes: normalizeGeometryTypes(layer.geometry_types, layer.geometry_type ?? "mixed"),
+      },
+      datasets,
+      geojson: filteredGeojson,
+      tilesUrl: null,
+      filterScope: propertyFilter,
+    };
+  }
+
   if (isBordersLayer(layer)) {
+    onProgress?.(58, "Using local border tiles");
     return {
       layer: {
         ...layer,
@@ -747,6 +833,7 @@ export async function loadLayerFromSupabase(layerId) {
   if (datasets.length === 1) {
     const [dataset] = datasets;
     if (dataset?.render_format === "pmtiles" && dataset?.artifact_url) {
+      onProgress?.(58, "Using PMTiles artifact");
       return {
         layer: {
           ...layer,
@@ -763,7 +850,9 @@ export async function loadLayerFromSupabase(layerId) {
     }
 
     if (dataset?.render_format === "geojson" && dataset?.artifact_url) {
+      onProgress?.(45, "Fetching GeoJSON artifact");
       const geojson = await loadGeojsonArtifact(dataset.artifact_url);
+      onProgress?.(62, `Loaded ${(geojson?.features?.length ?? 0).toLocaleString()} features`);
       return {
         layer: {
           ...layer,
@@ -777,11 +866,21 @@ export async function loadLayerFromSupabase(layerId) {
   }
 
   if (datasets.some((dataset) => dataset.render_format === "pmtiles" && dataset.artifact_url)) {
+    onProgress?.(40, "Multiple tile datasets found; falling back to merged GeoJSON");
     console.warn("Layer has multiple datasets, so loader is falling back to merged GeoJSON instead of per-dataset PMTiles.");
   }
 
   if ((layer.feature_count ?? 0) > MAX_GEOJSON_FEATURES) {
-    console.warn(`Layer has ${layer.feature_count} features - too large to load as GeoJSON. Re-upload with tile generation enabled.`);
+    onProgress?.(60, "Layer is too large for merged GeoJSON");
+    const loadWarning = createLayerLoadWarning(
+      "too_many_features_for_geojson",
+      `${layer.name || "This layer"} has ${layer.feature_count} features, which is too large to load as merged GeoJSON.`,
+      {
+        featureCount: layer.feature_count,
+        maxGeojsonFeatures: MAX_GEOJSON_FEATURES,
+      },
+    );
+    console.warn(`${loadWarning.message} Re-upload with tile generation enabled or load a smaller filtered dataset.`);
     return {
       layer: {
         ...layer,
@@ -790,11 +889,14 @@ export async function loadLayerFromSupabase(layerId) {
       datasets,
       geojson: null,
       tilesUrl: null,
+      loadWarning,
     };
   }
 
+  onProgress?.(45, "Loading merged GeoJSON");
   const { data: geojson, error: geojsonError } = await supabase.rpc("get_layer_geojson", { p_layer_id: layerId });
   if (geojsonError) throw new Error(`Failed to load features: ${geojsonError.message}`);
+  onProgress?.(62, `Loaded ${(geojson?.features?.length ?? 0).toLocaleString()} features`);
 
   return {
     layer: {

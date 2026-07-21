@@ -78,7 +78,8 @@ function applySettingsBackground(panel, state) {
 function getSettingsBackground(state) {
   const color = normalizeHexColor(state?.color, "#f8f8f8");
   const rgb = hexToRgb(color);
-  const alpha = Math.max(0, Math.min(100, Number(state?.opacity) || 0)) / 100;
+  const opacity = state?.opacity == null ? 100 : Number(state.opacity);
+  const alpha = Math.max(0, Math.min(100, Number.isFinite(opacity) ? opacity : 100)) / 100;
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
 }
 
@@ -553,7 +554,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
     if (state.step === "done") content.append(renderDone());
 
     inner?.classList.toggle("is-preview-step", state.step === "preview");
-    applySettingsBackground(panel, getAppearanceState?.()?.settings);
+    applySettingsBackground(panel, null);
     if (state.step === "preview") {
       const tableWrap = panel.querySelector(".clp-table-wrap");
       if (tableWrap && Number.isFinite(state.previewScrollLeft)) {
@@ -821,8 +822,8 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
     }
 
     state.error = "";
-    state.uploadingPct = 100;
-    state.uploadingLabel = "Adding layer…";
+    state.uploadingPct = 5;
+    state.uploadingLabel = "Starting layer load…";
     state.step = "uploading";
     render();
 
@@ -833,6 +834,14 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
         parentId: state.parentId ?? null,
         geometryTypes: selectedLayer.geometryTypes ?? [],
         geometryType: selectedLayer.geometryType ?? "mixed",
+        onProgress(pct, label) {
+          state.uploadingPct = Math.max(0, Math.min(100, Number(pct) || 0));
+          state.uploadingLabel = label || `${state.uploadingPct}%`;
+          const bar = panel.querySelector(".clp-progress-bar");
+          const labelEl = panel.querySelector(".clp-progress-label");
+          if (bar) bar.style.width = `${state.uploadingPct}%`;
+          if (labelEl) labelEl.textContent = state.uploadingLabel;
+        },
       });
       state.layerId = selectedLayer.id;
       state.doneMessage = result?.duplicate

@@ -209,7 +209,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         </label>
         <div class="clp-mode-selector" role="radiogroup" aria-label="Filter type">
           <button class="clp-mode-option filter-panel-mode-option ${state.filterMode === "fixed" ? "is-selected" : ""}" type="button" data-filter-mode="fixed" aria-pressed="${state.filterMode === "fixed"}" ${modeLocked ? "disabled" : ""}>Fixed</button>
-          <button class="clp-mode-option filter-panel-mode-option ${state.filterMode === "variable" ? "is-selected" : ""}" type="button" data-filter-mode="variable" aria-pressed="${state.filterMode === "variable"}" ${modeLocked || isDatasetColumn ? "disabled" : ""}>Variable</button>
+          <button class="clp-mode-option filter-panel-mode-option ${state.filterMode === "variable" ? "is-selected" : ""}" type="button" data-filter-mode="variable" aria-pressed="${state.filterMode === "variable"}" ${modeLocked ? "disabled" : ""}>Variable</button>
         </div>
         ${isVariableMode ? `
           <label class="clp-field">
@@ -308,9 +308,6 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         onSelect(nextValue) {
           state.columnName = String(nextValue ?? "");
           state.value = "";
-          if (state.columnName === DATASET_FILTER_FIELD) {
-            state.filterMode = "fixed";
-          }
           render();
           void loadValues();
         },
@@ -379,9 +376,6 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
     content.querySelectorAll(".filter-panel-mode-option").forEach((button) => {
       button.addEventListener("click", () => {
         if (modeLocked) {
-          return;
-        }
-        if (button.dataset.filterMode === "variable" && state.columnName === DATASET_FILTER_FIELD) {
           return;
         }
         state.filterMode = button.dataset.filterMode === "variable" ? "variable" : "fixed";
@@ -501,9 +495,6 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
       state.columnName = fieldValues.includes(state.columnName)
         ? state.columnName
         : state.fields[0]?.value ?? "";
-      if (state.columnName === DATASET_FILTER_FIELD) {
-        state.filterMode = "fixed";
-      }
       if (!state.fields.length) {
         state.error = "No filterable columns found.";
       }

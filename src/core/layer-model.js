@@ -1181,6 +1181,74 @@ function createLayerModel() {
     return structuredClone(variableFilter);
   }
 
+  function addVariableFilterPresetToLayer(layerId, config = {}) {
+    const parentDef = rowDefinitionsById.get(layerId) ?? layerDefinitions[layerId];
+    if (!parentDef || parentDef.type !== "layer") {
+      return null;
+    }
+
+    const variableId = String(config.variableId ?? "").trim();
+    const conditions = Array.isArray(config.conditions)
+      ? config.conditions
+        .map((condition) => ({
+          field: String(condition?.field ?? "").trim(),
+          op: condition?.op ?? "==",
+          value: condition?.value ?? "",
+          valueRef: String(condition?.valueRef ?? variableId).trim(),
+        }))
+        .filter((condition) => condition.field && condition.valueRef)
+      : [];
+    if (!variableId || !conditions.length) {
+      return null;
+    }
+
+    const controlRow = createVariableSelectRow({
+      id: config.controlRowId || `${layerId}-preset-variable-${variableId}`,
+      label: config.label || "Dropdown",
+      variableId,
+      options: Array.isArray(config.options) ? config.options : [],
+      initialValue: config.initialValue,
+    });
+
+    if (parentDef.rows?.some((row) => row.id === controlRow.id)) {
+      return null;
+    }
+
+    if (!Array.isArray(parentDef.rows)) {
+      parentDef.rows = [];
+    }
+    parentDef.rows.unshift(controlRow);
+    rowDefinitionsById.set(controlRow.id, controlRow);
+    dynamicIds.add(controlRow.id);
+    initializeDynamicRowState([controlRow], parentDef.layerRef ?? layerId, parentDef.id);
+
+    const currentChildOrder = Array.isArray(layerState[parentDef.id]?.rowOrder)
+      ? layerState[parentDef.id].rowOrder
+      : getDefaultChildOrder(parentDef.id);
+    layerState[parentDef.id].rowOrder = normalizeChildRowOrder(
+      parentDef.id,
+      [controlRow.id, ...currentChildOrder.filter((rowId) => rowId !== controlRow.id)],
+    );
+
+    const variableFilter = addVariableFilterToLayer(parentDef.id, {
+      label: config.filterLabel || config.label || "Variable filter",
+      controlRowId: controlRow.id,
+      combinator: config.combinator ?? "all",
+      conditions,
+    });
+    if (!variableFilter) {
+      return null;
+    }
+
+    persistDynamicDefs();
+    persistLayerState();
+    return {
+      controlRow: structuredClone(controlRow),
+      variableFilter,
+      parentRow: structuredClone(parentDef),
+    };
+  }
+
   function updateFixedFilterRow(rowId, config = {}) {
     const row = rowDefinitionsById.get(rowId);
     if (!row || row.type !== "layer" || row.kind !== "filter" || !row.filter) {
@@ -1474,6 +1542,7 @@ function createLayerModel() {
   return {
     addDataRow,
     addVariableFilterToLayer,
+    addVariableFilterPresetToLayer,
     addRowToLayer,
     getChildRows,
     getDefinitions,

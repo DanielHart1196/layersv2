@@ -5,13 +5,20 @@ import {
   normalizeProjectionCamera,
   sharesCameraAcrossLockStates,
 } from "../../print/projection-adapters.js";
+import { LOCAL_LAYERS } from "../../config/local-layers.js";
 
 const PRINT_VIEW_CLASS = "layers-print-view";
 const PRINT_PROJECTION_KEY = "layerv2.print.projection.v1";
 const PRINT_TITLE_KEY = "layerv2.print.title.v1";
 const PRINT_UNDO_LIMIT = 30;
-const LAND_LOW_URL = "/data/world-atlas/land-110m.geojson";
-const LAND_HIGH_URL = "/data/world-atlas/land-50m.geojson";
+const LAND_LAYER_CONFIG = LOCAL_LAYERS.find((entry) => entry.id === "land") ?? null;
+const LAND_LOW_DETAIL = LAND_LAYER_CONFIG?.detailLevels?.find((entry) => entry.value === "low") ?? null;
+const LAND_HIGH_DETAIL = LAND_LAYER_CONFIG?.detailLevels?.find((entry) => entry.value === "high") ?? null;
+const LAND_LOW_URL = LAND_LOW_DETAIL?.printUrl
+  ?? LAND_LOW_DETAIL?.url
+  ?? LAND_LAYER_CONFIG?.source?.url
+  ?? "/data/world-atlas/ne_110m_land.geojson";
+const LAND_HIGH_URL = LAND_HIGH_DETAIL?.printUrl ?? LAND_HIGH_DETAIL?.url ?? LAND_LOW_URL;
 const GRATICULES_URL = "/data/graticules/world-graticules-10deg.geojson";
 
 const DEFAULT_PRINT_TITLE = Object.freeze({
@@ -182,8 +189,69 @@ async function fetchJson(url) {
   return response.json();
 }
 
+function normalizeLandDetail(detail) {
+  if (detail === "50m" || detail === "10m" || detail === "osm") {
+    return "high";
+  }
+  if (detail === "110m") {
+    return "low";
+  }
+  return detail === "high" ? "high" : "low";
+}
+
+function getSelectedLandDetail(layerState) {
+  return normalizeLandDetail(layerState?.["land-detail"]?.detail ?? LAND_LAYER_CONFIG?.defaultDetail);
+}
+
+function getLandGeometryForState(data, layerState) {
+  const selectedDetail = getSelectedLandDetail(layerState);
+  return data.landByDetail?.[selectedDetail] ?? data.landLow ?? data.landHigh ?? null;
+}
+
 function getStateRecord(layerState, id) {
   return layerState?.[id] && typeof layerState[id] === "object" ? layerState[id] : {};
+}
+
+function parseRuntimeTarget(runtimeTargetId) {
+  const match = /^(.+)::(fill|line|point-fill|point-stroke)$/.exec(runtimeTargetId ?? "");
+  return match ? { baseLayerId: match[1], subtarget: match[2] } : null;
+}
+
+function findRowStateKeyForRuntimeTarget(layerState, runtimeTargetId) {
+  return Object.entries(layerState ?? {}).find(([, record]) => record?.runtimeTargetId === runtimeTargetId)?.[0] ?? null;
+}
+
+function getLayerStyleValue(layerState, layerId, key, fallback) {
+  const directValue = layerState?.[layerId]?.[key];
+  if (directValue !== undefined) {
+    return directValue;
+  }
+  const runtimeTarget = parseRuntimeTarget(layerId);
+  if (runtimeTarget?.baseLayerId) {
+    const inheritedValue = layerState?.[runtimeTarget.baseLayerId]?.[key];
+    if (inheritedValue !== undefined) {
+      return inheritedValue;
+    }
+  }
+  return fallback;
+}
+
+function isRowEnabled(layerState, rowId) {
+  if (typeof layerState?.[rowId]?.rowVisible === "boolean") {
+    return layerState[rowId].rowVisible;
+  }
+  return getLayerStyleValue(layerState, rowId, "visible", true);
+}
+
+function isRuntimeTargetVisible(layerState, runtimeTargetId) {
+  let currentRowId = findRowStateKeyForRuntimeTarget(layerState, runtimeTargetId) ?? runtimeTargetId;
+  while (currentRowId) {
+    if (!isRowEnabled(layerState, currentRowId)) {
+      return false;
+    }
+    currentRowId = layerState?.[currentRowId]?.parentRowId ?? null;
+  }
+  return true;
 }
 
 function isVisible(layerState, layerId, styleRowId = null) {
@@ -195,31 +263,41 @@ function isVisible(layerState, layerId, styleRowId = null) {
 }
 
 function getFillChannel(layerState, layerId, styleRowId, fallbackColor, fallbackOpacity = 100) {
-  const record = getStateRecord(layerState, layerId);
+  const runtimeTargetId = `${layerId}::fill`;
   return {
-    color: record.fillColor ?? fallbackColor,
-    opacity: record.fillOpacity ?? fallbackOpacity,
-    visible: isVisible(layerState, layerId, styleRowId),
+    color: getLayerStyleValue(layerState, runtimeTargetId, "fillColor", fallbackColor),
+    opacity: getLayerStyleValue(layerState, runtimeTargetId, "fillOpacity", fallbackOpacity),
+    visible: isVisible(layerState, layerId, styleRowId) && isRuntimeTargetVisible(layerState, runtimeTargetId),
   };
 }
 
 function getLineChannel(layerState, layerId, styleRowId, fallbackColor, fallbackOpacity = 100, fallbackWidth = 1) {
-  const record = getStateRecord(layerState, layerId);
+  const runtimeTargetId = `${layerId}::line`;
   return {
-    color: record.lineColor ?? fallbackColor,
-    opacity: record.lineOpacity ?? fallbackOpacity,
-    width: record.lineWeight ?? fallbackWidth,
-    visible: isVisible(layerState, layerId, styleRowId),
+    color: getLayerStyleValue(layerState, runtimeTargetId, "lineColor", fallbackColor),
+    opacity: getLayerStyleValue(layerState, runtimeTargetId, "lineOpacity", fallbackOpacity),
+    width: getLayerStyleValue(layerState, runtimeTargetId, "lineWeight", fallbackWidth),
+    visible: isVisible(layerState, layerId, styleRowId) && isRuntimeTargetVisible(layerState, runtimeTargetId),
   };
 }
 
 function getPointChannel(layerState, layerId, fallbackColor = "#e74c3c", fallbackOpacity = 80, fallbackRadius = 6) {
-  const record = getStateRecord(layerState, layerId);
+  const runtimeTargetId = `${layerId}::point-fill`;
   return {
-    color: record.pointColor ?? fallbackColor,
-    opacity: record.pointOpacity ?? fallbackOpacity,
-    radius: record.pointRadius ?? fallbackRadius,
-    visible: record.visible !== false,
+    color: getLayerStyleValue(layerState, runtimeTargetId, "pointColor", fallbackColor),
+    opacity: getLayerStyleValue(layerState, runtimeTargetId, "pointOpacity", fallbackOpacity),
+    radius: getLayerStyleValue(layerState, runtimeTargetId, "pointRadius", fallbackRadius),
+    visible: getStateRecord(layerState, layerId).visible !== false && isRuntimeTargetVisible(layerState, runtimeTargetId),
+  };
+}
+
+function getPointLineChannel(layerState, layerId, fallbackColor = "#ffffff", fallbackOpacity = 100, fallbackWidth = 1) {
+  const runtimeTargetId = `${layerId}::point-stroke`;
+  return {
+    color: getLayerStyleValue(layerState, runtimeTargetId, "lineColor", fallbackColor),
+    opacity: getLayerStyleValue(layerState, runtimeTargetId, "lineOpacity", fallbackOpacity),
+    width: getLayerStyleValue(layerState, runtimeTargetId, "lineWeight", fallbackWidth),
+    visible: getStateRecord(layerState, layerId).visible !== false && isRuntimeTargetVisible(layerState, runtimeTargetId),
   };
 }
 
@@ -265,6 +343,61 @@ function geometryRecordFromFeatures(features) {
   };
 }
 
+function normalizeFilterConditions(row) {
+  if (Array.isArray(row?.filter?.conditions) && row.filter.conditions.length) {
+    return row.filter.conditions
+      .filter((condition) => condition?.field && condition.op !== "all")
+      .map((condition) => ({
+        field: condition.field === "__dataset" ? "_dataset_id" : condition.field,
+        op: condition.op ?? "==",
+        value: condition.value ?? "",
+      }));
+  }
+  if (!row?.filter?.field) {
+    return [];
+  }
+  return [{
+    field: row.filter.field === "__dataset" ? "_dataset_id" : row.filter.field,
+    op: row.filter.op ?? "==",
+    value: row.filter.value ?? "",
+  }];
+}
+
+function buildDynamicPrintFilters(layerModel, layerState, parentRow) {
+  const filters = [];
+  const visit = (row) => {
+    const childRows = layerModel.getOrderedChildRows?.(row.id) ?? row.rows ?? [];
+    childRows.forEach((childRow) => {
+      if (childRow?.type !== "layer" || childRow.kind !== "filter" || getStateRecord(layerState, childRow.id).visible === false) {
+        return;
+      }
+      const conditions = normalizeFilterConditions(childRow);
+      if (conditions.length) {
+        const layerId = childRow.runtimeLayerId ?? childRow.layerId ?? childRow.id;
+        filters.push({
+          id: layerId,
+          field: conditions[0].field,
+          op: conditions[0].op,
+          value: conditions[0].value,
+          conditions,
+          combinator: childRow.filter?.combinator === "any" ? "any" : "all",
+          visible: true,
+          channels: {
+            fill: getFillChannel(layerState, layerId, null, "#2ecc71", 60),
+            line: getLineChannel(layerState, layerId, null, "#3498db", 90, 2),
+            point: getPointChannel(layerState, layerId, "#e74c3c", 80, 6),
+            pointLine: getPointLineChannel(layerState, layerId, "#ffffff", 100, 1),
+          },
+          channelOrder: ["fill", "line", "point"],
+        });
+      }
+      visit(childRow);
+    });
+  };
+  visit(parentRow);
+  return filters;
+}
+
 function buildDynamicPrintEntries(layerModel, layerState, dynamicLayerData = []) {
   const dataByLayerId = new Map(dynamicLayerData.map((entry) => [entry.layerId ?? entry.id, entry]));
   const dynamicRows = (layerModel.getOrderedChildRows?.(layerModel.getRootParentId?.()) ?? [])
@@ -286,10 +419,10 @@ function buildDynamicPrintEntries(layerModel, layerState, dynamicLayerData = [])
         fill: getFillChannel(layerState, layerId, null, source?.style?.fillColor ?? "#c85e50", source?.style?.fillOpacity ?? 65),
         line: getLineChannel(layerState, layerId, null, source?.style?.lineColor ?? "#000000", source?.style?.lineOpacity ?? 100, source?.style?.lineWeight ?? 1),
         point: getPointChannel(layerState, layerId, source?.style?.pointColor ?? "#e74c3c", source?.style?.pointOpacity ?? 80, source?.style?.pointRadius ?? 6),
-        pointLine: { color: "#ffffff", opacity: 100, width: 1, visible: true },
+        pointLine: getPointLineChannel(layerState, layerId, source?.style?.lineColor ?? "#ffffff", source?.style?.lineOpacity ?? 100, source?.style?.lineWeight ?? 1),
       },
       channelOrder: ["fill", "line", "point"],
-      filters: [],
+      filters: buildDynamicPrintFilters(layerModel, layerState, row),
     });
     printData.push({
       id: layerId,
@@ -347,6 +480,10 @@ function createPrintRendererAdapter() {
     sceneData = {
       landLow,
       landHigh,
+      landByDetail: {
+        low: landLow,
+        high: landHigh,
+      },
       graticules,
     };
     return sceneData;
@@ -389,6 +526,7 @@ function createPrintRendererAdapter() {
     const layerState = layerModel?.getState?.() ?? {};
     const appearance = layerModel?.getAppearanceState?.() ?? {};
     const dynamic = buildDynamicPrintEntries(layerModel, layerState, context.dynamicLayerData ?? []);
+    const land = getLandGeometryForState(data, layerState);
     return {
       projection: printState.projection,
       locked: printState.locked,
@@ -398,8 +536,8 @@ function createPrintRendererAdapter() {
       landFill: getFillChannel(layerState, "land", "land-fill", "#6EAA6E", 100),
       landLine: getLineChannel(layerState, "land", "land-line", "#000000", 100, 1),
       graticulesLine: getLineChannel(layerState, "graticules", "graticules-line", "#8FA9BC", 100, 1),
-      land: data.landHigh,
-      interactionLand: data.landLow,
+      land,
+      interactionLand: data.landLow ?? land,
       graticules: data.graticules,
       dynamicLayers: dynamic.dynamicLayers,
       dynamicLayersRevision: context.dynamicLayerRevision ?? dynamic.dynamicLayers.length,

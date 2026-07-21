@@ -788,7 +788,12 @@ const SINU_MOLLWEIDE_BASELINE = Object.freeze({
 });
 
 const PEIRCE_QUINCUNCIAL_BASELINE = Object.freeze({
-  rotate: [-115, -90, 45],
+  rotate: [20, -90, -45],
+});
+
+const WATERMAN_BASELINE = Object.freeze({
+  rotate: [20, 0, 0],
+  center: [0, 45],
 });
 
 function createAzimuthalDefinition({
@@ -1008,7 +1013,6 @@ const PROJECTION_DEFINITIONS = {
     name: "Peirce Quincuncial",
     factory: geoPeirceQuincuncial,
     baseline: PEIRCE_QUINCUNCIAL_BASELINE,
-    unlockedApplyProjectionState: applyFlatProjectionStateWithRotate,
     resetFrameStateOnUnlockTransfer: true,
   }),
   larrivee: createFlatDefinition({
@@ -1061,6 +1065,7 @@ const PROJECTION_DEFINITIONS = {
     id: "waterman",
     name: "Waterman Butterfly",
     factory: geoPolyhedralWaterman,
+    baseline: WATERMAN_BASELINE,
     resetFrameStateOnUnlockTransfer: true,
   }),
 };

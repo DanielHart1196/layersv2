@@ -45,8 +45,8 @@ export const LOCAL_LAYERS = [
     },
     defaultDetail: "low",
     detailLevels: [
-      { label: "Low", value: "low", url: "/data/world-atlas/ne_110m_land.geojson", lineUrl: "/data/world-atlas/ne_110m_coastline.geojson" },
-      { label: "High", value: "high", url: "/data/world-atlas/countries-dissolved-land.geojson", lineUrl: "/data/world-atlas/ne_10m_coastline.geojson" },
+      { label: "Low", value: "low", url: "/data/world-atlas/ne_110m_land.geojson", printUrl: "/data/world-atlas/land-110m.geojson", lineUrl: "/data/world-atlas/ne_110m_coastline.geojson" },
+      { label: "High", value: "high", url: "/data/world-atlas/countries-dissolved-land.geojson", printUrl: "/data/world-atlas/land-50m.geojson", lineUrl: "/data/world-atlas/ne_10m_coastline.geojson" },
     ],
     fill: { color: "#6EAA6E", opacity: 100 },
     line: {

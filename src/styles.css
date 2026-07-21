@@ -265,6 +265,18 @@ body.is-print-view-open .map-share-popup {
   z-index: 32;
 }
 
+body.is-print-view-open .map-title-shell {
+  z-index: 32;
+}
+
+body.is-print-view-open .layer-menu {
+  z-index: 33;
+}
+
+body.is-print-view-open .layer-menu.is-open {
+  z-index: 36;
+}
+
 .map-share-popup-title {
   margin: 0;
   color: #101820;
@@ -4392,33 +4404,6 @@ textarea.arp-field-input {
   pointer-events: auto;
 }
 
-.earthlab-debug-panel {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 20;
-  max-width: min(420px, calc(100vw - 16px));
-  background: rgba(255, 255, 255, 0.92);
-  color: #000000;
-  border-radius: var(--radius);
-  padding: 4px 6px;
-  font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  pointer-events: auto;
-  white-space: pre-wrap;
-}
-
-.earthlab-debug-panel summary {
-  cursor: pointer;
-  font-weight: 700;
-  user-select: none;
-}
-
-.earthlab-debug-pre {
-  margin: 6px 0 0;
-  max-height: 40dvh;
-  overflow: auto;
-}
-
 .earthlab-print-title-select,
 .earthlab-print-title-size,
 .earthlab-print-title-move {
@@ -4600,7 +4585,6 @@ textarea.arp-field-input {
   .earthlab-projection-controls,
   .earthlab-custom-controls,
   .earthlab-projection-dropdown,
-  .earthlab-debug-panel,
   .earthlab-print-title-toolbar {
     display: none !important;
   }

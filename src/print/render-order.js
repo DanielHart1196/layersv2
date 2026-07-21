@@ -1,8 +1,8 @@
 const DEFAULT_EARTH_RENDER_ORDER = [
+  "ocean.fill",
+  "land.fill",
   "graticules.line",
   "land.line",
-  "land.fill",
-  "ocean.fill",
 ];
 
 function normalizeRenderOrder(order = []) {

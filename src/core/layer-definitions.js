@@ -4,7 +4,7 @@ const ROOT_PARENT_ID = "__root__";
 const ROOT_ROW_IDS = ["earth"];
 const SHARED_COLOR_STORAGE_KEY = "layerv2.colors.customColors";
 const SHARED_COLOR_PRESETS = ["#000000", "#FFFFFF", "#d94b4b", "#e58a2b", "#e5c84a", "#5b8c5a", "#4b6ed9", "#8c5bd6"];
-const SETTINGS_BACKGROUND_STORAGE_KEY = "layerv2.colors.settingsBackground";
+const SCREEN_BACKGROUND_STORAGE_KEY = "layerv2.colors.screenBackground";
 
 function normalizeGeometryTypes(geometryTypes = [], geometryType = "mixed") {
   const source = Array.isArray(geometryTypes) && geometryTypes.length
@@ -332,7 +332,7 @@ function createLayerDefinitions() {
           id: "settings-background-fill",
           type: "fill",
           label: "Background",
-          storageKey: SETTINGS_BACKGROUND_STORAGE_KEY,
+          storageKey: SCREEN_BACKGROUND_STORAGE_KEY,
           presets: SHARED_COLOR_PRESETS,
           min: 0,
           max: 100,
@@ -341,11 +341,11 @@ function createLayerDefinitions() {
           defaultExpanded: true,
           initialState: {},
           colorTarget: {
-            kind: "settings-background",
+            kind: "screen-background",
             key: "color",
           },
           opacityTarget: {
-            kind: "settings-background",
+            kind: "screen-background",
             key: "opacity",
           },
         },

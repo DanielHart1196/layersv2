@@ -18,11 +18,53 @@ function geometryRecordFromFeatures(features) {
   };
 }
 
-function filterMatchingFeatures(features, field, value) {
-  return features.filter((f) => {
-    const props = f?.properties;
-    return props != null && String(props[field]) === String(value);
-  });
+function featureMatchesCondition(feature, condition) {
+  const props = feature?.properties;
+  if (!props || !condition?.field) {
+    return false;
+  }
+  const actual = props[condition.field];
+  const expected = condition.value;
+  const op = condition.op ?? "==";
+  if (op === "!=") {
+    return String(actual ?? "") !== String(expected ?? "");
+  }
+  if ([">", ">=", "<", "<="].includes(op)) {
+    const actualNumber = Number(actual);
+    const expectedNumber = Number(expected);
+    if (!Number.isFinite(actualNumber) || !Number.isFinite(expectedNumber)) {
+      return false;
+    }
+    if (op === ">") return actualNumber > expectedNumber;
+    if (op === ">=") return actualNumber >= expectedNumber;
+    if (op === "<") return actualNumber < expectedNumber;
+    return actualNumber <= expectedNumber;
+  }
+  return String(actual ?? "") === String(expected ?? "");
+}
+
+function getFilterConditions(filter) {
+  if (Array.isArray(filter?.conditions) && filter.conditions.length) {
+    return filter.conditions;
+  }
+  return filter?.field && filter.value != null
+    ? [{ field: filter.field, op: filter.op ?? "==", value: filter.value }]
+    : [];
+}
+
+function featureMatchesFilter(feature, filter) {
+  const conditions = getFilterConditions(filter);
+  if (!conditions.length) {
+    return false;
+  }
+  if (filter?.combinator === "any") {
+    return conditions.some((condition) => featureMatchesCondition(feature, condition));
+  }
+  return conditions.every((condition) => featureMatchesCondition(feature, condition));
+}
+
+function filterMatchingFeatures(features, filter) {
+  return features.filter((feature) => featureMatchesFilter(feature, filter));
 }
 
 function filterGeometryRecord(geometryRecord, excludedFeatures) {
@@ -68,14 +110,14 @@ export function buildDynamicDrawCommands(dynamicLayers, dynamicLayerData) {
 
     const allFeatures = dataRecord.geojson.features ?? [];
     const baseGeometry = dataRecord.geometry ?? geometryRecordFromFeatures(allFeatures);
-    const activeFilters = (entry.filters ?? []).filter((f) => f.visible !== false && f.field && f.value != null);
+    const activeFilters = (entry.filters ?? []).filter((f) => f.visible !== false && getFilterConditions(f).length);
     const excludedFeatures = new Set();
     if (activeFilters.length) {
       for (const feature of allFeatures) {
         const props = feature?.properties;
         if (!props) continue;
         for (const filter of activeFilters) {
-          if (String(props[filter.field]) === String(filter.value)) {
+          if (featureMatchesFilter(feature, filter)) {
             excludedFeatures.add(feature);
             break;
           }
@@ -92,8 +134,8 @@ export function buildDynamicDrawCommands(dynamicLayers, dynamicLayerData) {
     );
 
     for (const filter of [...(entry.filters ?? [])].reverse()) {
-      if (filter.visible === false || !filter.field || filter.value == null) continue;
-      const matchingFeatures = filterMatchingFeatures(allFeatures, filter.field, filter.value);
+      if (filter.visible === false || !getFilterConditions(filter).length) continue;
+      const matchingFeatures = filterMatchingFeatures(allFeatures, filter);
       if (!matchingFeatures.length) continue;
       appendDynamicLayerGroup(
         commands,

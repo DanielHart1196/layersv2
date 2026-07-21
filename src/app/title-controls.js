@@ -1,4 +1,4 @@
-function bindTitleControls({ viewModel }) {
+function bindTitleControls({ viewModel, onTitleChange = null }) {
   const titleEl = document.getElementById("mapTitle");
   const titleShell = document.getElementById("mapTitleShell");
   if (!titleEl || !viewModel) {
@@ -90,6 +90,7 @@ function bindTitleControls({ viewModel }) {
     }
     syncEmptyState();
     scheduleShellWidthSync();
+    onTitleChange?.(title);
   }
 
   syncFromModel();

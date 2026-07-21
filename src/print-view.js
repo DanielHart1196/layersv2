@@ -217,15 +217,7 @@ export function createPrintView({
     customAddDropdown.appendChild(createProjectionOption(id, name, "customAddProjId"));
   }
 
-  const debugPanel = document.createElement("details");
-  debugPanel.className = "earthlab-debug-panel";
-  const debugSummary = document.createElement("summary");
-  debugSummary.textContent = "Debug";
-  const debugPre = document.createElement("pre");
-  debugPre.className = "earthlab-debug-pre";
-  debugPanel.append(debugSummary, debugPre);
-
-  container.append(canvas, titleLayer, projectionDropdown, customAddDropdown, projectionBtn, projectionControls, customControls, undoBtn, debugPanel);
+  container.append(canvas, titleLayer, projectionDropdown, customAddDropdown, projectionBtn, projectionControls, customControls, undoBtn);
   mount.replaceChildren(container);
 
   const context = canvas.getContext("2d");
@@ -522,40 +514,9 @@ export function createPrintView({
     titleEditor.dataset.empty = String(titleEditor.textContent.trim() === "");
   }
 
-  function updateDebugPanel() {
-    const frame = getPrintPreviewFrame();
-    const metrics = getTitleMetrics(printTitle);
-    const shellRect = titleShell.getBoundingClientRect();
-    const wrapRect = titleEditorWrap.getBoundingClientRect();
-    const editorRect = titleEditor.getBoundingClientRect();
-    const clearRect = titleClearBtn.getBoundingClientRect();
-    const projectionRect = projectionBtn.getBoundingClientRect();
-    const lockRect = lockBtn.getBoundingClientRect();
-    const resetRect = resetBtn.getBoundingClientRect();
-    debugPre.textContent = [
-      `projection=${viewState.projection}`,
-      `locked=${viewState.locked}`,
-      `selected=${titleUiState.selected}`,
-      `canvas=${width}x${height}`,
-      `frame x=${frame.x.toFixed(1)} y=${frame.y.toFixed(1)} w=${frame.width.toFixed(1)} h=${frame.height.toFixed(1)}`,
-      `title x=${metrics.x.toFixed(1)} y=${metrics.y.toFixed(1)} maxWidth=${metrics.maxWidth.toFixed(1)}`,
-      `shell w=${shellRect.width.toFixed(1)} h=${shellRect.height.toFixed(1)}`,
-      `wrap w=${wrapRect.width.toFixed(1)} h=${wrapRect.height.toFixed(1)}`,
-      `editor w=${editorRect.width.toFixed(1)} h=${editorRect.height.toFixed(1)}`,
-      `clear x=${clearRect.x.toFixed(1)} y=${clearRect.y.toFixed(1)} w=${clearRect.width.toFixed(1)} opacity=${getComputedStyle(titleClearBtn).opacity}`,
-      `projectionBtn x=${projectionRect.x.toFixed(1)} y=${projectionRect.y.toFixed(1)} w=${projectionRect.width.toFixed(1)}`,
-      `lockBtn x=${lockRect.x.toFixed(1)} y=${lockRect.y.toFixed(1)} w=${lockRect.width.toFixed(1)}`,
-      `resetBtn x=${resetRect.x.toFixed(1)} y=${resetRect.y.toFixed(1)} w=${resetRect.width.toFixed(1)}`,
-      `title text len=${(printTitle.text ?? "").length}`,
-      `titleEditor text="${(titleEditor.textContent ?? "").replace(/\n/g, "\\n")}"`,
-      `camera=${JSON.stringify(getCamera())}`,
-    ].join("\n");
-  }
-
   function emitTitleChange(nextTitle, { commit = false } = {}) {
     printTitle = normalizeTitle(nextTitle);
     syncTitleOverlay();
-    updateDebugPanel();
     requestRender();
     onTitleChange?.(printTitle, { commit });
   }
@@ -591,7 +552,6 @@ export function createPrintView({
     titleFontSelect.value = metrics.title.fontFamily;
     titleSizeInput.value = String(Math.round(metrics.fontSizePx));
     updateToolbarVisibility();
-    updateDebugPanel();
   }
 
   function positionUndoButton() {
@@ -1776,14 +1736,12 @@ export function createPrintView({
       if (isCustomProjection(viewState.projection)) {
         renderCustom();
         invalidation.consume();
-        updateDebugPanel();
         perfTracker.recordDuration("renderFrameMs", performance.now() - started);
         perfTracker.publish();
         return;
       }
       renderStylePreview();
       invalidation.consume();
-      updateDebugPanel();
       perfTracker.recordDuration("renderFrameMs", performance.now() - started);
       perfTracker.publish();
       return;
@@ -1791,7 +1749,6 @@ export function createPrintView({
     if (getProjectionRenderMode(viewState.projection) === "worker") {
       renderFlat();
       invalidation.consume();
-      updateDebugPanel();
       perfTracker.recordDuration("renderFrameMs", performance.now() - started);
       perfTracker.publish();
       return;
@@ -1799,14 +1756,12 @@ export function createPrintView({
     if (isCustomProjection(viewState.projection)) {
       renderCustom();
       invalidation.consume();
-      updateDebugPanel();
       perfTracker.recordDuration("renderFrameMs", performance.now() - started);
       perfTracker.publish();
       return;
     }
     renderOrthographic();
     invalidation.consume();
-    updateDebugPanel();
     perfTracker.recordDuration("renderFrameMs", performance.now() - started);
     perfTracker.publish();
   }

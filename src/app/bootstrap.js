@@ -107,6 +107,17 @@ async function bootstrapApplication() {
   let mapStartupError = null;
 
   let rerenderLayerMenu = () => {};
+  let syncPrintRenderer = () => {};
+  let printSyncFrame = 0;
+  const requestPrintRendererSync = () => {
+    if (printSyncFrame) {
+      return;
+    }
+    printSyncFrame = window.requestAnimationFrame(() => {
+      printSyncFrame = 0;
+      syncPrintRenderer();
+    });
+  };
   const getLayerDatasets = async (layerId) => {
     const cached = supabaseLayerDataCache.get(layerId);
     if (Array.isArray(cached?.datasets) && cached.datasets.length) {
@@ -158,6 +169,7 @@ async function bootstrapApplication() {
       syncDynamicFilterTree(layerModel, screenRuntime, parentRow);
       screenRuntime.reapplyFullOrder?.();
       rerenderLayerMenu();
+      requestPrintRendererSync();
       return;
     }
 
@@ -230,6 +242,7 @@ async function bootstrapApplication() {
       syncDynamicFilterTree(layerModel, screenRuntime, result.parentRow);
       screenRuntime.reapplyFullOrder?.();
       rerenderLayerMenu();
+      requestPrintRendererSync();
       return;
     }
 
@@ -256,6 +269,7 @@ async function bootstrapApplication() {
     }
     syncDynamicFilterTree(layerModel, screenRuntime, updatedRow);
     rerenderLayerMenu();
+    requestPrintRendererSync();
   };
   const renameDataset = async ({ datasetId, name }) => {
     const { updateDatasetName } = await import("../sources/supabase/layer-loader.js");
@@ -280,6 +294,7 @@ async function bootstrapApplication() {
     }
     layerModel.renameDataRowByLayerRef(layerId, result.name);
     rerenderLayerMenu();
+    requestPrintRendererSync();
     return result;
   };
   const updateDatasetMetadata = async ({ datasetId, license, licenseUrl, attribution }) => {
@@ -374,6 +389,7 @@ async function bootstrapApplication() {
       },
     });
     rerenderLayerMenu();
+    requestPrintRendererSync();
     return {
       layerRef,
       rowId: added.id,
@@ -385,15 +401,39 @@ async function bootstrapApplication() {
   let createLayerPanelPromise = null;
   let filterPanelPromise = null;
   let addRowPanelPromise = null;
+  const handleLayerCreated = async ({ layerId, name, parentId, geometryTypes = [], geometryType, onProgress = null }) => {
+    try {
+      const result = await addDataRowAndAttach({
+        parentId: parentId ?? layerModel.getRootParentId(),
+        name,
+        layerRef: layerId,
+        geometryTypes,
+        geometryType,
+        layerModel,
+        screenRuntime,
+        onProgress,
+      });
+      if (result) {
+        rerenderLayerMenu();
+        requestPrintRendererSync();
+      }
+      return result;
+    } catch (err) {
+      console.error("Failed to load uploaded layer onto map.", err);
+      throw err;
+    }
+  };
   const getAddDataPanel = () => {
     if (!addDataPanelPromise) {
       addDataPanelPromise = import("./add-data-panel.js").then(({ mountAddDataPanel }) => mountAddDataPanel({
         getAppearanceState: () => layerModel.getAppearanceState(),
         getLayerDatasets,
+        onLayerCreated: handleLayerCreated,
         async onDataAdded({ layerId, datasetId, displayGeometryTypes = [] }) {
           const dataTablePanel = await getDataTablePanel();
           await dataTablePanel?.reloadLayerData?.({ layerId, datasetId });
           await reloadSupabaseLayer(layerId, layerModel, screenRuntime, { displayGeometryTypes });
+          requestPrintRendererSync();
         },
       }));
     }
@@ -432,24 +472,7 @@ async function bootstrapApplication() {
     if (!createLayerPanelPromise) {
       createLayerPanelPromise = import("./create-layer-panel.js").then(({ mountCreateLayerPanel }) => mountCreateLayerPanel({
         getAppearanceState: () => layerModel.getAppearanceState(),
-        onLayerCreated: async ({ layerId, name, parentId, geometryTypes = [], geometryType }) => {
-          try {
-            const result = await addDataRowAndAttach({
-              parentId: parentId ?? layerModel.getRootParentId(),
-              name,
-              layerRef: layerId,
-              geometryTypes,
-              geometryType,
-              layerModel,
-              screenRuntime,
-            });
-            if (result) rerenderLayerMenu();
-            return result;
-          } catch (err) {
-            console.error("Failed to load uploaded layer onto map.", err);
-            throw err;
-          }
-        },
+        onLayerCreated: handleLayerCreated,
         onLayerDeleted: async (layer) => {
           const layerId = String(layer?.id ?? "").trim();
           if (!SUPABASE_UUID.test(layerId)) {
@@ -467,6 +490,7 @@ async function bootstrapApplication() {
           });
           supabaseLayerDataCache.delete(layerId);
           rerenderLayerMenu();
+          requestPrintRendererSync();
         },
       }));
     }
@@ -492,6 +516,7 @@ async function bootstrapApplication() {
             throw new Error("Failed to create row.");
           }
           rerenderLayerMenu();
+          requestPrintRendererSync();
           return nextRow;
         },
       }));
@@ -518,6 +543,7 @@ async function bootstrapApplication() {
     onRowInput: (row, nextValue) => {
       if (row?.type === "reorder") {
         screenRuntime.reorderLayerGroup(row.parentId, nextValue);
+        requestPrintRendererSync();
         return;
       }
 
@@ -532,14 +558,17 @@ async function bootstrapApplication() {
             && !supabaseLayerDataCache.has(targetRow.layerRef)
           ) {
             void reloadSupabaseLayer(targetRow.layerRef, layerModel, screenRuntime)
+              .then(() => requestPrintRendererSync())
               .catch((error) => console.warn("Failed to load toggled layer.", error));
           }
+          requestPrintRendererSync();
           return;
         }
       }
 
       if (row?.target?.kind === "runtime-style") {
         screenRuntime.setLayerStyleValue(row.target.runtimeTargetId, row.target.key, nextValue);
+        requestPrintRendererSync();
         return;
       }
 
@@ -550,6 +579,7 @@ async function bootstrapApplication() {
 
       if (update.target?.kind === "earth-land-detail") {
         screenRuntime.setEarthLandDetail(update.value);
+        requestPrintRendererSync();
         return;
       }
 
@@ -558,16 +588,29 @@ async function bootstrapApplication() {
           ? row.options.find((option) => String(option.value) === String(update.value))
           : null;
         screenRuntime.setSourceChoice(update.target, selectedOption ?? { value: update.value });
+        requestPrintRendererSync();
         return;
       }
 
       if (update.target?.kind === "row-variable") {
         applyVariableDrivenFilterRows(layerModel, screenRuntime, row.variableId ?? update.key);
+        if (getScopedLayerPreset({ variableId: row?.variableId })) {
+          void reloadScopedLayerValue({
+            layerModel,
+            screenRuntime,
+            controlRow: row,
+            value: nextValue,
+          })
+            .then(() => requestPrintRendererSync())
+            .catch((error) => console.error("Failed to reload scoped layer value.", error));
+        }
+        requestPrintRendererSync();
         return;
       }
 
       // Skip map update if the row has been disabled.
       if (!layerModel.isRowVisible(row.id)) {
+        requestPrintRendererSync();
         return;
       }
 
@@ -578,6 +621,7 @@ async function bootstrapApplication() {
       if (styleOwnerLayerRef) {
         debouncedUpdateDefaultStyle(styleOwnerLayerRef, update.key, update.value);
       }
+      requestPrintRendererSync();
     },
     onRemoveRow: (rowId, parentId, row) => {
       const removed = layerModel.removeRow(rowId, parentId);
@@ -601,6 +645,7 @@ async function bootstrapApplication() {
         syncDynamicFilterTree(layerModel, screenRuntime, parentRow);
       });
       rerenderLayerMenu();
+      requestPrintRendererSync();
     },
     onDataAction: (row) => {
       if (!row?.layerRef || !SUPABASE_UUID.test(row.layerRef)) {
@@ -666,6 +711,7 @@ async function bootstrapApplication() {
         })
         .catch((error) => console.error("Failed to open filter panel.", error));
     },
+    onStateChange: requestPrintRendererSync,
   });
   const layerMenuControls = enableLayerMenuControls({
     wrapper: document.getElementById("layerMenu"),
@@ -711,6 +757,14 @@ async function bootstrapApplication() {
       style: cached?.layer?.default_style ?? null,
     }))
     .filter((entry) => entry.geojson?.features?.length);
+  const getPrintContext = () => ({
+    title: viewModel.getTitle?.() ?? viewModel.getState().title ?? document.title ?? "Layers",
+    layerModel,
+    dynamicLayerData: getPrintDynamicLayerData(),
+  });
+  syncPrintRenderer = () => {
+    printRenderer.sync(getPrintContext());
+  };
   bindShareControls({
     getPrintDynamicLayerData,
     layerModel,
@@ -718,7 +772,10 @@ async function bootstrapApplication() {
     screenRuntime,
     viewModel,
   });
-  bindTitleControls({ viewModel });
+  bindTitleControls({
+    viewModel,
+    onTitleChange: requestPrintRendererSync,
+  });
 
   const startMapRuntime = async () => {
     try {
@@ -946,6 +1003,21 @@ function createDeferredScreenRuntime() {
 }
 
 const SUPABASE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SCOPED_LAYER_PRESETS = [
+  {
+    id: "olympics-year",
+    match: /olympic/i,
+    controlLabel: "Year",
+    variableId: "olympicsYear",
+    field: "year",
+    defaultValue: "2024",
+    options: ["2024", "2020", "2016", "2012", "2008", "2004", "2000", "1996"]
+      .map((year) => ({ label: year, value: year })),
+    prefetchOrder: ["2020", "2016", "2012", "2008", "2004", "2000", "1996"],
+  },
+];
+const scopedLayerDataCache = new Map();
+const scopedLayerPrefetches = new Set();
 
 // Accumulate style changes per layer and flush after 1s of inactivity.
 const pendingStyleUpdates = new Map(); // layerRef → { ...style keys }
@@ -993,9 +1065,9 @@ async function loadLayerFieldValues(layerRef, fieldKey, context = {}) {
   }
 }
 
-async function loadLayerFromSupabaseLazy(layerId) {
+async function loadLayerFromSupabaseLazy(layerId, options = {}) {
   const { loadLayerFromSupabase } = await import("../sources/supabase/layer-loader.js");
-  return loadLayerFromSupabase(layerId);
+  return loadLayerFromSupabase(layerId, options);
 }
 
 async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
@@ -1006,7 +1078,16 @@ async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
   for (const { rowId, layerId } of supabaseLayers) {
     try {
       const row = layerModel.getRowById(rowId);
-      const loadedLayer = await loadLayerFromSupabaseLazy(layerId);
+      const scopedPreset = getScopedLayerPreset({ row });
+      const scopedControlRow = scopedPreset
+        ? layerModel.getChildRows(row?.id).find((childRow) => childRow?.variableId === scopedPreset.variableId)
+        : null;
+      const scopedValue = scopedControlRow
+        ? layerModel.getRowValue(scopedControlRow) ?? scopedPreset.defaultValue
+        : scopedPreset?.defaultValue;
+      const loadedLayer = scopedPreset
+        ? await loadScopedLayerValue(layerId, scopedPreset, scopedValue)
+        : await loadLayerFromSupabaseLazy(layerId);
       const { layer, geojson, tilesUrl, sourceLayerId } = loadedLayer;
       supabaseLayerDataCache.set(layerId, loadedLayer);
       const rowState = layerModel.getState()?.[rowId] ?? {};
@@ -1025,6 +1106,9 @@ async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
             sourceLayerId,
           },
         });
+        if (scopedPreset) {
+          void prefetchScopedLayerValues(layerId, scopedPreset, scopedValue);
+        }
       }
       if (row) {
         applyPersistedRowVisibility(layerModel, screenRuntime, row);
@@ -1747,18 +1831,156 @@ function syncDynamicFilterTree(layerModel, screenRuntime, parentRow) {
   syncChildDynamicFilterRows(layerModel, screenRuntime, parentRow);
 }
 
-async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [], geometryType, layerModel, screenRuntime }) {
+function getScopedLayerPreset({ layer = null, row = null, name = "", variableId = "" } = {}) {
+  const targetVariableId = String(variableId ?? "");
+  if (targetVariableId) {
+    return SCOPED_LAYER_PRESETS.find((preset) => preset.variableId === targetVariableId) ?? null;
+  }
+
+  return SCOPED_LAYER_PRESETS.find((preset) => (
+    [layer?.name, row?.label, name].some((value) => preset.match.test(String(value ?? "")))
+  )) ?? null;
+}
+
+function ensureScopedLayerPreset(layerModel, row, { layer = null, name = "" } = {}) {
+  const preset = getScopedLayerPreset({ layer, row, name });
+  if (!row?.id || !preset) {
+    return null;
+  }
+  if (layerModel.getChildRows(row.id).some((childRow) => childRow?.variableId === preset.variableId)) {
+    return null;
+  }
+
+  const result = layerModel.addVariableFilterPresetToLayer(row.id, {
+    controlRowId: `${row.id}-${preset.id}`,
+    label: preset.controlLabel,
+    variableId: preset.variableId,
+    options: preset.options,
+    initialValue: preset.defaultValue,
+    filterLabel: preset.controlLabel,
+    conditions: [{ field: preset.field, op: "==", valueRef: preset.variableId }],
+  });
+  return result ? { ...result, preset } : null;
+}
+
+function getScopedPropertyFilter(preset, value = preset?.defaultValue) {
+  return {
+    field: preset.field,
+    value: String(value || preset.defaultValue),
+  };
+}
+
+function getScopedLayerCacheKey(layerId, preset, value) {
+  return `${layerId}:${preset.id}:${String(value || preset.defaultValue)}`;
+}
+
+async function loadScopedLayerValue(layerId, preset, value = preset.defaultValue, { onProgress = null } = {}) {
+  const selectedValue = String(value || preset.defaultValue);
+  const cacheKey = getScopedLayerCacheKey(layerId, preset, selectedValue);
+  if (scopedLayerDataCache.has(cacheKey)) {
+    return scopedLayerDataCache.get(cacheKey);
+  }
+
+  const loadPromise = loadLayerFromSupabaseLazy(layerId, {
+    propertyFilter: getScopedPropertyFilter(preset, selectedValue),
+    onProgress,
+  });
+  scopedLayerDataCache.set(cacheKey, loadPromise);
+  try {
+    const loadedLayer = await loadPromise;
+    scopedLayerDataCache.set(cacheKey, loadedLayer);
+    return loadedLayer;
+  } catch (error) {
+    scopedLayerDataCache.delete(cacheKey);
+    throw error;
+  }
+}
+
+async function prefetchScopedLayerValues(layerId, preset, activeValue = preset.defaultValue) {
+  const values = (preset.prefetchOrder ?? preset.options?.map((option) => option.value) ?? [])
+    .map((value) => String(value))
+    .filter((value) => value && value !== String(activeValue));
+
+  for (const value of values) {
+    const cacheKey = getScopedLayerCacheKey(layerId, preset, value);
+    if (scopedLayerDataCache.has(cacheKey) || scopedLayerPrefetches.has(cacheKey)) {
+      continue;
+    }
+    scopedLayerPrefetches.add(cacheKey);
+    try {
+      await loadScopedLayerValue(layerId, preset, value);
+    } catch (error) {
+      console.warn(`Failed to prefetch ${preset.id} value "${value}".`, error);
+    } finally {
+      scopedLayerPrefetches.delete(cacheKey);
+    }
+  }
+}
+
+function getUnavailableLayerDataMessage(layerResult, { name = "" } = {}) {
+  const layerName = layerResult?.layer?.name || name || "This layer";
+  const warning = layerResult?.loadWarning;
+  if (warning?.code === "too_many_features_for_geojson") {
+    const count = Number(warning.details?.featureCount);
+    const max = Number(warning.details?.maxGeojsonFeatures);
+    const countText = Number.isFinite(count) ? count.toLocaleString() : "too many";
+    const maxText = Number.isFinite(max) ? max.toLocaleString() : "the current limit";
+    return `${layerName} was added to the catalog, but it cannot be drawn yet: it has ${countText} features and the current merged GeoJSON loader is capped at ${maxText}. Add a year-specific dataset or serve this layer as PMTiles.`;
+  }
+  if (warning?.message) {
+    return `${layerName} was added to the catalog, but it cannot be drawn yet: ${warning.message}`;
+  }
+  return `${layerName} was added to the catalog, but no map data source was returned. No GeoJSON or tile artifact was available to draw.`;
+}
+
+async function reloadScopedLayerValue({ layerModel, screenRuntime, controlRow, value }) {
+  const preset = getScopedLayerPreset({ variableId: controlRow?.variableId });
+  if (!preset) {
+    return false;
+  }
+  const parentRowId = layerModel.getState()?.[controlRow.id]?.parentRowId;
+  const parentRow = parentRowId ? layerModel.getRowById(parentRowId) : null;
+  if (!parentRow?.layerRef || !SUPABASE_UUID.test(parentRow.layerRef) || getScopedLayerPreset({ row: parentRow }) !== preset) {
+    return false;
+  }
+
+  const layerResult = await loadScopedLayerValue(parentRow.layerRef, preset, value);
+  supabaseLayerDataCache.set(parentRow.layerRef, layerResult);
+  screenRuntime.loadDynamicLayer({
+    layerId: parentRow.layerRef,
+    rowId: parentRow.id,
+    parentRowId: layerModel.getState()?.[parentRow.id]?.parentRowId ?? null,
+    childRows: parentRow.rows ?? [],
+    geojson: layerResult.geojson,
+    tilesUrl: layerResult.tilesUrl,
+    style: layerResult.layer?.default_style,
+    options: {
+      geometryTypes: parentRow.geometryTypes ?? layerResult.layer?.geometryTypes ?? [],
+      geometryType: parentRow.geometryType ?? layerResult.layer?.geometry_type ?? null,
+      sourceLayerId: layerResult.sourceLayerId,
+    },
+  });
+  syncDynamicFilterTree(layerModel, screenRuntime, parentRow);
+  void prefetchScopedLayerValues(parentRow.layerRef, preset, value);
+  return true;
+}
+
+async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [], geometryType, layerModel, screenRuntime, onProgress = null }) {
   const resolvedParentId = parentId ?? layerModel.getRootParentId();
+  const reportProgress = (pct, label) => onProgress?.(pct, label);
   const existingSupabaseLayer = SUPABASE_UUID.test(layerRef)
     ? layerModel.getSupabaseLayers().find((entry) => entry.layerId === layerRef)
     : null;
 
   if (existingSupabaseLayer) {
+    reportProgress(20, "Layer is already in the map");
     const existingRow = layerModel.getRowById(existingSupabaseLayer.rowId);
     if (!existingRow) {
       return null;
     }
+    const scopedPresetResult = ensureScopedLayerPreset(layerModel, existingRow, { name });
 
+    reportProgress(55, "Restoring layer visibility");
     const update = layerModel.setRowValue({
       target: {
         kind: "layer-style",
@@ -1772,21 +1994,36 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
     if (update?.runtimeTargetId) {
       screenRuntime.setLayerStyleValue(update.runtimeTargetId, update.key, update.value);
     }
+    if (scopedPresetResult) {
+      reportProgress(75, "Applying default filter controls");
+      syncDynamicFilterTree(layerModel, screenRuntime, layerModel.getRowById(existingRow.id) ?? existingRow);
+    }
 
+    reportProgress(100, "Layer already added");
     return { row: existingRow, duplicate: true };
   }
 
   if (!SUPABASE_UUID.test(layerRef)) {
+    reportProgress(35, "Creating local layer row");
     const added = layerModel.addDataRow(resolvedParentId, { name, layerRef, geometryTypes, geometryType });
     if (!added) {
       return null;
     }
+    reportProgress(100, "Layer added");
     return { row: added, duplicate: false };
   }
 
   let layerResult;
   try {
-    layerResult = await loadLayerFromSupabaseLazy(layerRef);
+    const scopedPreset = getScopedLayerPreset({ name });
+    reportProgress(10, "Loading layer metadata");
+    layerResult = scopedPreset
+      ? await loadScopedLayerValue(layerRef, scopedPreset, scopedPreset.defaultValue, {
+        onProgress: (pct, label) => reportProgress(pct, label),
+      })
+      : await loadLayerFromSupabaseLazy(layerRef, {
+        onProgress: (pct, label) => reportProgress(pct, label),
+      });
   } catch (err) {
     if (err?.code === "LAYER_NOT_FOUND") {
       return null;
@@ -1795,6 +2032,16 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
   }
   const { layer, geojson, tilesUrl, sourceLayerId, bounds } = layerResult;
   supabaseLayerDataCache.set(layerRef, layerResult);
+  if (!geojson && !tilesUrl) {
+    throw new Error(getUnavailableLayerDataMessage(layerResult, { name }));
+  }
+  const featureCount = Array.isArray(geojson?.features) ? geojson.features.length : null;
+  const sourceLabel = tilesUrl
+    ? "PMTiles"
+    : featureCount === null
+      ? "GeoJSON"
+      : `${featureCount.toLocaleString()} features`;
+  reportProgress(70, `Creating layer row (${sourceLabel})`);
   const added = layerModel.addDataRow(resolvedParentId, {
     name,
     layerRef,
@@ -1804,7 +2051,9 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
   if (!added) {
     return null;
   }
+  const scopedPresetResult = ensureScopedLayerPreset(layerModel, added, { layer, name });
   if (geojson || tilesUrl) {
+    reportProgress(82, "Attaching map source");
     screenRuntime.loadDynamicLayer({
       layerId: layerRef,
       rowId: added.id,
@@ -1819,6 +2068,12 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
         sourceLayerId,
       },
     });
+    if (scopedPresetResult) {
+      reportProgress(92, "Applying default filter controls");
+      syncDynamicFilterTree(layerModel, screenRuntime, layerModel.getRowById(added.id) ?? added);
+      reportProgress(96, "Layer added; warming related values");
+      void prefetchScopedLayerValues(layerRef, scopedPresetResult.preset, scopedPresetResult.preset.defaultValue);
+    }
   }
 
   const runtimeTargetId = getRowRuntimeTargetId(added);
@@ -1828,9 +2083,11 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
     screenRuntime.setLayerStyleValue(runtimeTargetId, "visible", visible);
   }
   if (Array.isArray(bounds)) {
+    reportProgress(98, "Fitting map to layer");
     screenRuntime.fitBounds(bounds);
   }
 
+  reportProgress(100, "Layer added to map");
   return { row: added, duplicate: false };
 }
 

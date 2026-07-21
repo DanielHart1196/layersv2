@@ -1927,6 +1927,10 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
     if (geojson || tilesUrl) {
       const sourceId = `dynamic-${layerId}`;
       if (map.getSource(sourceId)) {
+        const existingSource = map.getSource(sourceId);
+        if (geojson && existingSource && "setData" in existingSource) {
+          existingSource.setData(geojson);
+        }
         setDynamicLayerFeatureFilter(layerId, effectiveFeatureFilter);
         applyFullLayerOrder(map, layerState, getOrderedChildRowIds);
         return;

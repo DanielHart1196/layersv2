@@ -48,7 +48,8 @@ function hexToRgb(hex) {
 function getSettingsBackground(state) {
   const color = normalizeHexColor(state?.color, "#f8f8f8");
   const rgb = hexToRgb(color);
-  const alpha = Math.max(0, Math.min(100, Number(state?.opacity) || 0)) / 100;
+  const opacity = state?.opacity == null ? 100 : Number(state.opacity);
+  const alpha = Math.max(0, Math.min(100, Number.isFinite(opacity) ? opacity : 100)) / 100;
   return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
 }
 
@@ -191,10 +192,9 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
   function applyPanelBackground() {
     const inner = panel.querySelector(".clp-inner");
     if (!inner) return;
-    const settings = getAppearanceState?.()?.settings;
-    inner.style.backgroundColor = getSettingsBackground(settings);
-    inner.style.setProperty("--clp-settings-background", getSettingsBackground(settings));
-    inner.style.setProperty("--clp-preview-header-background", getPreviewHeaderBackground(settings));
+    inner.style.backgroundColor = getSettingsBackground(null);
+    inner.style.setProperty("--clp-settings-background", getSettingsBackground(null));
+    inner.style.setProperty("--clp-preview-header-background", getPreviewHeaderBackground(null));
   }
 
   function findSourceHeaderForDisplay(displayHeader) {

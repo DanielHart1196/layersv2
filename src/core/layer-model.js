@@ -692,6 +692,30 @@ function createLayerModel() {
     return !current;
   }
 
+  function clearLayerStyleOverrides(layerId) {
+    const record = layerState[layerId];
+    if (!record || typeof record !== "object") {
+      return;
+    }
+    [
+      "color",
+      "opacity",
+      "radius",
+      "weight",
+      "fillColor",
+      "fillOpacity",
+      "lineColor",
+      "lineOpacity",
+      "lineWeight",
+      "pointColor",
+      "pointOpacity",
+      "pointRadius",
+    ].forEach((key) => {
+      delete record[key];
+    });
+    persistLayerState();
+  }
+
   function reorderChildRow(parentId, rowId, targetRowId, placement = "before") {
     if (!getParentRows(parentId).length) {
       return null;
@@ -975,7 +999,12 @@ function createLayerModel() {
       return null;
     }
 
-    const uid = `${layerId}-dyn-${rowType}-${Date.now()}`;
+    const explicitId = String(config.id ?? "").trim();
+    const uid = explicitId || `${layerId}-dyn-${rowType}-${Date.now()}`;
+    const existingRow = rowDefinitionsById.get(uid);
+    if (existingRow) {
+      return structuredClone(existingRow);
+    }
     // Style targets must reference the actual map layer ID.
     // For Supabase-backed rows, the map uses layerRef (UUID); the model row uses its own uid.
     const mapLayerId = parentDef.layerRef ?? layerId;
@@ -1069,10 +1098,20 @@ function createLayerModel() {
         rows: filterRows,
       });
       newRow.kind = "filter";
+      const conditions = Array.isArray(config.conditions)
+        ? config.conditions
+          .map((condition) => ({
+            field: String(condition?.field ?? "").trim(),
+            op: condition?.op ?? "==",
+            value: condition?.value ?? "",
+          }))
+          .filter((condition) => condition.field)
+        : [];
       newRow.filter = {
         field: String(config.field ?? ""),
         op: config.op ?? "==",
         value: config.value ?? "",
+        ...(conditions.length ? { conditions, combinator: config.combinator === "any" ? "any" : "all" } : {}),
         parentLayerId: mapLayerId,
         sourceLayerId: config.sourceLayerId ?? (parentDef.filter?.sourceLayerId ?? parentDef.filter?.parentLayerId ?? mapLayerId),
       };
@@ -1164,7 +1203,20 @@ function createLayerModel() {
       return null;
     }
 
-    const uid = `${layerId}-dyn-variable-filter-${Date.now()}`;
+    if (!Array.isArray(parentDef.variableFilters)) {
+      parentDef.variableFilters = [];
+    }
+
+    const explicitId = String(config.id ?? "").trim();
+    const existingFilter = parentDef.variableFilters.find((filter) => (
+      (explicitId && String(filter?.id ?? "") === explicitId)
+      || (config.controlRowId && String(filter?.controlRowId ?? "") === String(config.controlRowId))
+    ));
+    if (existingFilter) {
+      return structuredClone(existingFilter);
+    }
+
+    const uid = explicitId || `${layerId}-dyn-variable-filter-${Date.now()}`;
     const variableFilter = {
       id: uid,
       label: config.label || "Variable filter",
@@ -1173,9 +1225,6 @@ function createLayerModel() {
       conditions,
     };
 
-    if (!Array.isArray(parentDef.variableFilters)) {
-      parentDef.variableFilters = [];
-    }
     parentDef.variableFilters.push(variableFilter);
     persistDynamicDefs();
     return structuredClone(variableFilter);
@@ -1202,13 +1251,23 @@ function createLayerModel() {
       return null;
     }
 
-    const controlRow = createVariableSelectRow({
-      id: config.controlRowId || `${layerId}-preset-variable-${variableId}`,
-      label: config.label || "Dropdown",
-      variableId,
-      options: Array.isArray(config.options) ? config.options : [],
-      initialValue: config.initialValue,
-    });
+    const controlRow = config.controlType === "slider"
+      ? createVariableSliderRow({
+        id: config.controlRowId || `${layerId}-preset-variable-${variableId}`,
+        label: config.label || "Slider",
+        variableId,
+        min: config.min,
+        max: config.max,
+        step: config.step ?? 1,
+        initialValue: config.initialValue,
+      })
+      : createVariableSelectRow({
+        id: config.controlRowId || `${layerId}-preset-variable-${variableId}`,
+        label: config.label || "Dropdown",
+        variableId,
+        options: Array.isArray(config.options) ? config.options : [],
+        initialValue: config.initialValue,
+      });
 
     if (parentDef.rows?.some((row) => row.id === controlRow.id)) {
       return null;
@@ -1262,11 +1321,27 @@ function createLayerModel() {
     const value = config.value ?? "";
     const op = config.op ?? row.filter.op ?? "==";
     row.label = config.name || `${field} ${op === "==" ? "=" : op} ${value === "" ? "Empty value" : value}`;
+    const conditions = Array.isArray(config.conditions)
+      ? config.conditions
+        .map((condition) => ({
+          field: String(condition?.field ?? "").trim(),
+          op: condition?.op ?? "==",
+          value: condition?.value ?? "",
+        }))
+        .filter((condition) => condition.field)
+      : [];
     row.filter = {
       ...row.filter,
       field,
       op,
       value,
+      ...(conditions.length ? {
+        conditions,
+        combinator: config.combinator === "any" ? "any" : "all",
+      } : {
+        conditions: undefined,
+        combinator: undefined,
+      }),
     };
     persistDynamicDefs();
     return structuredClone(row);
@@ -1544,6 +1619,7 @@ function createLayerModel() {
     addVariableFilterToLayer,
     addVariableFilterPresetToLayer,
     addRowToLayer,
+    clearLayerStyleOverrides,
     getChildRows,
     getDefinitions,
     getAppearanceState,

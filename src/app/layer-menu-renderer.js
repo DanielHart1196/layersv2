@@ -22,6 +22,7 @@ function formatRowValue(row, value) {
 const SETTINGS_BACKGROUND_PRESETS = ["#000000", "#FFFFFF", "#d94b4b", "#e58a2b", "#e5c84a", "#5b8c5a", "#4b6ed9", "#8c5bd6"];
 const SETTINGS_BACKGROUND_STORAGE_KEY = "layerv2.colors.settingsBackground";
 const SCREEN_BACKGROUND_STORAGE_KEY = "layerv2.colors.screenBackground";
+const SUPABASE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DEFAULT_SCREEN_BACKGROUND = {
   color: "#f8f8f8",
   opacity: 100,
@@ -1673,6 +1674,13 @@ function enableLayerRowLongPressDelete(rowElement, { row, parentId, onDelete }) 
   let startX = 0;
   let startY = 0;
   let suppressClick = false;
+  let activePointerId = null;
+  let openingPointerId = null;
+  let suppressPanelRelease = false;
+  let suppressNextPanelClick = false;
+  let releaseGuardHandler = null;
+  let releaseGuardTimer = null;
+  let suppressClickTimer = null;
 
   const clearTimer = () => {
     if (timer) {
@@ -1681,11 +1689,95 @@ function enableLayerRowLongPressDelete(rowElement, { row, parentId, onDelete }) 
     }
   };
 
+  const clearSuppressClick = () => {
+    suppressClick = false;
+    if (suppressClickTimer) {
+      window.clearTimeout(suppressClickTimer);
+      suppressClickTimer = null;
+    }
+  };
+
+  const suppressImmediateClick = () => {
+    suppressClick = true;
+    if (suppressClickTimer) {
+      window.clearTimeout(suppressClickTimer);
+    }
+    suppressClickTimer = window.setTimeout(() => {
+      suppressClick = false;
+      suppressClickTimer = null;
+    }, 450);
+  };
+
+  const finishPanelReleaseGuard = () => {
+    suppressPanelRelease = false;
+    suppressNextPanelClick = true;
+    if (releaseGuardHandler) {
+      document.removeEventListener("pointerup", releaseGuardHandler, true);
+      releaseGuardHandler = null;
+    }
+    if (releaseGuardTimer) {
+      window.clearTimeout(releaseGuardTimer);
+    }
+    releaseGuardTimer = window.setTimeout(() => {
+      suppressNextPanelClick = false;
+      document.querySelector(".layer-menu-delete-confirm")?.classList.remove("is-release-guarded");
+      releaseGuardTimer = null;
+    }, 350);
+  };
+
+  const clearPanelReleaseGuard = () => {
+    suppressPanelRelease = false;
+    suppressNextPanelClick = false;
+    if (releaseGuardHandler) {
+      document.removeEventListener("pointerup", releaseGuardHandler, true);
+      releaseGuardHandler = null;
+    }
+    if (releaseGuardTimer) {
+      window.clearTimeout(releaseGuardTimer);
+      releaseGuardTimer = null;
+    }
+    document.querySelector(".layer-menu-delete-confirm")?.classList.remove("is-release-guarded");
+  };
+
   const openDeleteConfirm = () => {
     clearTimer();
     navigator.vibrate?.(20);
-    suppressClick = true;
-    onDelete(parentId, row);
+    suppressImmediateClick();
+    suppressPanelRelease = true;
+    openingPointerId = activePointerId;
+    onDelete(parentId, row, { onDismiss: clearSuppressClick });
+    const confirmPanel = document.querySelector(".layer-menu-delete-confirm");
+    confirmPanel?.classList.add("is-release-guarded");
+    confirmPanel?.addEventListener("pointerup", (event) => {
+      if (!suppressPanelRelease || event.pointerId !== openingPointerId) {
+        return;
+      }
+      finishPanelReleaseGuard();
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+    confirmPanel?.addEventListener("click", (event) => {
+      if (!suppressNextPanelClick) {
+        return;
+      }
+      suppressNextPanelClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+    releaseGuardHandler = (event) => {
+      if (event.pointerId !== openingPointerId) {
+        return;
+      }
+      if (confirmPanel?.contains(event.target)) {
+        return;
+      }
+      finishPanelReleaseGuard();
+    };
+    document.addEventListener("pointerup", releaseGuardHandler, true);
+    if (releaseGuardTimer) {
+      window.clearTimeout(releaseGuardTimer);
+    }
+    releaseGuardTimer = window.setTimeout(clearPanelReleaseGuard, 450);
   };
 
   rowElement.addEventListener("pointerdown", (event) => {
@@ -1701,6 +1793,7 @@ function enableLayerRowLongPressDelete(rowElement, { row, parentId, onDelete }) 
     }
     startX = event.clientX;
     startY = event.clientY;
+    activePointerId = event.pointerId;
     clearTimer();
     timer = window.setTimeout(openDeleteConfirm, longPressDelayMs);
   });
@@ -1714,14 +1807,21 @@ function enableLayerRowLongPressDelete(rowElement, { row, parentId, onDelete }) 
       clearTimer();
     }
   });
-  rowElement.addEventListener("pointerup", clearTimer);
-  rowElement.addEventListener("pointercancel", clearTimer);
+  rowElement.addEventListener("pointerup", () => {
+    clearTimer();
+    activePointerId = null;
+  });
+  rowElement.addEventListener("pointercancel", () => {
+    clearTimer();
+    clearSuppressClick();
+    activePointerId = null;
+  });
   rowElement.addEventListener("contextmenu", (event) => event.preventDefault());
   rowElement.addEventListener("click", (event) => {
     if (!suppressClick) {
       return;
     }
-    suppressClick = false;
+    clearSuppressClick();
     event.preventDefault();
     event.stopPropagation();
   }, true);
@@ -2705,9 +2805,110 @@ function createAddButton(depth, parentId, onAddRow) {
   return btn;
 }
 
-function createDeleteConfirmPanel(row, anchor, onCancel, onConfirm) {
+function createDeleteConfirmPanel(row, anchor, onCancel, onConfirm, { renameActions = null, defaultsActions = null } = {}) {
   const panel = document.createElement("div");
   panel.className = "layer-menu-delete-confirm";
+  panel.addEventListener("pointerdown", (event) => {
+    event.stopPropagation();
+  });
+  panel.addEventListener("pointerup", (event) => {
+    event.stopPropagation();
+  });
+  panel.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  if (renameActions?.onSave) {
+    const rename = document.createElement("div");
+    rename.className = "layer-menu-rename-actions";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "layer-menu-rename-input";
+    input.value = String(row?.label ?? row?.name ?? "");
+    input.setAttribute("aria-label", "Layer name");
+    input.autocomplete = "off";
+    input.spellcheck = false;
+
+    const buttons = document.createElement("div");
+    buttons.className = "layer-menu-rename-buttons";
+    const status = document.createElement("div");
+    status.className = "layer-menu-rename-status";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+
+    const setStatus = (message, kind = "") => {
+      status.textContent = message;
+      status.hidden = !message;
+      status.classList.toggle("is-error", kind === "error");
+      status.classList.toggle("is-success", kind === "success");
+    };
+    setStatus("");
+
+    const cancelRename = document.createElement("button");
+    cancelRename.type = "button";
+    cancelRename.className = "layer-menu-rename-cancel";
+    cancelRename.textContent = "Cancel";
+    cancelRename.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onCancel();
+    });
+
+    const saveRename = document.createElement("button");
+    saveRename.type = "button";
+    saveRename.className = "layer-menu-rename-save";
+    saveRename.textContent = "Save";
+
+    const runRename = async () => {
+      const nextName = input.value.trim();
+      if (!nextName) {
+        setStatus("Layer name cannot be empty.", "error");
+        return;
+      }
+      const currentName = String(row?.label ?? row?.name ?? "").trim();
+      if (nextName === currentName) {
+        setStatus("No name changes to save.");
+        return;
+      }
+      input.disabled = true;
+      cancelRename.disabled = true;
+      saveRename.disabled = true;
+      setStatus("Saving name...");
+      try {
+        await renameActions.onSave(row, nextName);
+        row.label = nextName;
+        setStatus("Layer name saved.", "success");
+      } catch (error) {
+        setStatus(error?.message ?? "Rename failed.", "error");
+      } finally {
+        input.disabled = false;
+        cancelRename.disabled = false;
+        saveRename.disabled = false;
+      }
+    };
+
+    saveRename.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void runRename();
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        void runRename();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        input.value = String(row?.label ?? row?.name ?? "");
+        setStatus("");
+      }
+    });
+
+    buttons.append(cancelRename, saveRename);
+    rename.append(input, buttons, status);
+    panel.append(rename);
+  }
 
   const label = document.createElement("span");
   label.className = "layer-menu-delete-confirm-label";
@@ -2736,20 +2937,76 @@ function createDeleteConfirmPanel(row, anchor, onCancel, onConfirm) {
 
   actions.append(cancel, confirm);
   panel.append(label, actions);
+
+  if (defaultsActions?.onReset || defaultsActions?.onApply) {
+    const defaults = document.createElement("div");
+    defaults.className = "layer-menu-defaults-actions";
+    const defaultsLabel = document.createElement("span");
+    defaultsLabel.className = "layer-menu-defaults-label";
+    defaultsLabel.textContent = "Layer defaults";
+    const buttons = document.createElement("div");
+    buttons.className = "layer-menu-defaults-buttons";
+    const status = document.createElement("div");
+    status.className = "layer-menu-defaults-status";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+
+    const setStatus = (message, kind = "") => {
+      status.textContent = message;
+      status.hidden = !message;
+      status.classList.toggle("is-error", kind === "error");
+      status.classList.toggle("is-success", kind === "success");
+    };
+    setStatus("");
+
+    const runDefaultsAction = async (action, pendingLabel, successLabel) => {
+      if (!action) {
+        return;
+      }
+      reset.disabled = true;
+      apply.disabled = true;
+      setStatus(pendingLabel);
+      try {
+        await action(row);
+        setStatus(successLabel, "success");
+      } catch (error) {
+        setStatus(error?.message ?? "Action failed.", "error");
+      } finally {
+        reset.disabled = !defaultsActions.onReset;
+        apply.disabled = !defaultsActions.onApply;
+      }
+    };
+
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.className = "layer-menu-defaults-reset";
+    reset.textContent = "Reset";
+    reset.disabled = !defaultsActions.onReset;
+    reset.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void runDefaultsAction(defaultsActions.onReset, "Resetting defaults...", "Reset to saved defaults.");
+    });
+
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "layer-menu-defaults-apply";
+    apply.textContent = "Apply";
+    apply.disabled = !defaultsActions.onApply;
+    apply.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void runDefaultsAction(defaultsActions.onApply, "Saving defaults...", "Saved as layer defaults.");
+    });
+
+    buttons.append(reset, apply);
+    defaults.append(defaultsLabel, buttons, status);
+    panel.append(defaults);
+  }
   document.body.append(panel);
 
-  const anchorRect = anchor?.getBoundingClientRect?.() ?? null;
   const panelRect = panel.getBoundingClientRect();
   const viewportMargin = 12;
-  const top = anchorRect
-    ? Math.max(viewportMargin, anchorRect.top - panelRect.height - 8)
-    : viewportMargin;
-  const left = anchorRect
-    ? Math.min(
-      window.innerWidth - panelRect.width - viewportMargin,
-      Math.max(viewportMargin, anchorRect.left + (anchorRect.width - panelRect.width) / 2),
-    )
-    : viewportMargin;
+  const top = Math.max(viewportMargin, (window.innerHeight - panelRect.height) / 2);
+  const left = Math.max(viewportMargin, (window.innerWidth - panelRect.width) / 2);
   panel.style.top = `${top}px`;
   panel.style.left = `${left}px`;
 
@@ -3063,6 +3320,9 @@ function renderLayerMenuRows({
   onDataAction,
   onFilterAction,
   onEditFilterAction,
+  onRenameLayer,
+  onApplyLayerDefaults,
+  onResetLayerDefaults,
   onStateChange,
 }) {
   if (!panel || !layerModel) {
@@ -3085,6 +3345,7 @@ function renderLayerMenuRows({
 
   function dismissDeleteConfirmPanel() {
     removeDeleteConfirmOutsideHandler();
+    deleteConfirmPanel?.__layerMenuOnDismiss?.();
     deleteConfirmPanel?.remove();
     deleteConfirmPanel = null;
   }
@@ -3104,6 +3365,7 @@ function renderLayerMenuRows({
         dismissDeleteConfirmPanel();
         onRemoveRow(rowId, parentId, row);
       },
+      {},
     );
     deleteConfirmOutsideHandler = (event) => {
       if (deleteConfirmPanel?.contains(event.target)) {
@@ -3135,6 +3397,7 @@ function renderLayerMenuRows({
         dismissDeleteConfirmPanel();
         onRemoveRow(row.id, parentId, row);
       },
+      {},
     );
     deleteConfirmOutsideHandler = (event) => {
       if (deleteConfirmPanel?.contains(event.target)) {
@@ -3149,7 +3412,7 @@ function renderLayerMenuRows({
     }, 0);
   }
 
-  function showLayerDeleteConfirm(parentId, row) {
+  function showLayerDeleteConfirm(parentId, row, options = {}) {
     if (!row || !onRemoveRow) {
       return;
     }
@@ -3166,7 +3429,27 @@ function renderLayerMenuRows({
         dismissDeleteConfirmPanel();
         onRemoveRow(row.id, parentId, row);
       },
+      SUPABASE_UUID.test(row?.layerRef ?? "") ? {
+        renameActions: {
+          onSave: onRenameLayer
+            ? (_row, name) => onRenameLayer({ layerId: row.layerRef, name })
+            : null,
+        },
+        defaultsActions: {
+          onReset: onResetLayerDefaults
+            ? () => {
+              return onResetLayerDefaults(row);
+            }
+            : null,
+          onApply: onApplyLayerDefaults
+            ? () => {
+              return onApplyLayerDefaults(row);
+            }
+            : null,
+        },
+      } : {},
     );
+    deleteConfirmPanel.__layerMenuOnDismiss = typeof options.onDismiss === "function" ? options.onDismiss : null;
     deleteConfirmOutsideHandler = (event) => {
       if (deleteConfirmPanel?.contains(event.target)) {
         return;

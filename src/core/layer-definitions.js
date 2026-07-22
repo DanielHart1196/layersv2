@@ -35,6 +35,7 @@ function createDataRow({
   layerId,
   rows = [],
   hidden = false,
+  defaultVisible = true,
   defaultExpanded = false,
   pinnedOrder = null,
   layerRef = null,
@@ -54,6 +55,7 @@ function createDataRow({
     geometryTypes: resolvedGeometryTypes,
     geometryType: collapseGeometryTypes(resolvedGeometryTypes),
     hidden,
+    defaultVisible,
     defaultExpanded,
     ...(pinnedOrder ? { pinnedOrder } : {}),
     rows,
@@ -284,6 +286,7 @@ function localLayerToRow(entry) {
     layerId: entry.id,
     geometryType: entry.fill ? "polygon" : "line",
     hidden: entry.defaultVisible === false,
+    defaultVisible: entry.defaultVisible !== false,
     rows: [
       ...(entry.detailLevels ? [createChoiceSliderRow({
         id: `${entry.id}-detail`,

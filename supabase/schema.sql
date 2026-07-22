@@ -38,6 +38,9 @@ create table layers (
     "radius": 6
   }',
 
+  -- Shared row/filter/defaults contract applied when the layer is added.
+  default_view      jsonb       not null default '{}',
+
   -- Denormalized summary fields for layer-level UI/runtime decisions.
   feature_count     int         not null default 0,
 

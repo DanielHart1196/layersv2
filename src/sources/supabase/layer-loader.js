@@ -11,6 +11,9 @@ const DEFAULT_PMTILES_SOURCE_LAYER = "layer";
 const FIELD_VALUE_PAGE_SIZE = 500;
 const CLIENT_FIELD_SCAN_LIMIT = 5000;
 const CLIENT_VALUE_SCAN_LIMIT = 10000;
+const LAYER_RESULT_CACHE_DB = "layersv2.supabaseLayerResults";
+const LAYER_RESULT_CACHE_STORE = "layerResults";
+const LAYER_RESULT_CACHE_VERSION = 1;
 let catalogCache = null;
 let catalogRequest = null;
 
@@ -713,6 +716,163 @@ function createLayerLoadWarning(code, message, details = {}) {
   };
 }
 
+function isMissingColumnError(error) {
+  const message = String(error?.message ?? "").toLowerCase();
+  return error?.code === "42703"
+    || error?.code === "PGRST204"
+    || message.includes("does not exist")
+    || message.includes("could not find")
+    || message.includes("schema cache");
+}
+
+function getLayerResultCacheKey(layerId, propertyFilter = null) {
+  return `${String(layerId ?? "")}:${JSON.stringify(propertyFilter ?? null)}`;
+}
+
+function openLayerResultCache() {
+  if (typeof indexedDB === "undefined") {
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve) => {
+    const request = indexedDB.open(LAYER_RESULT_CACHE_DB, LAYER_RESULT_CACHE_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(LAYER_RESULT_CACHE_STORE)) {
+        db.createObjectStore(LAYER_RESULT_CACHE_STORE, { keyPath: "cacheKey" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+    request.onblocked = () => resolve(null);
+  });
+}
+
+async function readLayerResultCacheRecord(layerId, propertyFilter = null) {
+  const db = await openLayerResultCache();
+  if (!db) {
+    return null;
+  }
+  return new Promise((resolve) => {
+    const transaction = db.transaction(LAYER_RESULT_CACHE_STORE, "readonly");
+    const store = transaction.objectStore(LAYER_RESULT_CACHE_STORE);
+    const request = store.get(getLayerResultCacheKey(layerId, propertyFilter));
+    request.onsuccess = () => resolve(request.result ?? null);
+    request.onerror = () => resolve(null);
+    transaction.oncomplete = () => db.close();
+    transaction.onerror = () => db.close();
+  });
+}
+
+async function writeLayerResultCacheRecord(layerId, propertyFilter, layerResult) {
+  const db = await openLayerResultCache();
+  if (!db || !layerResult || typeof layerResult !== "object") {
+    return;
+  }
+  const cacheKey = getLayerResultCacheKey(layerId, propertyFilter);
+  const record = {
+    cacheKey,
+    layerId,
+    propertyFilter: propertyFilter ?? null,
+    cachedAt: Date.now(),
+    layerResult,
+  };
+  await new Promise((resolve) => {
+    const transaction = db.transaction(LAYER_RESULT_CACHE_STORE, "readwrite");
+    const store = transaction.objectStore(LAYER_RESULT_CACHE_STORE);
+    store.put(record);
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => {
+      db.close();
+      resolve();
+    };
+  });
+}
+
+export async function getCachedLayerResult(layerId, propertyFilter = null) {
+  const record = await readLayerResultCacheRecord(layerId, propertyFilter);
+  return record?.layerResult && typeof record.layerResult === "object"
+    ? record.layerResult
+    : null;
+}
+
+export async function clearCachedLayerResults(layerId) {
+  const db = await openLayerResultCache();
+  if (!db || !layerId) {
+    return;
+  }
+  await new Promise((resolve) => {
+    const transaction = db.transaction(LAYER_RESULT_CACHE_STORE, "readwrite");
+    const store = transaction.objectStore(LAYER_RESULT_CACHE_STORE);
+    const prefix = `${String(layerId)}:`;
+    const request = store.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        return;
+      }
+      if (String(cursor.key).startsWith(prefix)) {
+        cursor.delete();
+      }
+      cursor.continue();
+    };
+    transaction.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    transaction.onerror = () => {
+      db.close();
+      resolve();
+    };
+  });
+}
+
+export async function getLayerDefaultView(layerId) {
+  const supabase = requireSupabase();
+  if (!layerId) {
+    return {};
+  }
+  const { data, error } = await supabase
+    .from("layers")
+    .select("default_view")
+    .eq("id", layerId)
+    .single();
+
+  if (error) {
+    if (isMissingColumnError(error)) {
+      return {};
+    }
+    throw new Error(`Failed to load layer defaults: ${error.message}`);
+  }
+
+  return data?.default_view && typeof data.default_view === "object" ? data.default_view : {};
+}
+
+export async function updateLayerDefaultView(layerId, defaultView = {}) {
+  const supabase = requireSupabase();
+  if (!layerId) {
+    throw new Error("Layer is required.");
+  }
+  const nextDefaultView = defaultView && typeof defaultView === "object" && !Array.isArray(defaultView)
+    ? defaultView
+    : {};
+
+  const { error } = await supabase
+    .from("layers")
+    .update({ default_view: nextDefaultView })
+    .eq("id", layerId);
+
+  if (error) {
+    if (isMissingColumnError(error)) {
+      throw new Error("Layer defaults are not configured yet. Run the default_view migration in Supabase.");
+    }
+    throw new Error(`Failed to save layer defaults: ${error.message}`);
+  }
+}
+
 async function loadGeojsonArtifact(url) {
   const response = await fetch(url);
   if (!response.ok) {
@@ -735,11 +895,64 @@ function featureFromRow(row, datasetById) {
   };
 }
 
+function buildPropertyFilterExpression(filter) {
+  if (Array.isArray(filter?.expression)) {
+    return filter.expression;
+  }
+
+  const conditions = Array.isArray(filter?.conditions)
+    ? filter.conditions
+      .map((condition) => ({
+        field: String(condition?.field ?? "").trim(),
+        op: condition?.op ?? "==",
+        value: condition?.value,
+      }))
+      .filter((condition) => condition.field)
+    : [];
+
+  if (conditions.length) {
+    const expressions = conditions.map((condition) => {
+      if ([">", ">=", "<", "<="].includes(condition.op)) {
+        return [
+          condition.op,
+          ["to-number", ["coalesce", ["get", condition.field], 0]],
+          Number(condition.value) || 0,
+        ];
+      }
+      if (condition.op === "!=") {
+        return [
+          "!=",
+          ["to-string", ["coalesce", ["get", condition.field], ""]],
+          condition.value == null ? "" : String(condition.value),
+        ];
+      }
+      return [
+        "==",
+        ["to-string", ["coalesce", ["get", condition.field], ""]],
+        condition.value == null ? "" : String(condition.value),
+      ];
+    });
+    const combinator = filter?.combinator === "any" ? "any" : "all";
+    return expressions.length === 1 ? expressions[0] : [combinator, ...expressions];
+  }
+
+  const field = String(filter?.field ?? "").trim();
+  if (!field || filter?.value === undefined || filter?.value === null) {
+    return null;
+  }
+  return [
+    "==",
+    ["to-string", ["coalesce", ["get", field], ""]],
+    String(filter.value),
+  ];
+}
+
 async function loadFilteredLayerGeojson(supabase, datasets, filter, { onProgress = null } = {}) {
   const field = String(filter?.field ?? "").trim();
   const value = filter?.value;
+  const expression = buildPropertyFilterExpression(filter);
   const datasetIds = datasets.map((dataset) => dataset.id).filter(Boolean);
-  if (!field || value === undefined || value === null || !datasetIds.length) {
+  if (!expression || !datasetIds.length) {
     return null;
   }
 
@@ -747,25 +960,42 @@ async function loadFilteredLayerGeojson(supabase, datasets, filter, { onProgress
   const pageSize = 1000;
   const features = [];
   let offset = 0;
-  onProgress?.(35, `Loading scoped features for ${field} = ${value}`);
+  const canUseServerExactMatch = field && value !== undefined && value !== null && !Array.isArray(filter?.conditions);
+  onProgress?.(35, canUseServerExactMatch
+    ? `Loading scoped features for ${field} = ${value}`
+    : "Loading scoped features");
 
   while (features.length <= FILTERED_GEOJSON_FEATURES_MAX) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("features")
       .select("id, dataset_id, geometry, properties")
       .in("dataset_id", datasetIds)
-      .filter(`properties->>${field}`, "eq", String(value))
       .order("dataset_id", { ascending: true })
       .order("created_at", { ascending: true })
-      .order("id", { ascending: true })
-      .range(offset, offset + pageSize - 1);
+      .order("id", { ascending: true });
+
+    if (canUseServerExactMatch) {
+      query = query.filter(`properties->>${field}`, "eq", String(value));
+    }
+
+    const { data, error } = await query.range(offset, offset + pageSize - 1);
 
     if (error) {
       throw new Error(`Failed to load filtered features: ${error.message}`);
     }
 
     const rows = Array.isArray(data) ? data : [];
-    features.push(...rows.map((row) => featureFromRow(row, datasetById)).filter((feature) => feature.geometry));
+    const matchingRows = canUseServerExactMatch
+      ? rows
+      : rows.filter((row) => {
+        const dataset = datasetById.get(row?.dataset_id) ?? null;
+        return evaluatePropertyExpression(expression, {
+          ...(row?.properties && typeof row.properties === "object" ? row.properties : {}),
+          _dataset_id: row?.dataset_id ?? "",
+          _dataset_name: dataset?.name ?? "",
+        });
+      });
+    features.push(...matchingRows.map((row) => featureFromRow(row, datasetById)).filter((feature) => feature.geometry));
     onProgress?.(45, `Loaded ${features.length.toLocaleString()} scoped features`);
     if (rows.length < pageSize) {
       return {
@@ -777,6 +1007,11 @@ async function loadFilteredLayerGeojson(supabase, datasets, filter, { onProgress
   }
 
   throw new Error(`Filtered layer still has more than ${FILTERED_GEOJSON_FEATURES_MAX.toLocaleString()} features. Choose a narrower filter or use PMTiles.`);
+}
+
+function cacheAndReturnLayerResult(layerId, propertyFilter, layerResult) {
+  void writeLayerResultCacheRecord(layerId, propertyFilter, layerResult);
+  return layerResult;
 }
 
 export async function loadLayerFromSupabase(layerId, { propertyFilter = null, onProgress = null } = {}) {
@@ -797,28 +1032,31 @@ export async function loadLayerFromSupabase(layerId, { propertyFilter = null, on
   }
 
   onProgress?.(28, "Loading datasets");
+  const defaultView = await getLayerDefaultView(layerId);
   const datasets = await loadLayerDatasets(layerId);
   onProgress?.(32, `Found ${datasets.length.toLocaleString()} datasets`);
   const filteredGeojson = await loadFilteredLayerGeojson(supabase, datasets, propertyFilter, { onProgress });
   if (filteredGeojson) {
     onProgress?.(62, `Loaded ${filteredGeojson.features.length.toLocaleString()} scoped features`);
-    return {
+    return cacheAndReturnLayerResult(layerId, propertyFilter, {
       layer: {
         ...layer,
+        default_view: defaultView,
         geometryTypes: normalizeGeometryTypes(layer.geometry_types, layer.geometry_type ?? "mixed"),
       },
       datasets,
       geojson: filteredGeojson,
       tilesUrl: null,
       filterScope: propertyFilter,
-    };
+    });
   }
 
   if (isBordersLayer(layer)) {
     onProgress?.(58, "Using local border tiles");
-    return {
+    return cacheAndReturnLayerResult(layerId, propertyFilter, {
       layer: {
         ...layer,
+        default_view: defaultView,
         geometry_types: ["line"],
         geometry_type: "line",
         geometryTypes: ["line"],
@@ -827,16 +1065,17 @@ export async function loadLayerFromSupabase(layerId, { propertyFilter = null, on
       geojson: null,
       tilesUrl: LOCAL_BORDERS_PMTILES_URL,
       sourceLayerId: DEFAULT_PMTILES_SOURCE_LAYER,
-    };
+    });
   }
 
   if (datasets.length === 1) {
     const [dataset] = datasets;
     if (dataset?.render_format === "pmtiles" && dataset?.artifact_url) {
       onProgress?.(58, "Using PMTiles artifact");
-      return {
+      return cacheAndReturnLayerResult(layerId, propertyFilter, {
         layer: {
           ...layer,
+          default_view: defaultView,
           geometry_types: dataset.geometry_types ?? layer.geometry_types,
           geometry_type: dataset.geometry_type ?? layer.geometry_type,
           geometryTypes: normalizeGeometryTypes(dataset.geometry_types, dataset.geometry_type ?? layer.geometry_type ?? "mixed"),
@@ -846,22 +1085,23 @@ export async function loadLayerFromSupabase(layerId, { propertyFilter = null, on
         tilesUrl: dataset.artifact_url,
         sourceLayerId: dataset.source_layer ?? DEFAULT_PMTILES_SOURCE_LAYER,
         bounds: Array.isArray(dataset.bounds) ? dataset.bounds : null,
-      };
+      });
     }
 
     if (dataset?.render_format === "geojson" && dataset?.artifact_url) {
       onProgress?.(45, "Fetching GeoJSON artifact");
       const geojson = await loadGeojsonArtifact(dataset.artifact_url);
       onProgress?.(62, `Loaded ${(geojson?.features?.length ?? 0).toLocaleString()} features`);
-      return {
+      return cacheAndReturnLayerResult(layerId, propertyFilter, {
         layer: {
           ...layer,
+          default_view: defaultView,
           geometryTypes: normalizeGeometryTypes(layer.geometry_types, layer.geometry_type ?? "mixed"),
         },
         datasets,
         geojson,
         tilesUrl: null,
-      };
+      });
     }
   }
 
@@ -881,16 +1121,17 @@ export async function loadLayerFromSupabase(layerId, { propertyFilter = null, on
       },
     );
     console.warn(`${loadWarning.message} Re-upload with tile generation enabled or load a smaller filtered dataset.`);
-    return {
+    return cacheAndReturnLayerResult(layerId, propertyFilter, {
       layer: {
         ...layer,
+        default_view: defaultView,
         geometryTypes: normalizeGeometryTypes(layer.geometry_types, layer.geometry_type ?? "mixed"),
       },
       datasets,
       geojson: null,
       tilesUrl: null,
       loadWarning,
-    };
+    });
   }
 
   onProgress?.(45, "Loading merged GeoJSON");
@@ -898,13 +1139,14 @@ export async function loadLayerFromSupabase(layerId, { propertyFilter = null, on
   if (geojsonError) throw new Error(`Failed to load features: ${geojsonError.message}`);
   onProgress?.(62, `Loaded ${(geojson?.features?.length ?? 0).toLocaleString()} features`);
 
-  return {
+  return cacheAndReturnLayerResult(layerId, propertyFilter, {
     layer: {
       ...layer,
+      default_view: defaultView,
       geometryTypes: normalizeGeometryTypes(layer.geometry_types, layer.geometry_type ?? "mixed"),
     },
     datasets,
     geojson,
     tilesUrl: null,
-  };
+  });
 }

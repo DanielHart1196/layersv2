@@ -151,6 +151,13 @@ function createDefaultState(overrides = {}) {
     valuesLoading: false,
     value: "",
     filterOperator: "==",
+    secondConditionEnabled: false,
+    secondColumnName: "",
+    secondValues: [],
+    secondValuesLoading: false,
+    secondValue: "",
+    secondFilterOperator: "==",
+    conditionCombinator: "all",
     filterMode: "fixed",
     variableControlType: "slider",
     variableLabel: "Year",
@@ -164,6 +171,17 @@ function createDefaultState(overrides = {}) {
     error: "",
     ...overrides,
   };
+}
+
+function normalizeEditConditions(filter = null) {
+  const conditions = Array.isArray(filter?.conditions) && filter.conditions.length
+    ? filter.conditions
+    : [{ field: filter?.columnName ?? "", op: filter?.op ?? "==", value: filter?.value ?? "", valueRef: filter?.variableId ?? "" }];
+  return conditions.slice(0, 2).map((condition) => ({
+    field: String(condition?.field ?? ""),
+    op: condition?.op ?? "==",
+    value: condition?.value ?? "",
+  }));
 }
 
 function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter, onUpdateFilter }) {
@@ -187,6 +205,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
     const modeLocked = state.panelMode === "edit";
     const isVariableMode = state.filterMode === "variable";
     const operatorParts = getOperatorParts(state.filterOperator);
+    const secondOperatorParts = getOperatorParts(state.secondFilterOperator);
     const valueStats = getNumericValueStats(state.values);
     const variableMin = state.variableMin || (valueStats ? String(valueStats.min) : "0");
     const variableMax = state.variableMax || (valueStats ? String(valueStats.max) : "100");
@@ -194,10 +213,15 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
     const title = state.panelMode === "edit" ? "Edit filter" : "Add filter";
     const submitLabel = state.panelMode === "edit" ? "Save filter" : "Add filter";
     const columnLabel = formatColumnLabel(state.columnName, state.fields);
+    const secondColumnLabel = formatColumnLabel(state.secondColumnName, state.fields);
     const isDatasetColumn = state.columnName === DATASET_FILTER_FIELD;
+    const isSecondDatasetColumn = state.secondColumnName === DATASET_FILTER_FIELD;
     const displayedValue = isDatasetColumn
       ? (state.valuesLoading ? "Loading values..." : getResolvedOptionLabel(state.values, state.value))
       : state.value;
+    const secondDisplayedValue = isSecondDatasetColumn
+      ? (state.secondValuesLoading ? "Loading values..." : getResolvedOptionLabel(state.secondValues, state.secondValue))
+      : state.secondValue;
 
     panel.querySelector(".clp-title").textContent = title;
 
@@ -220,9 +244,10 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
             </select>
           </label>
         ` : ""}
+        <div class="filter-panel-condition" data-condition-index="0">
         <div class="clp-field">
           <span class="clp-field-label">Column</span>
-          <div class="filter-panel-select-combo">
+          <div class="filter-panel-select-combo" data-condition-index="0">
             <div class="clp-field-input filter-panel-column-display" aria-hidden="true">
               <span>${escapeHtml(columnLabel || (state.loading ? "Loading columns..." : "Column"))}</span>
             </div>
@@ -235,7 +260,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         </div>
         <div class="clp-field">
           <span class="clp-field-label">Compare</span>
-          <div class="filter-panel-operator-row" role="group" aria-label="Comparison">
+          <div class="filter-panel-operator-row" role="group" aria-label="Comparison" data-condition-index="0">
             ${OPERATOR_PARTS.map((part) => `
               <button class="filter-panel-operator-btn ${operatorParts.includes(part) ? "is-selected" : ""}" type="button" data-filter-operator-part="${part}" aria-pressed="${operatorParts.includes(part)}" ${controlsDisabled ? "disabled" : ""}>${OPERATOR_LABELS[part]}</button>
             `).join("")}
@@ -243,7 +268,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         </div>
         ${!isVariableMode ? `<div class="clp-field">
           <span class="clp-field-label">Value</span>
-          <div class="filter-panel-value-combo">
+          <div class="filter-panel-value-combo" data-condition-index="0">
             <input class="clp-field-input filter-panel-value filter-panel-value-input" type="text" value="${escapeHtml(displayedValue)}" placeholder="Value" ${controlsDisabled ? "disabled" : ""} ${isDatasetColumn ? "readonly" : ""} />
             <button class="filter-panel-value-menu-btn" type="button" aria-label="Choose existing value" title="Choose existing value" aria-haspopup="listbox" ${controlsDisabled || state.valuesLoading || !state.values.length ? "disabled" : ""}>
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -252,6 +277,47 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
             </button>
           </div>
         </div>` : ""}
+        </div>
+        ${state.secondConditionEnabled ? `
+          <div class="filter-panel-condition-join" role="radiogroup" aria-label="Condition join">
+            <button class="clp-mode-option filter-panel-combinator-option ${state.conditionCombinator === "all" ? "is-selected" : ""}" type="button" data-filter-combinator="all" aria-pressed="${state.conditionCombinator === "all"}" ${controlsDisabled ? "disabled" : ""}>And</button>
+            <button class="clp-mode-option filter-panel-combinator-option ${state.conditionCombinator === "any" ? "is-selected" : ""}" type="button" data-filter-combinator="any" aria-pressed="${state.conditionCombinator === "any"}" ${controlsDisabled ? "disabled" : ""}>Or</button>
+          </div>
+          <div class="filter-panel-condition" data-condition-index="1">
+            <div class="clp-field">
+              <span class="clp-field-label">Column</span>
+              <div class="filter-panel-select-combo" data-condition-index="1">
+                <div class="clp-field-input filter-panel-column-display" aria-hidden="true">
+                  <span>${escapeHtml(secondColumnLabel || (state.loading ? "Loading columns..." : "Column"))}</span>
+                </div>
+                <button class="filter-panel-select-menu-btn" type="button" aria-label="Choose column" title="Choose column" aria-haspopup="listbox" ${controlsDisabled ? "disabled" : ""}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M6 9l6 6 6-6"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div class="clp-field">
+              <span class="clp-field-label">Compare</span>
+              <div class="filter-panel-operator-row" role="group" aria-label="Comparison" data-condition-index="1">
+                ${OPERATOR_PARTS.map((part) => `
+                  <button class="filter-panel-operator-btn ${secondOperatorParts.includes(part) ? "is-selected" : ""}" type="button" data-filter-operator-part="${part}" aria-pressed="${secondOperatorParts.includes(part)}" ${controlsDisabled ? "disabled" : ""}>${OPERATOR_LABELS[part]}</button>
+                `).join("")}
+              </div>
+            </div>
+            ${!isVariableMode ? `<div class="clp-field">
+              <span class="clp-field-label">Value</span>
+              <div class="filter-panel-value-combo" data-condition-index="1">
+                <input class="clp-field-input filter-panel-value filter-panel-value-input" type="text" value="${escapeHtml(secondDisplayedValue)}" placeholder="Value" ${controlsDisabled ? "disabled" : ""} ${isSecondDatasetColumn ? "readonly" : ""} />
+                <button class="filter-panel-value-menu-btn" type="button" aria-label="Choose existing value" title="Choose existing value" aria-haspopup="listbox" ${controlsDisabled || state.secondValuesLoading || !state.secondValues.length ? "disabled" : ""}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M6 9l6 6 6-6"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>` : ""}
+          </div>
+        ` : ""}
         ${isVariableMode ? `
           <label class="clp-field">
             <span class="clp-field-label">Variable</span>
@@ -289,6 +355,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         ` : ""}
         ${state.error ? `<p class="upload-error">${escapeHtml(state.error)}</p>` : ""}
         <div class="upload-actions">
+          <button class="upload-btn upload-btn-secondary filter-panel-add-condition" type="button" ${controlsDisabled ? "disabled" : ""}>${state.secondConditionEnabled ? "Remove condition" : "Add condition"}</button>
           <button class="upload-btn upload-btn-secondary filter-panel-cancel" type="button">Cancel</button>
           <button class="upload-btn upload-btn-primary" type="submit" ${controlsDisabled ? "disabled" : ""}>${submitLabel}</button>
         </div>
@@ -296,7 +363,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
     `;
 
     const openColumnSelect = () => {
-      const anchor = content.querySelector(".filter-panel-select-combo");
+      const anchor = content.querySelector('.filter-panel-select-combo[data-condition-index="0"]');
       if (!anchor || controlsDisabled) {
         return;
       }
@@ -313,13 +380,38 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         },
       });
     };
-    content.querySelector(".filter-panel-select-menu-btn")?.addEventListener("click", (event) => {
-      event.stopPropagation();
-      openColumnSelect();
+    const openSecondColumnSelect = () => {
+      const anchor = content.querySelector('.filter-panel-select-combo[data-condition-index="1"]');
+      if (!anchor || controlsDisabled || !state.secondConditionEnabled) {
+        return;
+      }
+      createCustomSelect({
+        anchor,
+        options: state.fields,
+        value: state.secondColumnName,
+        label: "Choose column",
+        onSelect(nextValue) {
+          state.secondColumnName = String(nextValue ?? "");
+          state.secondValue = "";
+          render();
+          void loadSecondValues();
+        },
+      });
+    };
+    content.querySelectorAll(".filter-panel-select-menu-btn").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const index = button.closest(".filter-panel-select-combo")?.dataset.conditionIndex;
+        if (index === "1") {
+          openSecondColumnSelect();
+        } else {
+          openColumnSelect();
+        }
+      });
     });
 
     const openValueSelect = () => {
-      const anchor = content.querySelector(".filter-panel-value-combo");
+      const anchor = content.querySelector('.filter-panel-value-combo[data-condition-index="0"]');
       if (!anchor || controlsDisabled || state.valuesLoading || !state.values.length || isVariableMode) {
         return;
       }
@@ -337,38 +429,102 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         },
       });
     };
-    content.querySelector(".filter-panel-value-menu-btn")?.addEventListener("click", (event) => {
-      event.stopPropagation();
-      openValueSelect();
-    });
-    content.querySelector(".filter-panel-value-input")?.addEventListener("input", (event) => {
-      if (isDatasetColumn) {
-        event.target.value = getResolvedOptionLabel(state.values, state.value);
+    const openSecondValueSelect = () => {
+      const anchor = content.querySelector('.filter-panel-value-combo[data-condition-index="1"]');
+      if (!anchor || controlsDisabled || state.secondValuesLoading || !state.secondValues.length || isVariableMode || !state.secondConditionEnabled) {
         return;
       }
-      closeOpenSelect();
-      state.value = event.target.value;
+      createCustomSelect({
+        anchor,
+        options: state.secondValues.map((value) => ({
+          value: getOptionValue(value),
+          label: getOptionValue(value) === "" ? "Empty value" : getOptionLabel(value),
+        })),
+        value: state.secondValue,
+        label: "Choose existing value",
+        onSelect(nextValue) {
+          state.secondValue = String(nextValue ?? "");
+          render();
+        },
+      });
+    };
+    content.querySelectorAll(".filter-panel-value-menu-btn").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const index = button.closest(".filter-panel-value-combo")?.dataset.conditionIndex;
+        if (index === "1") {
+          openSecondValueSelect();
+        } else {
+          openValueSelect();
+        }
+      });
+    });
+    content.querySelectorAll(".filter-panel-value-input").forEach((input) => {
+      input.addEventListener("input", (event) => {
+        const index = input.closest(".filter-panel-value-combo")?.dataset.conditionIndex;
+        if (index === "1") {
+          if (isSecondDatasetColumn) {
+            event.target.value = getResolvedOptionLabel(state.secondValues, state.secondValue);
+            return;
+          }
+          closeOpenSelect();
+          state.secondValue = event.target.value;
+          return;
+        }
+        if (isDatasetColumn) {
+          event.target.value = getResolvedOptionLabel(state.values, state.value);
+          return;
+        }
+        closeOpenSelect();
+        state.value = event.target.value;
+      });
     });
     content.querySelector(".filter-panel-label")?.addEventListener("input", (event) => {
       state.filterLabel = event.target.value;
     });
-    content.querySelector(".filter-panel-select-menu-btn")?.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") {
-        return;
-      }
-      event.preventDefault();
-      openColumnSelect();
+    content.querySelectorAll(".filter-panel-select-menu-btn").forEach((button) => {
+      button.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+          return;
+        }
+        event.preventDefault();
+        const index = button.closest(".filter-panel-select-combo")?.dataset.conditionIndex;
+        if (index === "1") {
+          openSecondColumnSelect();
+        } else {
+          openColumnSelect();
+        }
+      });
     });
-    content.querySelector(".filter-panel-value-menu-btn")?.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") {
-        return;
-      }
-      event.preventDefault();
-      openValueSelect();
+    content.querySelectorAll(".filter-panel-value-menu-btn").forEach((button) => {
+      button.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+          return;
+        }
+        event.preventDefault();
+        const index = button.closest(".filter-panel-value-combo")?.dataset.conditionIndex;
+        if (index === "1") {
+          openSecondValueSelect();
+        } else {
+          openValueSelect();
+        }
+      });
     });
     content.querySelectorAll(".filter-panel-operator-btn").forEach((button) => {
       button.addEventListener("click", () => {
-        state.filterOperator = toggleOperatorPart(state.filterOperator, button.dataset.filterOperatorPart);
+        const index = button.closest(".filter-panel-operator-row")?.dataset.conditionIndex;
+        if (index === "1") {
+          state.secondFilterOperator = toggleOperatorPart(state.secondFilterOperator, button.dataset.filterOperatorPart);
+        } else {
+          state.filterOperator = toggleOperatorPart(state.filterOperator, button.dataset.filterOperatorPart);
+        }
+        state.error = "";
+        render();
+      });
+    });
+    content.querySelectorAll(".filter-panel-combinator-option").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.conditionCombinator = button.dataset.filterCombinator === "any" ? "any" : "all";
         state.error = "";
         render();
       });
@@ -398,6 +554,22 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         void loadValues();
       }
     });
+    content.querySelector(".filter-panel-add-condition")?.addEventListener("click", () => {
+      state.secondConditionEnabled = !state.secondConditionEnabled;
+      if (state.secondConditionEnabled && !state.secondColumnName) {
+        state.secondColumnName = state.fields.find((field) => field.value !== state.columnName)?.value ?? state.columnName;
+      }
+      if (!state.secondConditionEnabled) {
+        state.secondValue = "";
+        state.secondValues = [];
+        state.secondValuesLoading = false;
+      }
+      state.error = "";
+      render();
+      if (state.secondConditionEnabled && state.secondColumnName) {
+        void loadSecondValues();
+      }
+    });
     content.querySelector(".filter-panel-cancel")?.addEventListener("click", close);
     content.querySelector(".filter-panel-form")?.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -408,11 +580,19 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
       state.variableStep = content.querySelector(".filter-panel-variable-step")?.value ?? state.variableStep;
       state.variableDefault = content.querySelector(".filter-panel-variable-default")?.value ?? state.variableDefault;
       const columnName = String(state.columnName ?? "").trim();
+      const secondColumnName = state.secondConditionEnabled ? String(state.secondColumnName ?? "").trim() : "";
       const filterLabel = String(state.filterLabel ?? "").trim();
       const columnLabel = formatColumnLabel(columnName, state.fields);
       const valueLabel = formatValueLabel(state.value, state.values);
+      const secondColumnLabel = formatColumnLabel(secondColumnName, state.fields);
+      const secondValueLabel = formatValueLabel(state.secondValue, state.secondValues);
       if (!columnName) {
         state.error = "Choose a column.";
+        render();
+        return;
+      }
+      if (state.secondConditionEnabled && !secondColumnName) {
+        state.error = "Choose a column for the second condition.";
         render();
         return;
       }
@@ -437,15 +617,29 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
       state.error = "";
       render();
       try {
+        const conditions = [
+          state.filterMode === "variable"
+            ? { field: columnName, op: state.filterOperator, valueRef: variableId }
+            : { field: columnName, op: state.filterOperator, value: state.value },
+          ...(state.secondConditionEnabled ? [
+            state.filterMode === "variable"
+              ? { field: secondColumnName, op: state.secondFilterOperator, valueRef: variableId }
+              : { field: secondColumnName, op: state.secondFilterOperator, value: state.secondValue },
+          ] : []),
+        ];
         const payload = {
           layerId: state.layerId,
           parentRowId: state.parentRowId,
           label: filterLabel,
           columnLabel,
           valueLabel,
+          secondColumnLabel,
+          secondValueLabel,
           columnName,
           value: state.value,
           op: state.filterOperator,
+          conditions,
+          combinator: state.conditionCombinator,
           mode: state.filterMode,
           variableConfig: state.filterMode === "variable" ? {
             controlType: state.variableControlType,
@@ -462,8 +656,8 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
               value: String(getOptionValue(optionValue) ?? ""),
             })),
             filterLabel: filterLabel || `${columnLabel} variable`,
-            combinator: "all",
-            conditions: [{ field: columnName, op: state.filterOperator, valueRef: variableId }],
+            combinator: state.conditionCombinator,
+            conditions,
           } : null,
         };
         if (state.panelMode === "edit") {
@@ -495,11 +689,19 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
       state.columnName = fieldValues.includes(state.columnName)
         ? state.columnName
         : state.fields[0]?.value ?? "";
+      if (state.secondConditionEnabled) {
+        state.secondColumnName = fieldValues.includes(state.secondColumnName)
+          ? state.secondColumnName
+          : state.fields.find((field) => field.value !== state.columnName)?.value ?? state.columnName;
+      }
       if (!state.fields.length) {
         state.error = "No filterable columns found.";
       }
       if (state.columnName) {
         void loadValues();
+      }
+      if (state.secondConditionEnabled && state.secondColumnName) {
+        void loadSecondValues();
       }
     } catch (error) {
       state.fields = [];
@@ -541,6 +743,35 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
     }
   }
 
+  let secondValueRequestId = 0;
+  async function loadSecondValues() {
+    const requestId = secondValueRequestId + 1;
+    secondValueRequestId = requestId;
+    const columnName = state.secondColumnName;
+    if (!columnName) {
+      state.secondValues = [];
+      state.secondValuesLoading = false;
+      render();
+      return;
+    }
+
+    state.secondValues = [];
+    state.secondValuesLoading = true;
+    render();
+    try {
+      const values = await getLayerFieldValues?.(state.layerId, columnName, getLoaderContext());
+      if (requestId !== secondValueRequestId) {
+        return;
+      }
+      state.secondValues = Array.isArray(values) ? values : [];
+    } finally {
+      if (requestId === secondValueRequestId) {
+        state.secondValuesLoading = false;
+        render();
+      }
+    }
+  }
+
   panel.querySelector(".clp-close")?.addEventListener("click", close);
   panel.addEventListener("click", (event) => {
     if (event.target === panel) {
@@ -563,6 +794,9 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
     },
     edit({ layerId = "", layerName = "", parentRowId = "", filter = null, valueFilterExpression = null } = {}) {
       const mode = filter?.mode === "variable" ? "variable" : "fixed";
+      const conditions = normalizeEditConditions(filter);
+      const firstCondition = conditions[0] ?? {};
+      const secondCondition = conditions[1] ?? {};
       state = createDefaultState({
         panelMode: "edit",
         editFilter: filter,
@@ -571,9 +805,14 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         parentRowId,
         valueFilterExpression,
         filterLabel: filter?.label ?? filter?.variableLabel ?? "",
-        columnName: filter?.columnName ?? "",
-        value: filter?.value ?? "",
-        filterOperator: filter?.op ?? "==",
+        columnName: firstCondition.field ?? "",
+        value: firstCondition.value ?? "",
+        filterOperator: firstCondition.op ?? "==",
+        secondConditionEnabled: conditions.length > 1,
+        secondColumnName: secondCondition.field ?? "",
+        secondValue: secondCondition.value ?? "",
+        secondFilterOperator: secondCondition.op ?? "==",
+        conditionCombinator: filter?.combinator === "any" ? "any" : "all",
         filterMode: mode,
         variableControlType: filter?.variableControlType === "dropdown" ? "dropdown" : "slider",
         variableLabel: filter?.variableLabel ?? "Year",

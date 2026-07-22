@@ -52,39 +52,9 @@ const VICTORIA_OUTLINE_TILE_SOURCE_LAYER = "coastlines";
 const VICTORIA_OUTLINE_PMTILES_IDS = VICTORIA_TILE_IDS.map((tileId) => `osm-outline-victoria-${tileId}`);
 const VICTORIA_OUTLINE_SOURCE_IDS = VICTORIA_TILE_IDS.map((tileId) => `atlas-victoria-outline-${tileId}`);
 const VICTORIA_OUTLINE_LINE_LAYER_IDS = VICTORIA_TILE_IDS.map((tileId) => `atlas-victoria-outline-line-${tileId}`);
-const ROMAN_SOURCE_ID = "atlas-roman-empire";
-const ROMAN_FILL_SOURCE_ID = "atlas-roman-empire-fill-source";
-const ROMAN_FILL_SOURCE_LAYER = "roman-fill";
-const ROMAN_FILL_LAYER_ID = "atlas-roman-empire-fill";
-const ROMAN_LINE_LAYER_ID = "atlas-roman-empire-line";
-const ROMAN_VECTOR_URL = "/data/empires/roman_empire_117ad_major_empires_source.geojson";
-const MONGOL_SOURCE_ID = "atlas-mongol-empire";
-const MONGOL_FILL_LAYER_ID = "atlas-mongol-empire-fill";
-const MONGOL_LINE_LAYER_ID = "atlas-mongol-empire-line";
-const MONGOL_FILL_SOURCE_ID = "atlas-mongol-empire-fill-source";
-const MONGOL_FILL_SOURCE_LAYER = "mongol-fill";
-const MONGOL_VECTOR_URL = "/data/empires/mongol_empire_1279_extent.medium.geojson";
-const MONGOL_FILL_VECTOR_URL = "/data/empires/mongol_empire_1279_extent.medium.dissolved-fill.geojson";
-const BRITISH_SOURCE_ID = "atlas-british-empire";
-const BRITISH_FILL_SOURCE_ID = "atlas-british-empire-fill-source";
-const BRITISH_FILL_SOURCE_LAYER = "british-fill";
-const BRITISH_FILL_LAYER_ID = "atlas-british-empire-fill";
-const BRITISH_LINE_LAYER_ID = "atlas-british-empire-line";
-const BRITISH_VECTOR_URL = "/data/empires/british_empire_1921_extent.low.self-cutout.geojson";
-const EMPIRE_FILL_LAYER_IDS = {
-  roman: ROMAN_FILL_LAYER_ID,
-  mongol: MONGOL_FILL_LAYER_ID,
-  british: BRITISH_FILL_LAYER_ID,
-};
-const EMPIRE_LINE_LAYER_IDS = {
-  roman: ROMAN_LINE_LAYER_ID,
-  mongol: MONGOL_LINE_LAYER_ID,
-  british: BRITISH_LINE_LAYER_ID,
-};
 const LINE_LAYER_IDS = {
   australia: AUSTRALIA_OUTLINE_LINE_LAYER_IDS[0],
   victoria: VICTORIA_OUTLINE_LINE_LAYER_IDS[0],
-  ...EMPIRE_LINE_LAYER_IDS,
   ...Object.fromEntries(LOCAL_LAYERS.filter((l) => l.line).map((l) => [l.id, localLayerLineId(l.id)])),
 };
 const WATER_BACKGROUND_COLOR = { r: 44, g: 111, b: 146 };
@@ -975,40 +945,6 @@ function getOlympicsPointRadius(layerState) {
   return Math.max(0, Number(getLayerStyleValue(layerState, "olympics", "pointRadius", 3.5)) || 0);
 }
 
-function geometryToMultiPolygonCoordinates(geometry) {
-  if (!geometry) {
-    return [];
-  }
-
-  if (geometry.type === "Polygon") {
-    return [geometry.coordinates];
-  }
-
-  if (geometry.type === "MultiPolygon") {
-    return geometry.coordinates;
-  }
-
-  return [];
-}
-
-function buildEmpireOutlineFeatureCollection(featureCollection) {
-  // Extract all polygon rings as LineStrings directly — no polygon union needed,
-  // which avoids blocking the main thread with a heavy polygon union.
-  const lineFeatures = [];
-  for (const feature of featureCollection?.features ?? []) {
-    for (const polygon of geometryToMultiPolygonCoordinates(feature.geometry)) {
-      for (const ring of polygon) {
-        lineFeatures.push({
-          type: "Feature",
-          properties: {},
-          geometry: { type: "LineString", coordinates: ring },
-        });
-      }
-    }
-  }
-  return { type: "FeatureCollection", features: lineFeatures };
-}
-
 function ensureProtocol(maplibregl, manifest = []) {
   if (protocolInstalled) {
     return;
@@ -1027,49 +963,7 @@ function ensureProtocol(maplibregl, manifest = []) {
       sourceLayer: l.source.sourceLayer,
     });
   });
-  registerGeojsonVectorTileSource({
-    id: ROMAN_FILL_SOURCE_ID,
-    dataUrl: ROMAN_VECTOR_URL,
-    sourceLayer: ROMAN_FILL_SOURCE_LAYER,
-  });
-  registerGeojsonVectorTileSource({
-    id: MONGOL_FILL_SOURCE_ID,
-    dataUrl: MONGOL_FILL_VECTOR_URL,
-    sourceLayer: MONGOL_FILL_SOURCE_LAYER,
-  });
-  registerGeojsonVectorTileSource({
-    id: BRITISH_FILL_SOURCE_ID,
-    dataUrl: BRITISH_VECTOR_URL,
-    sourceLayer: BRITISH_FILL_SOURCE_LAYER,
-  });
   protocolInstalled = true;
-}
-
-async function loadRomanEmpireVector() {
-  const response = await fetch(ROMAN_VECTOR_URL);
-  if (!response.ok) {
-    throw new Error(`Failed to load Roman empire vector: ${response.status}`);
-  }
-
-  return response.json();
-}
-
-async function loadMongolEmpireVector() {
-  const response = await fetch(MONGOL_VECTOR_URL);
-  if (!response.ok) {
-    throw new Error(`Failed to load Mongol empire vector: ${response.status}`);
-  }
-
-  return response.json();
-}
-
-async function loadBritishEmpireVector() {
-  const response = await fetch(BRITISH_VECTOR_URL);
-  if (!response.ok) {
-    throw new Error(`Failed to load British empire vector: ${response.status}`);
-  }
-
-  return response.json();
 }
 
 // ─── Standard layer registry ─────────────────────────────────────────────────
@@ -1164,7 +1058,7 @@ function getLandDetailLineUrl(layerState, detail = null) {
     ?? getLandDetailUrl(layerState, detail);
 }
 
-// Special registry entries for Olympics and Empires
+// Special registry entries for static shipped layers
 const OLYMPICS_REGISTRY_ENTRY = {
   layerId: "olympics",
   deferred: false,
@@ -1177,68 +1071,10 @@ const OLYMPICS_REGISTRY_ENTRY = {
   },
 };
 
-const EMPIRE_REGISTRY_ENTRIES = [
-  {
-    layerId: "roman",
-    deferred: false,
-    source: { kind: "geojson", id: ROMAN_SOURCE_ID, url: ROMAN_VECTOR_URL },
-    fill: {
-      id: ROMAN_FILL_LAYER_ID,
-      sourceLayer: ROMAN_FILL_SOURCE_LAYER,
-      defaultColor: "#b85c38",
-      defaultOpacity: 100,
-    },
-    line: {
-      id: ROMAN_LINE_LAYER_ID,
-      sourceLayer: ROMAN_FILL_SOURCE_LAYER,
-      defaultColor: "#d96f44",
-      defaultOpacity: 100,
-      defaultWeight: 1,
-    },
-  },
-  {
-    layerId: "mongol",
-    deferred: false,
-    source: { kind: "geojson", id: MONGOL_SOURCE_ID, url: MONGOL_VECTOR_URL },
-    fill: {
-      id: MONGOL_FILL_LAYER_ID,
-      sourceLayer: MONGOL_FILL_SOURCE_LAYER,
-      defaultColor: "#b85c38",
-      defaultOpacity: 100,
-    },
-    line: {
-      id: MONGOL_LINE_LAYER_ID,
-      sourceLayer: MONGOL_FILL_SOURCE_LAYER,
-      defaultColor: "#d96f44",
-      defaultOpacity: 100,
-      defaultWeight: 1,
-    },
-  },
-  {
-    layerId: "british",
-    deferred: false,
-    source: { kind: "geojson", id: BRITISH_SOURCE_ID, url: BRITISH_VECTOR_URL },
-    fill: {
-      id: BRITISH_FILL_LAYER_ID,
-      sourceLayer: BRITISH_FILL_SOURCE_LAYER,
-      defaultColor: "#c84b31",
-      defaultOpacity: 100,
-    },
-    line: {
-      id: BRITISH_LINE_LAYER_ID,
-      sourceLayer: BRITISH_FILL_SOURCE_LAYER,
-      defaultColor: "#f07a58",
-      defaultOpacity: 100,
-      defaultWeight: 1,
-    },
-  },
-];
-
 // Combined registry
 const FULL_REGISTRY = [
   ...STANDARD_LAYER_REGISTRY,
   OLYMPICS_REGISTRY_ENTRY,
-  ...EMPIRE_REGISTRY_ENTRIES,
 ];
 
 // Helper function to find registry entry by layer ID

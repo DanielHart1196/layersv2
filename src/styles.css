@@ -2085,6 +2085,17 @@ body.is-reordering-rows {
   gap: 6px;
 }
 
+.filter-panel-condition + .filter-panel-condition-join {
+  margin-top: 12px;
+}
+
+.filter-panel-condition-join {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
 .filter-panel .filter-panel-operator-btn {
   display: inline-flex;
   align-items: center;
@@ -2114,6 +2125,10 @@ body.is-reordering-rows {
 .filter-panel .filter-panel-operator-btn:disabled {
   cursor: default;
   opacity: 0.55;
+}
+
+.filter-panel-add-condition {
+  margin-right: auto;
 }
 
 .filter-panel-select-menu-btn,
@@ -2261,6 +2276,13 @@ body.is-reordering-rows {
 .clp-content {
   padding: 16px 20px 20px;
   overscroll-behavior: contain;
+}
+
+.filter-panel .clp-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 
 .clp-inner.is-preview-step .clp-content {
@@ -3217,14 +3239,118 @@ body.is-reordering-rows {
   text-shadow: none;
 }
 
+.layer-menu-rename-actions {
+  display: grid;
+  gap: 7px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.16);
+}
+
+.layer-menu-rename-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 7px 9px;
+  border: 1px solid rgba(0, 0, 0, 0.24);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #000000;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  outline: none;
+  text-shadow: none;
+}
+
+.layer-menu-rename-input:focus {
+  border-color: rgba(42, 102, 170, 0.74);
+  box-shadow: 0 0 0 2px rgba(42, 102, 170, 0.18);
+}
+
+.layer-menu-rename-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.layer-menu-rename-status {
+  color: rgba(0, 0, 0, 0.62);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
+  text-shadow: none;
+}
+
+.layer-menu-rename-status[hidden] {
+  display: none;
+}
+
+.layer-menu-rename-status.is-success {
+  color: #1f6b35;
+}
+
+.layer-menu-rename-status.is-error {
+  color: #9e2f2f;
+}
+
 .layer-menu-delete-confirm-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
+.layer-menu-defaults-actions {
+  display: grid;
+  gap: 7px;
+  padding-top: 9px;
+  border-top: 1px solid rgba(0, 0, 0, 0.16);
+}
+
+.layer-menu-defaults-label {
+  color: rgba(0, 0, 0, 0.72);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  text-shadow: none;
+}
+
+.layer-menu-defaults-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.layer-menu-defaults-status {
+  color: rgba(0, 0, 0, 0.62);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-align: center;
+  overflow-wrap: anywhere;
+  text-shadow: none;
+}
+
+.layer-menu-defaults-status[hidden] {
+  display: none;
+}
+
+.layer-menu-defaults-status.is-success {
+  color: #1f6b35;
+}
+
+.layer-menu-defaults-status.is-error {
+  color: #9e2f2f;
+}
+
 .layer-menu-delete-confirm-cancel,
-.layer-menu-delete-confirm-remove {
+.layer-menu-delete-confirm-remove,
+.layer-menu-rename-cancel,
+.layer-menu-rename-save,
+.layer-menu-defaults-reset,
+.layer-menu-defaults-apply {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3242,18 +3368,40 @@ body.is-reordering-rows {
   text-shadow: none;
 }
 
+.layer-menu-rename-save {
+  border-color: rgba(42, 102, 170, 0.5);
+  background: rgba(42, 102, 170, 0.16);
+}
+
 .layer-menu-delete-confirm-remove {
   border-color: rgba(220, 60, 60, 0.62);
   background: rgba(220, 60, 60, 0.24);
 }
 
+.layer-menu-defaults-apply {
+  border-color: rgba(46, 125, 50, 0.5);
+  background: rgba(46, 125, 50, 0.18);
+}
+
 .layer-menu-delete-confirm-cancel:hover,
-.layer-menu-delete-confirm-remove:hover {
+.layer-menu-delete-confirm-remove:hover,
+.layer-menu-rename-cancel:hover,
+.layer-menu-rename-save:hover,
+.layer-menu-defaults-reset:hover,
+.layer-menu-defaults-apply:hover {
   background: rgba(0, 0, 0, 0.075);
+}
+
+.layer-menu-rename-save:hover {
+  background: rgba(42, 102, 170, 0.26);
 }
 
 .layer-menu-delete-confirm-remove:hover {
   background: rgba(220, 60, 60, 0.36);
+}
+
+.layer-menu-defaults-apply:hover {
+  background: rgba(46, 125, 50, 0.28);
 }
 
 .layer-menu-delete-confirm-remove svg {

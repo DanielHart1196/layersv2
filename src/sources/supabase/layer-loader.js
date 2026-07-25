@@ -906,12 +906,16 @@ function buildPropertyFilterExpression(filter) {
         field: String(condition?.field ?? "").trim(),
         op: condition?.op ?? "==",
         value: condition?.value,
+        valueRef: String(condition?.valueRef ?? "").trim(),
       }))
       .filter((condition) => condition.field)
     : [];
 
   if (conditions.length) {
     const expressions = conditions.map((condition) => {
+      if (condition.value === undefined && condition.valueRef) {
+        return null;
+      }
       if ([">", ">=", "<", "<="].includes(condition.op)) {
         return [
           condition.op,
@@ -931,7 +935,10 @@ function buildPropertyFilterExpression(filter) {
         ["to-string", ["coalesce", ["get", condition.field], ""]],
         condition.value == null ? "" : String(condition.value),
       ];
-    });
+    }).filter(Boolean);
+    if (!expressions.length) {
+      return null;
+    }
     const combinator = filter?.combinator === "any" ? "any" : "all";
     return expressions.length === 1 ? expressions[0] : [combinator, ...expressions];
   }
@@ -947,13 +954,94 @@ function buildPropertyFilterExpression(filter) {
   ];
 }
 
-async function loadFilteredLayerGeojson(supabase, datasets, filter, { onProgress = null } = {}) {
+function getExpressionField(expression) {
+  if (!Array.isArray(expression)) {
+    return "";
+  }
+  if (expression[0] === "get") {
+    return String(expression[1] ?? "").trim();
+  }
+  if ((expression[0] === "to-number" || expression[0] === "to-string") && Array.isArray(expression[1])) {
+    return getExpressionField(expression[1]);
+  }
+  if (expression[0] === "coalesce" && Array.isArray(expression[1])) {
+    return getExpressionField(expression[1]);
+  }
+  return "";
+}
+
+function getServerFilterCondition(expression) {
+  if (!Array.isArray(expression) || expression.length < 3) {
+    return null;
+  }
+  const op = expression[0] === "=" ? "==" : expression[0];
+  if (!["==", "!=", ">", ">=", "<", "<="].includes(op)) {
+    return null;
+  }
+  const field = getExpressionField(expression[1]);
+  if (!field || field.startsWith("_")) {
+    return null;
+  }
+  const value = expression[2];
+  if (value === undefined || value === null || Array.isArray(value) || typeof value === "object") {
+    return null;
+  }
+  return {
+    field,
+    op,
+    value,
+    type: [">", ">=", "<", "<="].includes(op) ? "number" : "text",
+  };
+}
+
+function getServerFilterConfig(expression) {
+  if (!Array.isArray(expression)) {
+    return null;
+  }
+  const operator = expression[0];
+  if (operator === "all") {
+    const conditions = expression.slice(1).map(getServerFilterCondition);
+    return conditions.length && conditions.every(Boolean)
+      ? { combinator: "all", conditions }
+      : null;
+  }
+  const condition = getServerFilterCondition(expression);
+  return condition ? { combinator: "all", conditions: [condition] } : null;
+}
+
+async function loadServerFilteredLayerGeojson(supabase, layerId, expression, { onProgress = null } = {}) {
+  const serverFilter = getServerFilterConfig(expression);
+  if (!serverFilter?.conditions?.length) {
+    return null;
+  }
+  onProgress?.(35, "Loading scoped features from server");
+  const { data, error } = await supabase.rpc("get_layer_geojson_filtered", {
+    p_layer_id: layerId,
+    p_conditions: serverFilter.conditions,
+    p_combinator: serverFilter.combinator,
+  });
+  if (error) {
+    if (error.code === "PGRST202" || String(error.message ?? "").includes("get_layer_geojson_filtered")) {
+      console.warn("Filtered GeoJSON RPC is not installed; falling back to client-side scoped loading.");
+      return null;
+    }
+    throw new Error(`Failed to load server-filtered features: ${error.message}`);
+  }
+  return data && typeof data === "object" ? data : null;
+}
+
+async function loadFilteredLayerGeojson(supabase, layerId, datasets, filter, { onProgress = null } = {}) {
   const field = String(filter?.field ?? "").trim();
   const value = filter?.value;
   const expression = buildPropertyFilterExpression(filter);
   const datasetIds = datasets.map((dataset) => dataset.id).filter(Boolean);
   if (!expression || !datasetIds.length) {
     return null;
+  }
+
+  const serverFilteredGeojson = await loadServerFilteredLayerGeojson(supabase, layerId, expression, { onProgress });
+  if (serverFilteredGeojson) {
+    return serverFilteredGeojson;
   }
 
   const datasetById = new Map(datasets.map((dataset) => [dataset.id, dataset]));
@@ -1035,7 +1123,7 @@ export async function loadLayerFromSupabase(layerId, { propertyFilter = null, on
   const defaultView = await getLayerDefaultView(layerId);
   const datasets = await loadLayerDatasets(layerId);
   onProgress?.(32, `Found ${datasets.length.toLocaleString()} datasets`);
-  const filteredGeojson = await loadFilteredLayerGeojson(supabase, datasets, propertyFilter, { onProgress });
+  const filteredGeojson = await loadFilteredLayerGeojson(supabase, layerId, datasets, propertyFilter, { onProgress });
   if (filteredGeojson) {
     onProgress?.(62, `Loaded ${filteredGeojson.features.length.toLocaleString()} scoped features`);
     return cacheAndReturnLayerResult(layerId, propertyFilter, {

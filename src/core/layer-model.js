@@ -1104,6 +1104,7 @@ function createLayerModel() {
             field: String(condition?.field ?? "").trim(),
             op: condition?.op ?? "==",
             value: condition?.value ?? "",
+            valueRef: String(condition?.valueRef ?? "").trim(),
           }))
           .filter((condition) => condition.field)
         : [];
@@ -1327,6 +1328,7 @@ function createLayerModel() {
           field: String(condition?.field ?? "").trim(),
           op: condition?.op ?? "==",
           value: condition?.value ?? "",
+          valueRef: String(condition?.valueRef ?? "").trim(),
         }))
         .filter((condition) => condition.field)
       : [];

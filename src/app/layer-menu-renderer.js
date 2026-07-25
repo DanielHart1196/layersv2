@@ -1995,7 +1995,7 @@ function appendCascadeLockButton(header, lockControl = null) {
   header.append(button);
 }
 
-function createSliderRow(row, value, onInput, { inheritedHidden = false, lockControl = null } = {}) {
+function createSliderRow(row, value, onInput, { inheritedHidden = false, lockControl = null, previewOnSlide = false } = {}) {
   const wrapper = document.createElement("label");
   wrapper.className = "layer-menu-row layer-menu-row-slider";
   if (row?.target?.kind === "layer-style") {
@@ -2018,7 +2018,7 @@ function createSliderRow(row, value, onInput, { inheritedHidden = false, lockCon
   input.value = String(value);
   input.disabled = inheritedHidden;
   input.addEventListener("pointerdown", (event) => {
-    if (row?.target?.kind === "layer-style") {
+    if (row?.target?.kind === "layer-style" || previewOnSlide) {
       beginStylePreviewFocus(input, event);
     }
   });
@@ -3082,10 +3082,11 @@ function buildRows(rows, layerModel, onToggleExpanded, onToggleVisibility, reord
     const isDynamic = onRemoveRow && layerModel.isDynamic(row.id);
 
     if (row.type === "slider" || row.type === "variable-slider") {
+      const isVariableFilterControl = rowHasVariableFilterControl(layerModel, row);
       const slider = createSliderRow(row, getDisplayRowValue(row, layerModel, appearanceState), (nextValue) => {
         onRowInput(row, nextValue);
-      }, { inheritedHidden });
-      if (rowHasVariableFilterControl(layerModel, row)) {
+      }, { inheritedHidden, previewOnSlide: isVariableFilterControl });
+      if (isVariableFilterControl) {
         enableFilterRowLongPressActions(slider, {
           row,
           parentId,

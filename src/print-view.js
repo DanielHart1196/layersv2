@@ -144,11 +144,13 @@ export function createPrintView({
 
   const projectionControls = document.createElement("div");
   projectionControls.className = "earthlab-projection-controls";
+  projectionControls.style.visibility = "hidden";
   projectionControls.append(lockBtn, resetBtn);
 
   const customControls = document.createElement("div");
   customControls.className = "earthlab-custom-controls";
   customControls.hidden = true;
+  customControls.style.visibility = "hidden";
 
   const customAddBtn = document.createElement("button");
   customAddBtn.type = "button";
@@ -199,6 +201,7 @@ export function createPrintView({
   undoBtn.style.top = "0";
   undoBtn.style.bottom = "auto";
   undoBtn.style.right = "0";
+  undoBtn.style.visibility = "hidden";
 
   const projectionDropdown = document.createElement("div");
   projectionDropdown.className = "earthlab-projection-dropdown";
@@ -555,13 +558,23 @@ export function createPrintView({
   }
 
   function positionUndoButton() {
+    if (!width || !height) {
+      undoBtn.style.visibility = "hidden";
+      return;
+    }
     const frame = getPrintPreviewFrame();
     const gutterRight = Math.max(0, width - (frame.x + frame.width));
     undoBtn.style.top = `${Math.max(8, frame.y - 34)}px`;
     undoBtn.style.right = `${gutterRight}px`;
+    undoBtn.style.visibility = "visible";
   }
 
   function positionProjectionControls() {
+    if (!width || !height) {
+      projectionControls.style.visibility = "hidden";
+      customControls.style.visibility = "hidden";
+      return;
+    }
     const frame = getPrintPreviewFrame();
     const top = frame.y + frame.height + 6;
     const right = Math.max(0, width - (frame.x + frame.width));
@@ -569,6 +582,8 @@ export function createPrintView({
     projectionControls.style.right = `${right}px`;
     customControls.style.top = `${top}px`;
     customControls.style.left = `${frame.x}px`;
+    projectionControls.style.visibility = "visible";
+    customControls.style.visibility = "visible";
     positionCustomAddDropdown();
   }
 
@@ -2204,6 +2219,13 @@ export function createPrintView({
   });
 
   const resizeObserver = new ResizeObserver(() => {
+    const nextWidth = mount.clientWidth;
+    const nextHeight = mount.clientHeight;
+    if (nextWidth && nextHeight && context) {
+      syncCanvasSize(nextWidth, nextHeight);
+      positionUndoButton();
+      positionProjectionControls();
+    }
     invalidation.invalidate(["scene", "camera", "frame"]);
     syncTitleOverlay();
     requestRender();

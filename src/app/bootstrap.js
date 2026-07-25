@@ -794,7 +794,6 @@ async function bootstrapApplication() {
 
   const startMapRuntime = async () => {
     try {
-      await waitForMaplibreGlobal();
       const { createMaplibreScreenRuntime } = await import("../renderers/screen/maplibre/runtime.js");
       const runtime = createMaplibreScreenRuntime({
         pmtilesManifest,
@@ -860,9 +859,7 @@ async function bootstrapApplication() {
         window.LayerV2.mapStartupError = null;
       }
       runtime.whenStyleReady(() => {
-        window.setTimeout(() => {
-          void reattachPersistedSupabaseLayers(layerModel, screenRuntime);
-        }, 0);
+        schedulePersistedSupabaseLayerReattach(layerModel, screenRuntime);
       });
     } catch (error) {
       mapStartupError = error;
@@ -892,28 +889,6 @@ async function bootstrapApplication() {
     editableStore,
     screenRuntime,
   };
-}
-
-function waitForMaplibreGlobal({ timeoutMs = 8000 } = {}) {
-  if (window.maplibregl) {
-    return Promise.resolve();
-  }
-
-  return new Promise((resolve, reject) => {
-    const startedAt = performance.now();
-    const check = () => {
-      if (window.maplibregl) {
-        resolve();
-        return;
-      }
-      if (performance.now() - startedAt >= timeoutMs) {
-        reject(new Error("MapLibre failed to load before map startup timeout."));
-        return;
-      }
-      window.setTimeout(check, 25);
-    };
-    check();
-  });
 }
 
 function createDeferredScreenRuntime() {
@@ -1290,7 +1265,7 @@ function serializeFilterConfig(row) {
     ? filter.conditions.map((condition) => ({
       field: condition.field,
       op: condition.op ?? "==",
-      value: condition.value ?? "",
+      ...(condition.valueRef ? { valueRef: condition.valueRef } : { value: condition.value ?? "" }),
     }))
     : filter.field
       ? [{ field: filter.field, op: filter.op ?? "==", value: filter.value ?? "" }]
@@ -1487,74 +1462,93 @@ function attachSupabaseLayerResultToRuntime({ layerModel, screenRuntime, rowId, 
   return true;
 }
 
-async function warmFullSupabaseLayerAfterScopedLoad({ layerModel, screenRuntime, rowId, layerId, layerResult }) {
-  if (!layerResult?.filterScope) {
+function scheduleIdleTask(callback, { timeout = 3000 } = {}) {
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(callback, { timeout });
     return;
   }
-  try {
-    const fullLayerResult = await loadLayerFromSupabaseLazy(layerId);
-    if (!fullLayerResult?.geojson && !fullLayerResult?.tilesUrl) {
-      return;
-    }
-    supabaseLayerDataCache.set(layerId, fullLayerResult);
-    attachSupabaseLayerResultToRuntime({ layerModel, screenRuntime, rowId, layerId, layerResult: fullLayerResult });
+  window.setTimeout(callback, Math.min(timeout, 1000));
+}
+
+function schedulePersistedSupabaseLayerReattach(layerModel, screenRuntime) {
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      window.setTimeout(() => {
+        void reattachPersistedSupabaseLayers(layerModel, screenRuntime);
+      }, 0);
+    });
+  });
+}
+
+function isSupabaseLayerRowVisible(layerModel, rowId) {
+  const row = layerModel.getRowById(rowId);
+  return row ? getStoredRowVisibility(layerModel, row) : false;
+}
+
+async function reattachPersistedSupabaseLayer(layerModel, screenRuntime, { rowId, layerId }) {
+  const row = layerModel.getRowById(rowId);
+  const defaultView = await loadLayerDefaultViewLazy(layerId);
+  materializeLayerDefaultViewRows(layerModel, row, defaultView, {
+    sourceLayerId: layerId,
+    geometryTypes: row?.geometryTypes ?? [],
+    geometryType: row?.geometryType ?? "mixed",
+  });
+  const initialFilter = buildInitialLoadFilterExpressionForLayer(layerModel, row, defaultView);
+  const cachedLayer = await loadCachedLayerResultLazy(layerId, initialFilter);
+  if (cachedLayer) {
+    supabaseLayerDataCache.set(layerId, cachedLayer);
+    attachSupabaseLayerResultToRuntime({ layerModel, screenRuntime, rowId, layerId, layerResult: cachedLayer });
     requestPrintRendererSync();
-  } catch (error) {
-    console.warn("Failed to warm full Supabase layer data:", error?.message ?? error);
   }
+  const loadedLayer = await loadLayerFromSupabaseLazy(layerId, {
+    propertyFilter: initialFilter,
+  });
+  supabaseLayerDataCache.set(layerId, loadedLayer);
+  const freshRow = layerModel.getRowById(rowId) ?? row;
+  if (loadedLayer.geojson || loadedLayer.tilesUrl) {
+    attachSupabaseLayerResultToRuntime({ layerModel, screenRuntime, rowId, layerId, layerResult: loadedLayer });
+  }
+  if (freshRow) {
+    applyPersistedRowVisibility(layerModel, screenRuntime, freshRow);
+    attachDynamicFilterRowsRecursively(layerModel, screenRuntime, freshRow);
+    syncDynamicFilterOwnershipRecursively(layerModel, screenRuntime, freshRow);
+  }
+}
+
+async function reattachPersistedSupabaseLayerQueue(layerModel, screenRuntime, supabaseLayers) {
+  let suppressedAny = false;
+  for (const layerEntry of supabaseLayers) {
+    try {
+      await reattachPersistedSupabaseLayer(layerModel, screenRuntime, layerEntry);
+    } catch (err) {
+      if (err?.code === "LAYER_NOT_FOUND") {
+        suppressedAny = layerModel.suppressRow(layerEntry.rowId) || suppressedAny;
+        continue;
+      }
+      console.warn(`Failed to reattach layer ${layerEntry.layerId}:`, err.message);
+    }
+  }
+  if (suppressedAny) {
+    window.LayerV2?.rerenderLayerMenu?.();
+  }
+  screenRuntime.reapplyFullOrder?.();
 }
 
 async function reattachPersistedSupabaseLayers(layerModel, screenRuntime) {
   const supabaseLayers = layerModel.getSupabaseLayers();
   if (!supabaseLayers.length) return;
 
-  let suppressedAny = false;
-  for (const { rowId, layerId } of supabaseLayers) {
-    try {
-      const row = layerModel.getRowById(rowId);
-      const cachedInitialFilter = buildInitialLoadFilterExpressionForLayer(layerModel, row, {
-        initialLoad: { mode: DEFAULT_VIEW_INITIAL_LOAD_ACTIVE_DEFAULTS },
-      });
-      const cachedLayer = await loadCachedLayerResultLazy(layerId, cachedInitialFilter)
-        ?? await loadCachedLayerResultLazy(layerId, null);
-      if (cachedLayer) {
-        supabaseLayerDataCache.set(layerId, cachedLayer);
-        attachSupabaseLayerResultToRuntime({ layerModel, screenRuntime, rowId, layerId, layerResult: cachedLayer });
-        requestPrintRendererSync();
-      }
-      const defaultView = await loadLayerDefaultViewLazy(layerId);
-      materializeLayerDefaultViewRows(layerModel, row, defaultView, {
-        sourceLayerId: layerId,
-        geometryTypes: row?.geometryTypes ?? [],
-        geometryType: row?.geometryType ?? "mixed",
-      });
-      const loadedLayer = await loadLayerFromSupabaseLazy(layerId, {
-        propertyFilter: buildInitialLoadFilterExpressionForLayer(layerModel, row, defaultView),
-      });
-      supabaseLayerDataCache.set(layerId, loadedLayer);
-      const freshRow = layerModel.getRowById(rowId) ?? row;
-      if (loadedLayer.geojson || loadedLayer.tilesUrl) {
-        attachSupabaseLayerResultToRuntime({ layerModel, screenRuntime, rowId, layerId, layerResult: loadedLayer });
-        void warmFullSupabaseLayerAfterScopedLoad({ layerModel, screenRuntime, rowId, layerId, layerResult: loadedLayer });
-      }
-      if (freshRow) {
-        applyPersistedRowVisibility(layerModel, screenRuntime, freshRow);
-        attachDynamicFilterRowsRecursively(layerModel, screenRuntime, freshRow);
-        syncDynamicFilterOwnershipRecursively(layerModel, screenRuntime, freshRow);
-      }
-    } catch (err) {
-      if (err?.code === "LAYER_NOT_FOUND") {
-        suppressedAny = layerModel.suppressRow(rowId) || suppressedAny;
-        continue;
-      }
-      console.warn(`Failed to reattach layer ${layerId}:`, err.message);
-    }
+  const visibleLayers = supabaseLayers.filter(({ rowId }) => isSupabaseLayerRowVisible(layerModel, rowId));
+  const hiddenLayers = supabaseLayers.filter(({ rowId }) => !isSupabaseLayerRowVisible(layerModel, rowId));
+
+  await reattachPersistedSupabaseLayerQueue(layerModel, screenRuntime, visibleLayers);
+  if (!hiddenLayers.length) {
+    return;
   }
 
-  if (suppressedAny) {
-    window.LayerV2?.rerenderLayerMenu?.();
-  }
-  screenRuntime.reapplyFullOrder?.();
+  scheduleIdleTask(() => {
+    void reattachPersistedSupabaseLayerQueue(layerModel, screenRuntime, hiddenLayers);
+  }, { timeout: 5000 });
 }
 
 function applyPersistedRowVisibility(layerModel, screenRuntime, row) {
@@ -2391,8 +2385,7 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
       reportProgress(92, "Applying default filter controls");
       syncDynamicFilterTree(layerModel, screenRuntime, runtimeRow);
     }
-    reportProgress(96, "Layer added; warming full data");
-    void warmFullSupabaseLayerAfterScopedLoad({ layerModel, screenRuntime, rowId: added.id, layerId: layerRef, layerResult });
+    reportProgress(96, "Layer added");
   }
 
   const runtimeTargetId = getRowRuntimeTargetId(added);
@@ -2473,7 +2466,6 @@ async function refreshSupabaseLayerDataInBackground(layerId, layerModel, screenR
         layerResult,
         displayGeometryTypes,
       });
-      void warmFullSupabaseLayerAfterScopedLoad({ layerModel, screenRuntime, rowId: targetRowId, layerId, layerResult });
       requestPrintRendererSync();
     }
   } catch (error) {

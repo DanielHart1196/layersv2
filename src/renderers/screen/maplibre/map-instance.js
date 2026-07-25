@@ -1,6 +1,6 @@
-// MapLibre loaded from CDN - use global instead of import
-// import maplibregl from "maplibre-gl";
-// import "maplibre-gl/dist/maplibre-gl.css";
+import * as maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { Protocol } from "pmtiles";
 import {
   createGeojsonVectorSourceSpec,
@@ -20,6 +20,7 @@ import {
 } from "../../../core/layer-definitions.js";
 
 let protocolInstalled = false;
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
 // Track which layers have been loaded to prevent duplicate loading
 const loadedLayers = new Set();
@@ -1230,9 +1231,6 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
   if (!container) {
     return null;
   }
-
-  // Use MapLibre from CDN
-  const maplibregl = window.maplibregl;
 
   ensureProtocol(maplibregl, manifest);
   const layerState = structuredClone(initialLayerState);

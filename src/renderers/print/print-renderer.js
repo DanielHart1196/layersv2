@@ -343,14 +343,60 @@ function geometryRecordFromFeatures(features) {
   };
 }
 
-function normalizeFilterConditions(row) {
+function getVariableRowKey(row) {
+  return row?.variableId ?? row?.key ?? row?.target?.key ?? "";
+}
+
+function findVariableRow(layerModel, variableId, scopeRow = null) {
+  const targetVariableId = String(variableId ?? "");
+  if (!targetVariableId) {
+    return null;
+  }
+
+  const visit = (rows = []) => {
+    for (const row of rows) {
+      if (getVariableRowKey(row) === targetVariableId) {
+        return row;
+      }
+      const found = visit(layerModel.getChildRows?.(row.id) ?? row.rows ?? []);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  };
+
+  if (scopeRow?.id) {
+    const scopedMatch = visit([scopeRow]);
+    if (scopedMatch) {
+      return scopedMatch;
+    }
+  }
+
+  return visit(layerModel.getRootRows?.() ?? []);
+}
+
+function resolvePrintFilterValue(layerModel, layerState, condition, scopeRow = null) {
+  const valueRef = String(condition?.valueRef ?? "").trim();
+  if (!valueRef) {
+    return condition?.value ?? "";
+  }
+
+  const variableRow = findVariableRow(layerModel, valueRef, scopeRow);
+  const variableKey = getVariableRowKey(variableRow);
+  return variableKey
+    ? getStateRecord(layerState, variableRow.id)?.[variableKey] ?? condition?.value ?? ""
+    : condition?.value ?? "";
+}
+
+function normalizeFilterConditions(row, layerModel, layerState) {
   if (Array.isArray(row?.filter?.conditions) && row.filter.conditions.length) {
     return row.filter.conditions
       .filter((condition) => condition?.field && condition.op !== "all")
       .map((condition) => ({
         field: condition.field === "__dataset" ? "_dataset_id" : condition.field,
         op: condition.op ?? "==",
-        value: condition.value ?? "",
+        value: resolvePrintFilterValue(layerModel, layerState, condition, row),
       }));
   }
   if (!row?.filter?.field) {
@@ -371,7 +417,7 @@ function buildDynamicPrintFilters(layerModel, layerState, parentRow) {
       if (childRow?.type !== "layer" || childRow.kind !== "filter" || getStateRecord(layerState, childRow.id).visible === false) {
         return;
       }
-      const conditions = normalizeFilterConditions(childRow);
+      const conditions = normalizeFilterConditions(childRow, layerModel, layerState);
       if (conditions.length) {
         const layerId = childRow.runtimeLayerId ?? childRow.layerId ?? childRow.id;
         filters.push({

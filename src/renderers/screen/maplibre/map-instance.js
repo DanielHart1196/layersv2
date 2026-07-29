@@ -1771,7 +1771,14 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       }
 
       const color = style?.color ?? "#e74c3c";
-      const opacity = (style?.opacity ?? 80) / 100;
+      const fillColor = style?.fillColor ?? color;
+      const fillOpacity = (style?.fillOpacity ?? style?.opacity ?? 80) / 100;
+      const lineColor = style?.lineColor ?? color;
+      const lineOpacity = (style?.lineOpacity ?? style?.opacity ?? 80) / 100;
+      const lineWeight = style?.lineWeight ?? style?.weight ?? 2;
+      const pointColor = style?.pointColor ?? color;
+      const pointOpacity = (style?.pointOpacity ?? style?.opacity ?? 80) / 100;
+      const pointRadius = style?.pointRadius ?? style?.radius ?? 6;
       if (tilesUrl) {
         map.addSource(sourceId, { type: "vector", url: `pmtiles://${tilesUrl}` });
       } else {
@@ -1784,23 +1791,23 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
       if (resolvedGeometryTypes.includes("polygon")) {
         map.addLayer({ id: `${sourceId}-fill`, type: "fill", source: sourceId, ...sourceLayerProp,
           ...(effectiveFeatureFilter ? { filter: effectiveFeatureFilter } : {}),
-          paint: { "fill-color": color, "fill-opacity": opacity } });
+          paint: { "fill-color": fillColor, "fill-opacity": fillOpacity } });
       }
       if (resolvedGeometryTypes.includes("line") || resolvedGeometryTypes.includes("polygon")) {
         map.addLayer({ id: `${sourceId}-line`, type: "line", source: sourceId, ...sourceLayerProp,
           ...(effectiveFeatureFilter ? { filter: effectiveFeatureFilter } : {}),
-          paint: { "line-color": color, "line-opacity": opacity, "line-width": style?.weight ?? 2 } });
+          paint: { "line-color": lineColor, "line-opacity": lineOpacity, "line-width": lineWeight } });
       }
       if (resolvedGeometryTypes.includes("point")) {
         map.addLayer({ id: `${sourceId}-circle`, type: "circle", source: sourceId, ...sourceLayerProp,
           ...(effectiveFeatureFilter ? { filter: effectiveFeatureFilter } : {}),
           paint: {
-            "circle-color": color,
-            "circle-opacity": opacity,
-            "circle-radius": style?.radius ?? 6,
+            "circle-color": pointColor,
+            "circle-opacity": pointOpacity,
+            "circle-radius": pointRadius,
             "circle-stroke-color": style?.lineColor ?? "#ffffff",
-            "circle-stroke-opacity": (style?.lineOpacity ?? 100) / 100,
-            "circle-stroke-width": style?.lineWeight ?? 1,
+            "circle-stroke-opacity": (style?.lineOpacity ?? style?.opacity ?? 100) / 100,
+            "circle-stroke-width": style?.lineWeight ?? style?.weight ?? 1,
           } });
       }
       const stored = layerState[layerId];
@@ -1843,6 +1850,14 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
 
     const sourceLayerProp = getDynamicSourceLayerProp(sourceLayerId);
     const filterExpression = effectiveFeatureFilter;
+    const fillColorFallback = style?.fillColor ?? style?.color ?? "#2ecc71";
+    const fillOpacityFallback = style?.fillOpacity ?? style?.opacity ?? 60;
+    const lineColorFallback = style?.lineColor ?? style?.color ?? (resolvedGeometryTypes.includes("line") ? "#3498db" : "#1f7a45");
+    const lineWeightFallback = style?.lineWeight ?? style?.weight ?? 2;
+    const lineOpacityFallback = style?.lineOpacity ?? style?.opacity ?? 90;
+    const pointColorFallback = style?.pointColor ?? style?.color ?? "#e74c3c";
+    const pointOpacityFallback = style?.pointOpacity ?? style?.opacity ?? 80;
+    const pointRadiusFallback = style?.pointRadius ?? style?.radius ?? 6;
 
     if (resolvedGeometryTypes.includes("polygon")) {
       map.addLayer({
@@ -1853,8 +1868,8 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         ...(filterExpression ? { filter: filterExpression } : {}),
         layout: { visibility: getInheritedLayoutVisibility(layerState, `${layerId}::fill`) },
         paint: {
-          "fill-color": getLayerStyleValue(layerState, layerId, "fillColor", "#2ecc71"),
-          "fill-opacity": Number(getLayerStyleValue(layerState, layerId, "fillOpacity", 60)) / 100,
+          "fill-color": getLayerStyleValue(layerState, layerId, "fillColor", fillColorFallback),
+          "fill-opacity": Number(getLayerStyleValue(layerState, layerId, "fillOpacity", fillOpacityFallback)) / 100,
         },
       });
     }
@@ -1867,9 +1882,9 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         ...(filterExpression ? { filter: filterExpression } : {}),
         layout: { visibility: getInheritedLayoutVisibility(layerState, `${layerId}::line`) },
         paint: {
-          "line-color": getLayerStyleValue(layerState, layerId, "lineColor", resolvedGeometryTypes.includes("line") ? "#3498db" : "#1f7a45"),
-          "line-width": buildLineWidthExpression(getLayerStyleValue(layerState, layerId, "lineWeight", 2)),
-          "line-opacity": Number(getLayerStyleValue(layerState, layerId, "lineOpacity", 90)) / 100,
+          "line-color": getLayerStyleValue(layerState, layerId, "lineColor", lineColorFallback),
+          "line-width": buildLineWidthExpression(getLayerStyleValue(layerState, layerId, "lineWeight", lineWeightFallback)),
+          "line-opacity": Number(getLayerStyleValue(layerState, layerId, "lineOpacity", lineOpacityFallback)) / 100,
         },
       });
     }
@@ -1882,12 +1897,12 @@ function createMapInstance({ container, manifest = [], viewState, initialLayerSt
         ...(filterExpression ? { filter: filterExpression } : {}),
         layout: { visibility: getInheritedLayoutVisibility(layerState, `${layerId}::point-fill`) },
         paint: {
-          "circle-color": getLayerStyleValue(layerState, layerId, "pointColor", "#e74c3c"),
-          "circle-opacity": Number(getLayerStyleValue(layerState, layerId, "pointOpacity", 80)) / 100,
-          "circle-radius": Number(getLayerStyleValue(layerState, layerId, "pointRadius", 6)),
-          "circle-stroke-color": getLayerStyleValue(layerState, layerId, "lineColor", "#ffffff"),
-          "circle-stroke-opacity": Number(getLayerStyleValue(layerState, layerId, "lineOpacity", 100)) / 100,
-          "circle-stroke-width": Number(getLayerStyleValue(layerState, layerId, "lineWeight", 1)),
+          "circle-color": getLayerStyleValue(layerState, layerId, "pointColor", pointColorFallback),
+          "circle-opacity": Number(getLayerStyleValue(layerState, layerId, "pointOpacity", pointOpacityFallback)) / 100,
+          "circle-radius": Number(getLayerStyleValue(layerState, layerId, "pointRadius", pointRadiusFallback)),
+          "circle-stroke-color": getLayerStyleValue(layerState, layerId, "lineColor", style?.lineColor ?? "#ffffff"),
+          "circle-stroke-opacity": Number(getLayerStyleValue(layerState, layerId, "lineOpacity", style?.lineOpacity ?? style?.opacity ?? 100)) / 100,
+          "circle-stroke-width": Number(getLayerStyleValue(layerState, layerId, "lineWeight", style?.lineWeight ?? 1)),
         },
       });
     }

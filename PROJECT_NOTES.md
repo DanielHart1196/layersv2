@@ -5,6 +5,43 @@
 - This file is the local architecture note set for the MapLibre Layers app.
 - Keep this file active and current, not archival.
 
+## Beta Release Readiness
+- Do not treat the project as beta/public-release ready until security, backend reproducibility, dependency, and deployment-hygiene gates below are resolved.
+- Completed beta lockdown work:
+  - Public/anonymous hosted-layer writes are removed from the repo schema and covered by `supabase/migrations/011_beta_read_only_catalog.sql`.
+  - `layer-files` storage is public-read only in the repo schema and beta lockdown migration; public upload/update policies are removed.
+  - Public/deployed UI now treats hosted catalog layers as read-only. Hosted creation, data append, canonical rename, metadata edit, and default-save controls are gated behind local admin mode.
+  - Localhost admin edits use a local-only server that reads `SUPABASE_SERVICE_ROLE_KEY` from ignored local env. Never expose the service role key through `VITE_*` or browser code.
+  - Hosted layer defaults are applied into the UUID-scoped runtime style state when Supabase layers are attached, and hosted row deletion clears UUID-scoped style state so stale local styles cannot beat fresh catalog defaults on re-add.
+  - Hosted layer style defaults are explicit-save only. Slider movement may update the current runtime map state, but must not autosave catalog `default_style`; both direct-source and derived dynamic renderer paths must honor `fill*`, `line*`, and `point*` keys before falling back to generic `color`, `opacity`, `weight`, or `radius`.
+- Highest-priority security gates:
+  - Verify the live Supabase project after applying `011_beta_read_only_catalog.sql`: anon/public users should fail to insert/update/delete `layers`, `datasets`, `features`, and `layer-files` objects.
+  - Audit every `security definer` RPC before launch. Export/filter RPCs must explicitly re-check layer visibility, ownership, or collaborator access inside the function instead of relying on caller-side RLS.
+  - The checked-in Supabase schema/migrations must fully recreate the live backend. If client code uses a table such as `map_shares`, that table, indexes, and RLS policies need to exist in repo migrations.
+- Beta admin workflow:
+  - Public/deployed app should treat hosted catalog layers as read-only.
+  - Localhost admin edits may use a local-only server that reads `SUPABASE_SERVICE_ROLE_KEY` from ignored local env. Never expose the service role key through `VITE_*` or browser code.
+  - Global product auth, admins, layer owners, free self-hosting, and paid hosted publishing are future flows; do not preserve anonymous canonical writes as a shortcut for those future capabilities.
+- Dependency/security gates:
+  - `npm audit --omit=dev` should be clean or each remaining advisory should have an explicit accepted-risk note.
+  - `xlsx` is currently a direct user-upload parser dependency with high-severity advisories and no npm-audit fix. Before beta, replace it, sandbox/limit spreadsheet parsing, or remove XLSX upload support.
+  - Run `npm audit fix` or dependency upgrades for fixable transitive advisories such as `ws` and `protocol-buffers-schema`, then verify build/runtime behavior.
+- Public embarrassment gates:
+  - Remove or gate production-visible debug/noisy `console.log` output from runtime source. No beta build should ship logs like "implementation needed".
+  - Update `README.md` so it describes the current product accurately, not as a "runnable scaffold only".
+  - Add baseline production security headers in `public/_headers`, including a deliberate CSP, frame policy, referrer policy, and permissions policy appropriate for the final hosting target.
+- Deployment/data gates:
+  - `npm run build` currently passes, but Vite copies every local file under `public`, including ignored/generated artifacts. Do not deploy from a dirty local `public` tree.
+  - Keep deployable public assets represented intentionally in source control or in an explicit artifact/CDN pipeline. Large local files such as generated `.zip`, `.mbtiles`, and huge GeoJSON artifacts should not silently land in `dist`.
+  - Before beta, verify hosting quotas, cache invalidation, source attribution, and license posture for every shipped public data asset.
+- A beta readiness pass should report concrete status for:
+  - no tracked secrets
+  - clean/reviewed dependency audit
+  - RLS/storage/RPC policy test results against the live Supabase project
+  - reproducible migrations from an empty database
+  - production build size and asset manifest review
+  - runtime smoke test for upload, share, load existing layer, filter, print, and mobile interaction
+
 ## Current Reset Direction
 - Layers uses one main MapLibre globe runtime.
 - Do not keep lab pages, deck overlays, custom globe test layers, or separate polar overlay systems in the production path.

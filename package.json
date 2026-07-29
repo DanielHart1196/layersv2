@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "admin:local": "node ./scripts/local-admin-server.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "build:countries:dissolved-land": "node ./scripts/build-countries-dissolved-land-geojson.mjs",

@@ -17,6 +17,7 @@ import {
 import { bindShareControls, readShareSnapshotFromLocation } from "./share-controls.js";
 import { bindTitleControls } from "./title-controls.js";
 import { createFeatureInspector } from "./feature-inspector.js";
+import { isLocalAdminEnabled } from "../sources/supabase/local-admin-api.js";
 
 const supabaseLayerDataCache = new Map();
 
@@ -99,6 +100,7 @@ async function bootstrapApplication() {
   const printRenderer = createLazyPrintRendererAdapter();
   const projections = getProjectionRegistry();
   const featureInspector = createFeatureInspector();
+  const canEditHostedLayers = isLocalAdminEnabled();
   const viewState = {
     ...viewModel.getState(),
     hasCameraState: viewModel.hasCameraState(),
@@ -450,6 +452,7 @@ async function bootstrapApplication() {
   const getDataTablePanel = () => {
     if (!dataTablePanelPromise) {
       dataTablePanelPromise = import("./data-table-panel.js").then(({ mountDataTablePanel }) => mountDataTablePanel({
+        canEditHostedLayers,
         getAppearanceState: () => layerModel.getAppearanceState(),
         getLayerDatasets,
         async loadTablePreview(layerId, { limit, offset, datasetId }) {
@@ -465,13 +468,16 @@ async function bootstrapApplication() {
           return getLayerTablePreview(layerId, { limit, offset, datasetId });
         },
         onAddDataRequested(args) {
+          if (!canEditHostedLayers) {
+            return;
+          }
           void getAddDataPanel()
             .then((addDataPanel) => addDataPanel.open(args))
             .catch((error) => console.error("Failed to open add data panel.", error));
         },
-        onRenameLayer: renameLayer,
-        onRenameDataset: renameDataset,
-        onUpdateDatasetMetadata: updateDatasetMetadata,
+        onRenameLayer: canEditHostedLayers ? renameLayer : null,
+        onRenameDataset: canEditHostedLayers ? renameDataset : null,
+        onUpdateDatasetMetadata: canEditHostedLayers ? updateDatasetMetadata : null,
       }));
     }
     return dataTablePanelPromise;
@@ -479,9 +485,10 @@ async function bootstrapApplication() {
   const getCreateLayerPanel = () => {
     if (!createLayerPanelPromise) {
       createLayerPanelPromise = import("./create-layer-panel.js").then(({ mountCreateLayerPanel }) => mountCreateLayerPanel({
+        allowCreateHostedLayers: canEditHostedLayers,
         getAppearanceState: () => layerModel.getAppearanceState(),
         onLayerCreated: handleLayerCreated,
-        onLayerDeleted: async (layer) => {
+        onLayerDeleted: canEditHostedLayers ? async (layer) => {
           const layerId = String(layer?.id ?? "").trim();
           if (!SUPABASE_UUID.test(layerId)) {
             throw new Error("Only uploaded layers can be deleted here.");
@@ -499,7 +506,7 @@ async function bootstrapApplication() {
           supabaseLayerDataCache.delete(layerId);
           rerenderLayerMenu();
           requestPrintRendererSync();
-        },
+        } : null,
       }));
     }
     return createLayerPanelPromise;
@@ -614,11 +621,6 @@ async function bootstrapApplication() {
 
       screenRuntime.setLayerStyleValue(update.runtimeTargetId ?? update.layerId, update.key, update.value);
       syncVisibleStyleControls(cascadeParentStyleToFixedFilterChildren(layerModel, screenRuntime, row, update));
-      // Persist style changes as new defaults for Supabase layers.
-      const styleOwnerLayerRef = getStyleOwnerLayerRef(layerModel, update);
-      if (styleOwnerLayerRef) {
-        debouncedUpdateDefaultStyle(styleOwnerLayerRef, update.key, update.value);
-      }
       requestPrintRendererSync();
     },
     onRemoveRow: (rowId, parentId, row) => {
@@ -645,21 +647,22 @@ async function bootstrapApplication() {
       rerenderLayerMenu();
       requestPrintRendererSync();
     },
-    onApplyLayerDefaults: (row) => {
+    onApplyLayerDefaults: canEditHostedLayers ? (row) => {
       return applyCurrentLayerSettingsAsDefaults(row, layerModel, screenRuntime)
-        .then(() => {
+        .then((result) => {
           requestPrintRendererSync();
           window.setTimeout(() => rerenderLayerMenu(), 900);
+          return result;
         });
-    },
-    onResetLayerDefaults: (row) => {
+    } : null,
+    onResetLayerDefaults: canEditHostedLayers ? (row) => {
       return resetLayerSettingsToDefaults(row, layerModel, screenRuntime)
         .then(() => {
           requestPrintRendererSync();
           window.setTimeout(() => rerenderLayerMenu(), 900);
         });
-    },
-    onRenameLayer: renameLayer,
+    } : null,
+    onRenameLayer: canEditHostedLayers ? renameLayer : null,
     onDataAction: (row) => {
       if (!row?.layerRef || !SUPABASE_UUID.test(row.layerRef)) {
         return;
@@ -994,28 +997,6 @@ function createDeferredScreenRuntime() {
 
 const SUPABASE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DEFAULT_VIEW_INITIAL_LOAD_ACTIVE_DEFAULTS = "active-defaults";
-
-// Accumulate style changes per layer and flush after 1s of inactivity.
-const pendingStyleUpdates = new Map(); // layerRef → { ...style keys }
-const styleUpdateTimers = new Map();   // layerRef → timer id
-
-function debouncedUpdateDefaultStyle(layerRef, key, value) {
-  if (!pendingStyleUpdates.has(layerRef)) pendingStyleUpdates.set(layerRef, {});
-  pendingStyleUpdates.get(layerRef)[key] = value;
-
-  clearTimeout(styleUpdateTimers.get(layerRef));
-  styleUpdateTimers.set(layerRef, setTimeout(async () => {
-    const patch = pendingStyleUpdates.get(layerRef);
-    pendingStyleUpdates.delete(layerRef);
-    styleUpdateTimers.delete(layerRef);
-    try {
-      const { updateLayerDefaultStyle } = await import("../sources/supabase/layer-loader.js");
-      await updateLayerDefaultStyle(layerRef, patch);
-    } catch (err) {
-      console.warn("Failed to save layer style defaults:", err.message);
-    }
-  }, 1000));
-}
 
 async function loadLayerFields(layerRef, context = {}) {
   const sourceLayerId = resolveFilterPanelSourceLayerId(layerRef, context);
@@ -1406,6 +1387,17 @@ function collectLayerDefaultStylePatch(layerModel, row) {
   return patch;
 }
 
+function formatDefaultStyleSummary(style = {}) {
+  if (!style || typeof style !== "object") {
+    return "no style";
+  }
+  const keys = ["fillOpacity", "lineOpacity", "lineWeight", "fillColor", "lineColor"];
+  return keys
+    .filter((key) => style[key] !== undefined && style[key] !== null)
+    .map((key) => `${key}=${style[key]}`)
+    .join(", ") || "no tracked style values";
+}
+
 function buildInitialLoadFilterExpressionForLayer(layerModel, row, defaultView = {}) {
   const normalized = normalizeLayerDefaultView(defaultView);
   if (normalized.initialLoad?.mode !== DEFAULT_VIEW_INITIAL_LOAD_ACTIVE_DEFAULTS) {
@@ -1428,6 +1420,7 @@ function attachSupabaseLayerResultToRuntime({ layerModel, screenRuntime, rowId, 
   if (!layerResult?.geojson && !layerResult?.tilesUrl) {
     return false;
   }
+  layerModel.applyHostedLayerDefaultStyle?.(layerId, layerResult.layer?.default_style);
   const row = rowId ? layerModel.getRowById(rowId) : null;
   const rowState = rowId ? layerModel.getState()?.[rowId] ?? {} : {};
   const runtimeGeometryTypes = Array.isArray(displayGeometryTypes) && displayGeometryTypes.length
@@ -1634,23 +1627,6 @@ function findLayerRowByLayerRef(layerModel, layerRef) {
   return layerModel.getSupabaseLayers()
     .map((entry) => layerModel.getRowById(entry.rowId))
     .find((row) => row?.layerRef === layerRef) ?? null;
-}
-
-function getStyleOwnerLayerRef(layerModel, update) {
-  if (!update || update.target?.kind !== "layer-style") {
-    return "";
-  }
-  if (SUPABASE_UUID.test(update.layerId)) {
-    return update.layerId;
-  }
-
-  const runtimeTargetId = update.runtimeTargetId ?? update.layerId;
-  const runtimeTargetBase = /^(.+)::/.exec(runtimeTargetId ?? "")?.[1] ?? runtimeTargetId;
-  const ownerRow = findRowByRuntimeTargetId(layerModel, runtimeTargetBase)
-    ?? layerModel.getRowById(runtimeTargetBase);
-  return ownerRow?.layerRef && SUPABASE_UUID.test(ownerRow.layerRef)
-    ? ownerRow.layerRef
-    : "";
 }
 
 function formatStyleControlValue(key, value) {
@@ -2355,6 +2331,7 @@ async function addDataRowAndAttach({ parentId, name, layerRef, geometryTypes = [
     layerRef,
     geometryTypes: geometryTypes.length ? geometryTypes : (Array.isArray(layer.geometry_types) ? layer.geometry_types : []),
     geometryType: geometryType ?? layer.geometry_type ?? "mixed",
+    defaultStyle: layer.default_style,
   });
   if (!added) {
     return null;
@@ -2475,7 +2452,7 @@ async function refreshSupabaseLayerDataInBackground(layerId, layerModel, screenR
 
 async function applyCurrentLayerSettingsAsDefaults(row, layerModel, screenRuntime) {
   if (!row?.layerRef || !SUPABASE_UUID.test(row.layerRef)) {
-    return;
+    throw new Error("Layer defaults can only be saved for hosted Supabase layers.");
   }
   const defaultView = serializeLayerDefaultView(layerModel, row);
   const stylePatch = collectLayerDefaultStylePatch(layerModel, row);
@@ -2485,12 +2462,27 @@ async function applyCurrentLayerSettingsAsDefaults(row, layerModel, screenRuntim
     await updateLayerDefaultStyle(row.layerRef, stylePatch);
   }
   await clearCachedLayerResultsLazy(row.layerRef);
+  const verifiedLayer = await loadLayerFromSupabaseLazy(row.layerRef, {
+    propertyFilter: buildInitialLoadFilterExpressionForLayer(layerModel, row, defaultView),
+  });
+  const savedRows = Array.isArray(verifiedLayer?.layer?.default_view?.rows)
+    ? verifiedLayer.layer.default_view.rows.length
+    : 0;
+  const savedStyleKeys = verifiedLayer?.layer?.default_style && typeof verifiedLayer.layer.default_style === "object"
+    ? Object.keys(verifiedLayer.layer.default_style).length
+    : 0;
+  if (!verifiedLayer?.layer) {
+    throw new Error("Layer defaults were submitted, but the saved layer could not be verified.");
+  }
   void refreshSupabaseLayerDataInBackground(row.layerRef, layerModel, screenRuntime, {
     rowId: row.id,
     propertyFilter: buildInitialLoadFilterExpressionForLayer(layerModel, row, defaultView),
     displayGeometryTypes: row.geometryTypes ?? [],
     clearCache: false,
   });
+  return {
+    message: `Saved defaults (${savedRows} rows, ${savedStyleKeys} style keys: ${formatDefaultStyleSummary(verifiedLayer.layer.default_style)}).`,
+  };
 }
 
 async function resetLayerSettingsToDefaults(row, layerModel, screenRuntime) {

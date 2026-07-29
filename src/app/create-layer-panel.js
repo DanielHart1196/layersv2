@@ -448,7 +448,7 @@ function comparePreviewRows(leftRow, rightRow, columnName, direction) {
   return direction === "desc" ? -result : result;
 }
 
-export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLayerDeleted }) {
+export function mountCreateLayerPanel({ allowCreateHostedLayers = false, getAppearanceState, onLayerCreated, onLayerDeleted }) {
   const panel = createPanelShell();
   document.body.appendChild(panel);
 
@@ -591,6 +591,9 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
   }
 
   function renderModeSelector() {
+    if (!allowCreateHostedLayers) {
+      return "";
+    }
     const isCreateNew = state.mode !== CREATE_LAYER_MODE_EXISTING;
     return `
       <div class="clp-mode-selector" role="radiogroup" aria-label="Layer destination">
@@ -621,6 +624,9 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
       button.addEventListener("click", () => {
         const nextMode = button.getAttribute("data-mode");
         if (!nextMode || nextMode === state.mode) {
+          return;
+        }
+        if (nextMode === CREATE_LAYER_MODE_NEW && !allowCreateHostedLayers) {
           return;
         }
         state.mode = nextMode;
@@ -703,7 +709,7 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
   }
 
   function enableExistingLayerDeleteLongPress(button) {
-    if (!button || !onLayerDeleted) {
+    if (!button || !allowCreateHostedLayers || !onLayerDeleted) {
       return;
     }
 
@@ -1853,6 +1859,9 @@ export function mountCreateLayerPanel({ getAppearanceState, onLayerCreated, onLa
   }
 
   function renderForm() {
+    if (!allowCreateHostedLayers && state.mode !== CREATE_LAYER_MODE_EXISTING) {
+      state.mode = CREATE_LAYER_MODE_EXISTING;
+    }
     const el = html(`
       <div class="clp-form">
         ${renderModeSelector()}

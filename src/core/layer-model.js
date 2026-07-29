@@ -961,6 +961,9 @@ function createLayerModel() {
       rowDefinitionsById.delete(row.id);
       dynamicIds.delete(row.id);
       delete layerState[row.id];
+      if (row.type === "layer" && row.layerRef) {
+        delete layerState[row.layerRef];
+      }
       if (row.type === "layer" && row.kind === "filter") {
         delete layerState[row.runtimeLayerId ?? row.layerId];
       }
@@ -1468,7 +1471,7 @@ function createLayerModel() {
 
   // Adds a new data row (type: "layer") pointing to an entry in the layer catalog.
   // layerRef is the catalog layer ID (e.g. "land", or a Supabase UUID later).
-  function addDataRow(parentId, { name, layerRef, geometryTypes = [], geometryType = "mixed", persist = true }) {
+  function addDataRow(parentId, { name, layerRef, geometryTypes = [], geometryType = "mixed", defaultStyle = null, persist = true }) {
     const uid = `dyn-${Date.now()}`;
     const mapLayerId = layerRef ?? uid;
     const resolvedGeometryTypes = normalizeDatasetGeometryTypes(geometryTypes, geometryType);
@@ -1513,6 +1516,7 @@ function createLayerModel() {
 
     rowDefinitionsById.set(newRow.id, newRow);
     initializeDynamicRowState(rows, mapLayerId, newRow.id);
+    applyHostedLayerDefaultStyle(mapLayerId, defaultStyle);
     dynamicIds.add(newRow.id);
     layerState[uid] = {
       expanded: false,
@@ -1526,6 +1530,40 @@ function createLayerModel() {
     }
 
     return newRow;
+  }
+
+  function applyHostedLayerDefaultStyle(layerId, defaultStyle = null) {
+    if (!layerId || !defaultStyle || typeof defaultStyle !== "object") {
+      return false;
+    }
+    if (!layerState[layerId] || typeof layerState[layerId] !== "object") {
+      layerState[layerId] = {};
+    }
+    const state = layerState[layerId];
+    const assignments = {
+      fillColor: defaultStyle.fillColor ?? defaultStyle.color,
+      fillOpacity: defaultStyle.fillOpacity ?? defaultStyle.opacity,
+      lineColor: defaultStyle.lineColor ?? defaultStyle.color,
+      lineOpacity: defaultStyle.lineOpacity,
+      lineWeight: defaultStyle.lineWeight ?? defaultStyle.weight,
+      pointColor: defaultStyle.pointColor ?? defaultStyle.color,
+      pointOpacity: defaultStyle.pointOpacity ?? defaultStyle.opacity,
+      pointRadius: defaultStyle.pointRadius ?? defaultStyle.radius,
+    };
+    let changed = false;
+    Object.entries(assignments).forEach(([key, value]) => {
+      if (value === undefined || value === null) {
+        return;
+      }
+      if (state[key] !== value) {
+        state[key] = value;
+        changed = true;
+      }
+    });
+    if (changed) {
+      persistLayerState();
+    }
+    return changed;
   }
 
   function renameDataRowByLayerRef(layerRef, name) {
@@ -1622,6 +1660,7 @@ function createLayerModel() {
     addVariableFilterPresetToLayer,
     addRowToLayer,
     clearLayerStyleOverrides,
+    applyHostedLayerDefaultStyle,
     getChildRows,
     getDefinitions,
     getAppearanceState,

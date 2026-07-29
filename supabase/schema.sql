@@ -62,11 +62,6 @@ create policy "owners can insert layers"
   on layers for insert
   with check (owner_id = auth.uid());
 
--- Allow unauthenticated inserts for dev (no owner). Remove once auth is added.
-create policy "anon can create non-private layers"
-  on layers for insert
-  with check (owner_id is null and view_access in ('public', 'unlisted'));
-
 create policy "owners can update their layers"
   on layers for update
   using (owner_id = auth.uid());
@@ -138,17 +133,6 @@ create policy "owners and contributors can insert datasets"
           and role in ('contributor', 'moderator', 'owner')
         )
       )
-    )
-  );
-
-create policy "anon can create datasets for anon layers"
-  on datasets for insert
-  with check (
-    exists (
-      select 1 from layers
-      where id = datasets.layer_id
-      and owner_id is null
-      and view_access in ('public', 'unlisted')
     )
   );
 
@@ -275,17 +259,6 @@ create policy "owners and contributors can insert features"
           and role in ('contributor', 'moderator', 'owner')
         )
       )
-    )
-  );
-
--- Allow unauthenticated feature inserts for dev. Remove once auth is added.
-create policy "anon can insert features for anon layers"
-  on features for insert
-  with check (
-    exists (
-      select 1 from layers
-      join datasets on datasets.layer_id = layers.id
-      where datasets.id = features.dataset_id and owner_id is null
     )
   );
 
@@ -708,12 +681,4 @@ on conflict (id) do nothing;
 
 create policy "Public read on layer-files"
   on storage.objects for select
-  using (bucket_id = 'layer-files');
-
-create policy "Anyone can upload to layer-files"
-  on storage.objects for insert
-  with check (bucket_id = 'layer-files');
-
-create policy "Anyone can update layer-files"
-  on storage.objects for update
   using (bucket_id = 'layer-files');

@@ -1,4 +1,5 @@
 import { requireSupabase } from "../../lib/supabase.js";
+import { isLocalAdminEnabled, localAdminJson } from "./local-admin-api.js";
 import {
   DATASET_FILTER_FIELD,
   DATASET_FILTER_LABEL,
@@ -199,35 +200,53 @@ async function loadLayerDatasets(layerId) {
 }
 
 export async function updateDatasetName(datasetId, name) {
-  const supabase = requireSupabase();
   const nextName = String(name ?? "").trim();
   if (!datasetId || !nextName) {
     throw new Error("Dataset name cannot be empty.");
   }
+  if (isLocalAdminEnabled()) {
+    const { data } = await localAdminJson(`/admin/datasets/${encodeURIComponent(datasetId)}`, {
+      method: "PATCH",
+      body: { name: nextName },
+    });
+    return { id: data.id, name: data.name };
+  }
 
-  const { error } = await supabase
+  const supabase = requireSupabase();
+  const { data, error } = await supabase
     .from("datasets")
     .update({ name: nextName })
-    .eq("id", datasetId);
+    .eq("id", datasetId)
+    .select("id, name")
+    .single();
 
   if (error) {
     throw new Error(`Failed to rename dataset: ${error.message}`);
   }
 
-  return { id: datasetId, name: nextName };
+  return { id: data.id, name: data.name };
 }
 
 export async function updateLayerName(layerId, name) {
-  const supabase = requireSupabase();
   const nextName = String(name ?? "").trim();
   if (!layerId || !nextName) {
     throw new Error("Layer name cannot be empty.");
   }
+  if (isLocalAdminEnabled()) {
+    const { data } = await localAdminJson(`/admin/layers/${encodeURIComponent(layerId)}`, {
+      method: "PATCH",
+      body: { name: nextName },
+    });
+    return { id: data.id, name: data.name };
+  }
 
-  const { error } = await supabase
+  const supabase = requireSupabase();
+  const { data, error } = await supabase
     .from("layers")
     .update({ name: nextName })
-    .eq("id", layerId);
+    .eq("id", layerId)
+    .select("id, name")
+    .single();
 
   if (error) {
     throw new Error(`Failed to rename layer: ${error.message}`);
@@ -240,27 +259,36 @@ export async function updateLayerName(layerId, name) {
     catalogCache.sort((left, right) => String(left?.label ?? "").localeCompare(String(right?.label ?? "")));
   }
 
-  return { id: layerId, name: nextName };
+  return { id: data.id, name: data.name };
 }
 
 export async function deleteLayer(layerId) {
-  const supabase = requireSupabase();
   const normalizedLayerId = String(layerId ?? "").trim();
   if (!normalizedLayerId) {
     throw new Error("Layer is required.");
   }
+  if (isLocalAdminEnabled()) {
+    const { data } = await localAdminJson(`/admin/layers/${encodeURIComponent(normalizedLayerId)}`, {
+      method: "DELETE",
+    });
+    invalidateSupabaseCatalogCache();
+    return { id: data.id };
+  }
 
-  const { error } = await supabase
+  const supabase = requireSupabase();
+  const { data, error } = await supabase
     .from("layers")
     .delete()
-    .eq("id", normalizedLayerId);
+    .eq("id", normalizedLayerId)
+    .select("id")
+    .single();
 
   if (error) {
     throw new Error(`Failed to delete layer: ${error.message}`);
   }
 
   invalidateSupabaseCatalogCache();
-  return { id: normalizedLayerId };
+  return { id: data.id };
 }
 
 export function invalidateSupabaseCatalogCache() {
@@ -269,7 +297,6 @@ export function invalidateSupabaseCatalogCache() {
 }
 
 export async function updateDatasetMetadata(datasetId, { license = "", licenseUrl = "", attribution = "" } = {}) {
-  const supabase = requireSupabase();
   if (!datasetId) {
     throw new Error("Dataset is required.");
   }
@@ -279,7 +306,15 @@ export async function updateDatasetMetadata(datasetId, { license = "", licenseUr
     license_url: String(licenseUrl ?? "").trim() || null,
     attribution: String(attribution ?? "").trim() || null,
   };
+  if (isLocalAdminEnabled()) {
+    const { data } = await localAdminJson(`/admin/datasets/${encodeURIComponent(datasetId)}`, {
+      method: "PATCH",
+      body: patch,
+    });
+    return data;
+  }
 
+  const supabase = requireSupabase();
   const { data, error } = await supabase
     .from("datasets")
     .update(patch)
@@ -295,14 +330,21 @@ export async function updateDatasetMetadata(datasetId, { license = "", licenseUr
 }
 
 export async function updateDatasetFeatureInspector(datasetId, featureInspector = {}) {
-  const supabase = requireSupabase();
   if (!datasetId) {
     throw new Error("Dataset is required.");
   }
   const nextFeatureInspector = featureInspector && typeof featureInspector === "object"
     ? featureInspector
     : {};
+  if (isLocalAdminEnabled()) {
+    const { data } = await localAdminJson(`/admin/datasets/${encodeURIComponent(datasetId)}`, {
+      method: "PATCH",
+      body: { feature_inspector: nextFeatureInspector },
+    });
+    return data;
+  }
 
+  const supabase = requireSupabase();
   const { data, error } = await supabase
     .from("datasets")
     .update({ feature_inspector: nextFeatureInspector })
@@ -318,14 +360,24 @@ export async function updateDatasetFeatureInspector(datasetId, featureInspector 
 }
 
 export async function updateLayerDatasetsFeatureInspector(layerId, featureInspector = {}) {
-  const supabase = requireSupabase();
   if (!layerId) {
     throw new Error("Layer is required.");
   }
   const nextFeatureInspector = featureInspector && typeof featureInspector === "object"
     ? featureInspector
     : {};
+  if (isLocalAdminEnabled()) {
+    const { data } = await localAdminJson(`/admin/datasets/${encodeURIComponent(layerId)}`, {
+      method: "PATCH",
+      body: {
+        patch: { feature_inspector: nextFeatureInspector },
+        filter: { layer_id: layerId },
+      },
+    });
+    return Array.isArray(data) ? data : [];
+  }
 
+  const supabase = requireSupabase();
   const { data, error } = await supabase
     .from("datasets")
     .update({ feature_inspector: nextFeatureInspector })
@@ -353,12 +405,23 @@ export async function updateLayerDefaultStyle(layerId, patch) {
 
   const merged = { ...(layer.default_style ?? {}), ...patch };
 
-  const { error } = await supabase
+  if (isLocalAdminEnabled()) {
+    const { data } = await localAdminJson(`/admin/layers/${encodeURIComponent(layerId)}`, {
+      method: "PATCH",
+      body: { default_style: merged },
+    });
+    return data;
+  }
+
+  const { data, error } = await supabase
     .from("layers")
     .update({ default_style: merged })
-    .eq("id", layerId);
+    .eq("id", layerId)
+    .select("id, default_style")
+    .single();
 
   if (error) throw new Error(error.message);
+  return data;
 }
 
 export async function getSupabaseCatalog({ forceRefresh = false } = {}) {
@@ -852,18 +915,27 @@ export async function getLayerDefaultView(layerId) {
 }
 
 export async function updateLayerDefaultView(layerId, defaultView = {}) {
-  const supabase = requireSupabase();
   if (!layerId) {
     throw new Error("Layer is required.");
   }
   const nextDefaultView = defaultView && typeof defaultView === "object" && !Array.isArray(defaultView)
     ? defaultView
     : {};
+  if (isLocalAdminEnabled()) {
+    const { data } = await localAdminJson(`/admin/layers/${encodeURIComponent(layerId)}`, {
+      method: "PATCH",
+      body: { default_view: nextDefaultView },
+    });
+    return data;
+  }
 
-  const { error } = await supabase
+  const supabase = requireSupabase();
+  const { data, error } = await supabase
     .from("layers")
     .update({ default_view: nextDefaultView })
-    .eq("id", layerId);
+    .eq("id", layerId)
+    .select("id, default_view")
+    .single();
 
   if (error) {
     if (isMissingColumnError(error)) {
@@ -871,6 +943,7 @@ export async function updateLayerDefaultView(layerId, defaultView = {}) {
     }
     throw new Error(`Failed to save layer defaults: ${error.message}`);
   }
+  return data;
 }
 
 async function loadGeojsonArtifact(url) {

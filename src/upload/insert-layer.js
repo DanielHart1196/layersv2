@@ -1,6 +1,7 @@
 import { requireSupabase } from "../lib/supabase.js";
 import { inferGeometryFamilies, inferGeometryFamily } from "./geometry-family.js";
 import { uploadStorageObject } from "./storage-upload.js";
+import { isLocalAdminEnabled, localAdminJson } from "../sources/supabase/local-admin-api.js";
 
 const BATCH_SIZE = 500;
 
@@ -39,15 +40,27 @@ async function cleanupPartialUpload(supabase, { datasetId, layerId }) {
   const issues = [];
 
   if (datasetId) {
-    const { error } = await supabase.from("datasets").delete().eq("id", datasetId);
-    if (error) {
+    try {
+      if (isLocalAdminEnabled()) {
+        await localAdminJson(`/admin/datasets/${encodeURIComponent(datasetId)}`, { method: "DELETE" });
+      } else {
+        const { error } = await supabase.from("datasets").delete().eq("id", datasetId);
+        if (error) throw error;
+      }
+    } catch (error) {
       issues.push(`dataset cleanup failed: ${error.message}`);
     }
   }
 
   if (layerId) {
-    const { error } = await supabase.from("layers").delete().eq("id", layerId);
-    if (error) {
+    try {
+      if (isLocalAdminEnabled()) {
+        await localAdminJson(`/admin/layers/${encodeURIComponent(layerId)}`, { method: "DELETE" });
+      } else {
+        const { error } = await supabase.from("layers").delete().eq("id", layerId);
+        if (error) throw error;
+      }
+    } catch (error) {
       issues.push(`layer cleanup failed: ${error.message}`);
     }
   }
@@ -161,8 +174,16 @@ async function insertFeatureBatches(supabase, datasetId, features, { onProgress,
 
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
-    const { error } = await supabase.from("features").insert(batch);
-    if (error) {
+    try {
+      if (isLocalAdminEnabled()) {
+        await localAdminJson("/admin/features/batch", {
+          body: { rows: batch },
+        });
+      } else {
+        const { error } = await supabase.from("features").insert(batch);
+        if (error) throw error;
+      }
+    } catch (error) {
       const batchStart = i + 1;
       const batchEnd = i + batch.length;
       throw new Error(formatUploadError("Feature upload", error, {
@@ -305,7 +326,20 @@ async function uploadDatasetArtifact(
     patch.artifact_url = geojsonUrl.publicUrl;
   }
 
-  const { error: updateError } = await supabase.from("datasets").update(patch).eq("id", datasetId);
+  let updateError = null;
+  if (isLocalAdminEnabled()) {
+    try {
+      await localAdminJson(`/admin/datasets/${encodeURIComponent(datasetId)}`, {
+        method: "PATCH",
+        body: patch,
+      });
+    } catch (error) {
+      updateError = error;
+    }
+  } else {
+    const result = await supabase.from("datasets").update(patch).eq("id", datasetId);
+    updateError = result.error;
+  }
   if (updateError) {
     throw new Error(`Failed to update dataset artifact: ${updateError.message}`);
   }
@@ -366,18 +400,26 @@ async function createDatasetRecord(supabase, {
   licenseUrl,
   attribution,
 }) {
+  const payload = {
+    layer_id: layerId,
+    name,
+    license: normalizeDatasetMetadataValue(license),
+    license_url: normalizeDatasetMetadataValue(licenseUrl),
+    attribution: normalizeDatasetMetadataValue(attribution),
+    geometry_types: Array.isArray(geometryTypes) ? geometryTypes : [],
+    geometry_type: geometryType,
+    field_schema: normalizeFieldSchema(fieldSchema),
+  };
+  if (isLocalAdminEnabled()) {
+    const { data } = await localAdminJson("/admin/datasets", {
+      body: payload,
+    });
+    return data.id;
+  }
+
   const { data, error } = await supabase
     .from("datasets")
-    .insert({
-      layer_id: layerId,
-      name,
-      license: normalizeDatasetMetadataValue(license),
-      license_url: normalizeDatasetMetadataValue(licenseUrl),
-      attribution: normalizeDatasetMetadataValue(attribution),
-      geometry_types: Array.isArray(geometryTypes) ? geometryTypes : [],
-      geometry_type: geometryType,
-      field_schema: normalizeFieldSchema(fieldSchema),
-    })
+    .insert(payload)
     .select("id")
     .single();
 
@@ -401,6 +443,16 @@ async function updateLayerSummary(supabase, layerId, nextGeometryTypes, nextGeom
 
   const mergedGeometryTypes = mergeGeometryTypes(layer?.geometry_types ?? [], nextGeometryTypes);
   const mergedGeometryType = mergeLayerGeometryType(layer?.geometry_type ?? null, nextGeometryType);
+  if (isLocalAdminEnabled()) {
+    await localAdminJson(`/admin/layers/${encodeURIComponent(layerId)}`, {
+      method: "PATCH",
+      body: {
+        geometry_types: mergedGeometryTypes,
+        geometry_type: mergedGeometryType,
+      },
+    });
+    return;
+  }
   const { error: updateError } = await supabase
     .from("layers")
     .update({
@@ -453,22 +505,30 @@ export async function createLayerWithDataset({
     }
 
     onProgress?.(usePmtiles ? 42 : 5, "Creating layer...");
-    const { data: layer, error: layerError } = await supabase
-      .from("layers")
-      .insert({
-        name,
-        view_access: viewAccess,
-        geometry_types: geometryTypes,
-        geometry_type: geometryType,
-        default_style: defaultStyleForType(geometryType),
-      })
-      .select("id")
-      .single();
+    const layerPayload = {
+      name,
+      view_access: viewAccess,
+      geometry_types: geometryTypes,
+      geometry_type: geometryType,
+      default_style: defaultStyleForType(geometryType),
+    };
+    if (isLocalAdminEnabled()) {
+      const { data: layer } = await localAdminJson("/admin/layers", {
+        body: layerPayload,
+      });
+      layerId = layer.id;
+    } else {
+      const { data: layer, error: layerError } = await supabase
+        .from("layers")
+        .insert(layerPayload)
+        .select("id")
+        .single();
 
-    if (layerError) {
-      throw new Error(`Failed to create layer: ${layerError.message}`);
+      if (layerError) {
+        throw new Error(`Failed to create layer: ${layerError.message}`);
+      }
+      layerId = layer.id;
     }
-    layerId = layer.id;
 
     datasetId = await createDatasetRecord(supabase, {
       layerId,
@@ -674,18 +734,32 @@ export async function appendFeaturesToDataset({
     progressEnd: 72,
   });
 
-  const { error: updateDatasetError } = await supabase
-    .from("datasets")
-    .update({
-      name: normalizeDatasetMetadataValue(name) ?? dataset.name,
-      license: normalizeDatasetMetadataValue(license),
-      license_url: normalizeDatasetMetadataValue(licenseUrl),
-      attribution: normalizeDatasetMetadataValue(attribution),
-      geometry_types: nextGeometryTypes,
-      geometry_type: nextGeometryType,
-      field_schema: normalizedFieldSchema,
-    })
-    .eq("id", datasetId);
+  const datasetPatch = {
+    name: normalizeDatasetMetadataValue(name) ?? dataset.name,
+    license: normalizeDatasetMetadataValue(license),
+    license_url: normalizeDatasetMetadataValue(licenseUrl),
+    attribution: normalizeDatasetMetadataValue(attribution),
+    geometry_types: nextGeometryTypes,
+    geometry_type: nextGeometryType,
+    field_schema: normalizedFieldSchema,
+  };
+  let updateDatasetError = null;
+  if (isLocalAdminEnabled()) {
+    try {
+      await localAdminJson(`/admin/datasets/${encodeURIComponent(datasetId)}`, {
+        method: "PATCH",
+        body: datasetPatch,
+      });
+    } catch (error) {
+      updateDatasetError = error;
+    }
+  } else {
+    const result = await supabase
+      .from("datasets")
+      .update(datasetPatch)
+      .eq("id", datasetId);
+    updateDatasetError = result.error;
+  }
 
   if (updateDatasetError) {
     throw new Error(`Failed to update dataset: ${updateDatasetError.message}`);

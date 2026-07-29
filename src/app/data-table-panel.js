@@ -142,7 +142,7 @@ function renameObjectKey(target, fromKey, toKey) {
   return Object.fromEntries(Object.entries(target).map(([key, value]) => [key === fromKey ? toKey : key, value]));
 }
 
-export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getLayerDatasets, onAddDataRequested, onRenameLayer, onRenameDataset, onUpdateDatasetMetadata }) {
+export function mountDataTablePanel({ canEditHostedLayers = false, loadTablePreview, getAppearanceState, getLayerDatasets, onAddDataRequested, onRenameLayer, onRenameDataset, onUpdateDatasetMetadata }) {
   const panel = createPanelShell();
   document.body.appendChild(panel);
 
@@ -575,8 +575,8 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
     const datasetOptions = (state.datasets ?? []).map((dataset) => `
       <option value="${escapeHtml(dataset.id)}"${dataset.id === state.selectedDatasetId ? " selected" : ""}>${escapeHtml(`${dataset.name || "Dataset"} (${formatGeometryTypes(dataset.geometryTypes, dataset.geometry_type)})`)}</option>
     `).join("");
-    const layerInputDisabled = state.layerRenameSaving;
-    const datasetInputDisabled = state.datasetsLoading || state.datasetRenameSaving || !selectedDataset;
+    const layerInputDisabled = !canEditHostedLayers || state.layerRenameSaving;
+    const datasetInputDisabled = !canEditHostedLayers || state.datasetsLoading || state.datasetRenameSaving || !selectedDataset;
     const licenseLabel = String(selectedDataset?.license ?? "").trim();
     const licenseUrl = String(selectedDataset?.license_url ?? "").trim();
     const attributionText = String(selectedDataset?.attribution ?? "").trim();
@@ -589,7 +589,7 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
       ? `<span class="dtv-license-text">${escapeHtml(attributionText)}</span>`
       : `<span class="dtv-license-text dtv-license-text-muted">No source</span>`;
     const licensePresetId = getSelectedLicensePresetId(state.licenseDraft, state.licenseUrlDraft);
-    const metadataControlsDisabled = state.metadataSaving || !selectedDataset;
+    const metadataControlsDisabled = !canEditHostedLayers || state.metadataSaving || !selectedDataset;
     const summaryText = state.loading
       ? "Loading rows..."
       : totalRowCount > rowCount
@@ -621,7 +621,7 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
                 </select>
               </div>
             </label>
-            <button class="dtv-add-data-btn" type="button" aria-label="Add data" title="Add data">+</button>
+            ${canEditHostedLayers ? `<button class="dtv-add-data-btn" type="button" aria-label="Add data" title="Add data">+</button>` : ""}
           </div>
           <div class="dtv-license-panel" aria-label="Dataset licensing">
             ${state.licenseEditing ? `
@@ -655,9 +655,9 @@ export function mountDataTablePanel({ loadTablePreview, getAppearanceState, getL
                 <span class="dtv-license-separator" aria-hidden="true">-</span>
                 ${sourceMarkup}
               </div>
-              <button class="dtv-license-edit-btn" type="button" aria-label="Edit dataset licensing" title="Edit dataset licensing">
+              ${canEditHostedLayers ? `<button class="dtv-license-edit-btn" type="button" aria-label="Edit dataset licensing" title="Edit dataset licensing">
                 <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
-              </button>
+              </button>` : ""}
             `}
           </div>
         </div>

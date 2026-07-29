@@ -2967,8 +2967,8 @@ function createDeleteConfirmPanel(row, anchor, onCancel, onConfirm, { renameActi
       apply.disabled = true;
       setStatus(pendingLabel);
       try {
-        await action(row);
-        setStatus(successLabel, "success");
+        const result = await action(row);
+        setStatus(result?.message ?? successLabel, "success");
       } catch (error) {
         setStatus(error?.message ?? "Action failed.", "error");
       } finally {

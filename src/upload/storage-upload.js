@@ -1,5 +1,6 @@
 import { Upload, isSupported as isTusSupported } from "tus-js-client";
 import { supabaseAnonKey, supabaseUrl } from "../lib/supabase.js";
+import { isLocalAdminEnabled, localAdminUpload } from "../sources/supabase/local-admin-api.js";
 
 const RESUMABLE_UPLOAD_THRESHOLD_BYTES = 6 * 1024 * 1024;
 const TUS_CHUNK_SIZE_BYTES = 6 * 1024 * 1024;
@@ -87,6 +88,11 @@ export async function uploadStorageObject(supabase, {
   resumableThresholdBytes = RESUMABLE_UPLOAD_THRESHOLD_BYTES,
   onProgress,
 } = {}) {
+  if (isLocalAdminEnabled()) {
+    await localAdminUpload({ bucket, path, body, contentType, cacheControl, onProgress });
+    return { localAdmin: true };
+  }
+
   const size = getByteSize(body);
   const shouldUseResumable = size >= resumableThresholdBytes && isTusSupported;
 

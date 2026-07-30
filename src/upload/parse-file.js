@@ -58,7 +58,7 @@ export async function parseFile(file) {
     const text = await file.text();
     const xml = new DOMParser().parseFromString(text, "text/xml");
     const geojson = gpx(xml);
-    return { type: "gpx", features: normaliseFeatures(geojson.features) };
+    return { type: "gpx", features: normaliseGpxFeatures(geojson.features) };
   }
 
   if (type === "kml") {
@@ -233,6 +233,122 @@ function addElevationProperties(properties, geometryType, zValues) {
   return nextProperties;
 }
 
+function parseTimestampMs(value) {
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function getCoordinateTimes(properties) {
+  const candidates = [
+    properties?.coordinateProperties?.times,
+    properties?.coordTimes,
+    properties?.times,
+  ];
+  const times = candidates.find((candidate) => Array.isArray(candidate));
+  return Array.isArray(times) ? times : [];
+}
+
+function buildTimedPointFeature(sourceFeature, coordinate, time, index, trackId) {
+  const properties = {
+    ...(sourceFeature.properties ?? {}),
+    _replay_kind: "track-point",
+    _replay_index: index,
+    _replay_track_id: trackId,
+  };
+  delete properties.coordinateProperties;
+  const validFromMs = parseTimestampMs(time);
+  if (validFromMs !== null) {
+    properties._valid_from_ms = validFromMs;
+  }
+  return {
+    type: "Feature",
+    geometry: { type: "Point", coordinates: coordinate },
+    properties,
+    valid_from: time ?? null,
+    valid_to: null,
+  };
+}
+
+function buildTimedSegmentFeature(sourceFeature, coordinates, time, index, trackId) {
+  const properties = {
+    ...(sourceFeature.properties ?? {}),
+    _replay_kind: "track-segment",
+    _replay_index: index,
+    _replay_track_id: trackId,
+  };
+  delete properties.coordinateProperties;
+  const validFromMs = parseTimestampMs(time);
+  if (validFromMs !== null) {
+    properties._valid_from_ms = validFromMs;
+  }
+  return {
+    type: "Feature",
+    geometry: { type: "LineString", coordinates },
+    properties,
+    valid_from: time ?? null,
+    valid_to: null,
+  };
+}
+
+function expandTimedLineStringFeature(feature, featureIndex) {
+  const coordinates = feature?.geometry?.coordinates;
+  const times = getCoordinateTimes(feature?.properties ?? {});
+  if (!Array.isArray(coordinates) || coordinates.length < 2 || times.length < coordinates.length) {
+    return [feature];
+  }
+
+  const sanitizedCoordinates = coordinates
+    .map((position) => Array.isArray(position) && position.length >= 2 ? [position[0], position[1]] : null);
+  if (sanitizedCoordinates.some((position) => !position)) {
+    return [feature];
+  }
+
+  const trackId = String(feature?.properties?.name ?? feature?.properties?.desc ?? `gpx-track-${featureIndex}`);
+  const points = sanitizedCoordinates.map((coordinate, index) => (
+    buildTimedPointFeature(feature, coordinate, times[index], index, trackId)
+  ));
+  const segments = [];
+  for (let index = 1; index < sanitizedCoordinates.length; index += 1) {
+    segments.push(buildTimedSegmentFeature(
+      feature,
+      [sanitizedCoordinates[index - 1], sanitizedCoordinates[index]],
+      times[index],
+      index,
+      trackId,
+    ));
+  }
+  return [...segments, ...points];
+}
+
+function expandTimedGpxFeature(feature, featureIndex) {
+  if (feature?.geometry?.type === "LineString") {
+    return expandTimedLineStringFeature(feature, featureIndex);
+  }
+  if (feature?.geometry?.type === "MultiLineString") {
+    const multiTimes = getCoordinateTimes(feature?.properties ?? {});
+    return feature.geometry.coordinates.flatMap((coordinates, lineIndex) => {
+      const lineFeature = {
+        ...feature,
+        geometry: { type: "LineString", coordinates },
+        properties: {
+          ...(feature.properties ?? {}),
+          coordinateProperties: {
+            times: Array.isArray(multiTimes[lineIndex]) ? multiTimes[lineIndex] : [],
+          },
+        },
+      };
+      return expandTimedLineStringFeature(lineFeature, `${featureIndex}-${lineIndex}`);
+    });
+  }
+  return [feature];
+}
+
+function normaliseGpxFeatures(features) {
+  return normaliseFeatures(
+    features.flatMap((feature, index) => expandTimedGpxFeature(feature, index)),
+  );
+}
+
 // Ensure every feature has a proper properties object and pull out time fields
 function normaliseFeatures(features) {
   return features
@@ -246,12 +362,25 @@ function normaliseFeatures(features) {
         sanitized.geometry.type,
         sanitized.zValues,
       );
+      const validFrom = f.valid_from ?? f.properties?.valid_from ?? f.properties?.time ?? f.properties?.start ?? null;
+      const validTo = f.valid_to ?? f.properties?.valid_to ?? f.properties?.end ?? null;
+      const validFromMs = parseTimestampMs(validFrom);
+      const nextProperties = { ...properties };
+      if (validFrom) {
+        nextProperties._valid_from = validFrom;
+      }
+      if (validTo) {
+        nextProperties._valid_to = validTo;
+      }
+      if (validFromMs !== null && nextProperties._valid_from_ms === undefined) {
+        nextProperties._valid_from_ms = validFromMs;
+      }
       return {
         type: "Feature",
         geometry: sanitized.geometry,
-        properties,
-        valid_from: f.properties?.valid_from ?? f.properties?.time ?? f.properties?.start ?? null,
-        valid_to:   f.properties?.valid_to   ?? f.properties?.end  ?? null,
+        properties: nextProperties,
+        valid_from: validFrom,
+        valid_to: validTo,
       };
     })
     .filter(Boolean);

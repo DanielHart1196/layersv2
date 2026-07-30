@@ -35,4 +35,24 @@ async function loadMapShare(shareId) {
   return data;
 }
 
-export { createMapShare, loadMapShare };
+async function loadPublicSlug(slug) {
+  const normalizedSlug = String(slug ?? "").trim().toLowerCase();
+  if (!normalizedSlug) {
+    return null;
+  }
+  const supabase = requireSupabase();
+  const { data, error } = await supabase
+    .from("public_view_slugs")
+    .select("slug, map_share_id, status")
+    .eq("slug", normalizedSlug)
+    .eq("status", "active")
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to load public slug: ${error.message}`);
+  }
+
+  return data;
+}
+
+export { createMapShare, loadMapShare, loadPublicSlug };

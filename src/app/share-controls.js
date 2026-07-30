@@ -1,10 +1,32 @@
-import { createMapShare, loadMapShare } from "../sources/supabase/map-share-loader.js";
+import { createMapShare, loadMapShare, loadPublicSlug } from "../sources/supabase/map-share-loader.js";
 
 const SHARE_QUERY_KEY = "share";
 const SHARE_SNAPSHOT_VERSION = 1;
+const RESERVED_PATH_SEGMENTS = new Set([
+  "",
+  "assets",
+  "data",
+  "favicon.ico",
+  "robots.txt",
+]);
 
 function getShareIdFromLocation() {
   return new URLSearchParams(window.location.search).get(SHARE_QUERY_KEY) ?? "";
+}
+
+function getPublicSlugFromLocation() {
+  const segments = window.location.pathname
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length !== 1) {
+    return "";
+  }
+  const slug = segments[0].toLowerCase();
+  if (RESERVED_PATH_SEGMENTS.has(slug) || slug.includes(".")) {
+    return "";
+  }
+  return slug;
 }
 
 function normalizeSharedView(view) {
@@ -68,7 +90,21 @@ function normalizeShareSnapshot(snapshot) {
 async function readShareSnapshotFromLocation() {
   const shareId = getShareIdFromLocation();
   if (!shareId) {
-    return null;
+    const slug = getPublicSlugFromLocation();
+    if (!slug) {
+      return null;
+    }
+    try {
+      const slugRecord = await loadPublicSlug(slug);
+      if (!slugRecord?.map_share_id) {
+        return null;
+      }
+      const share = await loadMapShare(slugRecord.map_share_id);
+      return normalizeShareSnapshot(share.snapshot);
+    } catch (error) {
+      console.warn("[layers] Failed to load public slug from Supabase.", error);
+      return null;
+    }
   }
   try {
     const share = await loadMapShare(shareId);

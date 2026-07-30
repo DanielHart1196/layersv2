@@ -13,6 +13,7 @@ import {
   createVariableSelectRow,
   createVariableSliderRow,
 } from "./layer-definitions.js";
+import { DEFAULT_TIME_DELAY_FIELD, TIME_DELAY_FILTER_MODE, normalizeDelayHours } from "./filter-expressions.js";
 
 const STORAGE_KEY = "layerv2.layerState.v1";
 const DEFS_STORAGE_KEY = "layerv2.dynamicDefs.v1";
@@ -1101,6 +1102,7 @@ function createLayerModel() {
         rows: filterRows,
       });
       newRow.kind = "filter";
+      const isTimeDelay = config.mode === TIME_DELAY_FILTER_MODE || config.filter?.mode === TIME_DELAY_FILTER_MODE;
       const conditions = Array.isArray(config.conditions)
         ? config.conditions
           .map((condition) => ({
@@ -1111,14 +1113,24 @@ function createLayerModel() {
           }))
           .filter((condition) => condition.field)
         : [];
-      newRow.filter = {
-        field: String(config.field ?? ""),
-        op: config.op ?? "==",
-        value: config.value ?? "",
-        ...(conditions.length ? { conditions, combinator: config.combinator === "any" ? "any" : "all" } : {}),
-        parentLayerId: mapLayerId,
-        sourceLayerId: config.sourceLayerId ?? (parentDef.filter?.sourceLayerId ?? parentDef.filter?.parentLayerId ?? mapLayerId),
-      };
+      newRow.filter = isTimeDelay
+        ? {
+          mode: TIME_DELAY_FILTER_MODE,
+          type: TIME_DELAY_FILTER_MODE,
+          delayHours: normalizeDelayHours(config.delayHours ?? config.timeDelayConfig?.delayHours ?? config.filter?.delayHours, 24),
+          timestampField: String(config.timestampField ?? config.timeDelayConfig?.timestampField ?? config.filter?.timestampField ?? DEFAULT_TIME_DELAY_FIELD).trim() || DEFAULT_TIME_DELAY_FIELD,
+          revealMode: config.revealMode ?? config.timeDelayConfig?.revealMode ?? config.filter?.revealMode ?? "up_to_delayed_now",
+          parentLayerId: mapLayerId,
+          sourceLayerId: config.sourceLayerId ?? (parentDef.filter?.sourceLayerId ?? parentDef.filter?.parentLayerId ?? mapLayerId),
+        }
+        : {
+          field: String(config.field ?? ""),
+          op: config.op ?? "==",
+          value: config.value ?? "",
+          ...(conditions.length ? { conditions, combinator: config.combinator === "any" ? "any" : "all" } : {}),
+          parentLayerId: mapLayerId,
+          sourceLayerId: config.sourceLayerId ?? (parentDef.filter?.sourceLayerId ?? parentDef.filter?.parentLayerId ?? mapLayerId),
+        };
     } else if (rowType === "sort") {
       newRow = createSortRow({
         id: uid,
@@ -1316,6 +1328,20 @@ function createLayerModel() {
     const row = rowDefinitionsById.get(rowId);
     if (!row || row.type !== "layer" || row.kind !== "filter" || !row.filter) {
       return null;
+    }
+
+    if (config.mode === TIME_DELAY_FILTER_MODE || row.filter?.mode === TIME_DELAY_FILTER_MODE) {
+      row.label = config.name || `${normalizeDelayHours(config.delayHours ?? config.timeDelayConfig?.delayHours ?? row.filter.delayHours, 24)}h delay`;
+      row.filter = {
+        ...row.filter,
+        mode: TIME_DELAY_FILTER_MODE,
+        type: TIME_DELAY_FILTER_MODE,
+        delayHours: normalizeDelayHours(config.delayHours ?? config.timeDelayConfig?.delayHours ?? row.filter.delayHours, 24),
+        timestampField: String(config.timestampField ?? config.timeDelayConfig?.timestampField ?? row.filter.timestampField ?? DEFAULT_TIME_DELAY_FIELD).trim() || DEFAULT_TIME_DELAY_FIELD,
+        revealMode: config.revealMode ?? config.timeDelayConfig?.revealMode ?? row.filter.revealMode ?? "up_to_delayed_now",
+      };
+      persistDynamicDefs();
+      return structuredClone(row);
     }
 
     const field = String(config.field ?? row.filter.field ?? "").trim();

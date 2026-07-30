@@ -11,8 +11,13 @@ import { getRowRuntimeTargetId, getRowStateKey } from "../core/layer-definitions
 import {
   DATASET_FILTER_FIELD,
   DATASET_FILTER_LABEL,
+  DEFAULT_TIME_DELAY_FIELD,
+  TIME_DELAY_FILTER_MODE,
   buildExactMatchFilterExpression,
   buildStringComparisonFilterExpression,
+  buildTimeDelayFilterExpression,
+  isTimeDelayFilter,
+  normalizeDelayHours,
 } from "../core/filter-expressions.js";
 import { bindShareControls, readShareSnapshotFromLocation } from "./share-controls.js";
 import { bindTitleControls } from "./title-controls.js";
@@ -128,12 +133,35 @@ async function bootstrapApplication() {
     const { getLayerDatasets: loadDatasets } = await import("../sources/supabase/layer-loader.js");
     return loadDatasets(layerId);
   };
-  const createFilterFromTableSelection = async ({ layerId, parentRowId = "", label = "", columnLabel = "", valueLabel = "", columnName, value, op = "==", conditions = null, combinator = "all", mode = "fixed", variableConfig = null }) => {
+  const createFilterFromTableSelection = async ({ layerId, parentRowId = "", label = "", columnLabel = "", valueLabel = "", columnName, value, op = "==", conditions = null, combinator = "all", mode = "fixed", variableConfig = null, timeDelayConfig = null }) => {
     const parentRow = parentRowId
       ? layerModel.getRowById(parentRowId)
       : findLayerRowByLayerRef(layerModel, layerId);
     if (!parentRow) {
       throw new Error("Could not find the parent layer for this filter.");
+    }
+
+    if (mode === TIME_DELAY_FILTER_MODE) {
+      const delayHours = normalizeDelayHours(timeDelayConfig?.delayHours, 24);
+      const nextRow = layerModel.addRowToLayer(parentRow.id, "filter", {
+        name: String(label ?? "").trim() || `${delayHours}h delay`,
+        mode: TIME_DELAY_FILTER_MODE,
+        delayHours,
+        timestampField: timeDelayConfig?.timestampField ?? DEFAULT_TIME_DELAY_FIELD,
+        revealMode: timeDelayConfig?.revealMode ?? "up_to_delayed_now",
+        sourceLayerId: layerId,
+        geometryTypes: parentRow.geometryTypes ?? [],
+        geometryType: parentRow.geometryType ?? "mixed",
+      });
+      if (!nextRow) {
+        throw new Error("Failed to create delay filter.");
+      }
+      attachDynamicFilterRow(layerModel, screenRuntime, nextRow);
+      applyPersistedRowVisibility(layerModel, screenRuntime, nextRow);
+      syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow);
+      screenRuntime.reapplyFullOrder?.();
+      rerenderLayerMenu();
+      return;
     }
 
     if (mode === "variable") {
@@ -214,9 +242,36 @@ async function bootstrapApplication() {
     screenRuntime.reapplyFullOrder?.();
     rerenderLayerMenu();
   };
-  const updateFilterFromPanel = async ({ editFilter, label = "", columnLabel = "", valueLabel = "", columnName, value, op = "==", conditions = null, combinator = "all", mode = "fixed", variableConfig = null }) => {
+  const updateFilterFromPanel = async ({ editFilter, label = "", columnLabel = "", valueLabel = "", columnName, value, op = "==", conditions = null, combinator = "all", mode = "fixed", variableConfig = null, timeDelayConfig = null }) => {
     if (!editFilter) {
       throw new Error("No filter was selected for editing.");
+    }
+
+    if (mode === TIME_DELAY_FILTER_MODE) {
+      const delayHours = normalizeDelayHours(timeDelayConfig?.delayHours, 24);
+      const updatedRow = layerModel.updateFixedFilterRow(editFilter.rowId, {
+        name: String(label ?? "").trim() || `${delayHours}h delay`,
+        mode: TIME_DELAY_FILTER_MODE,
+        delayHours,
+        timestampField: timeDelayConfig?.timestampField ?? DEFAULT_TIME_DELAY_FIELD,
+        revealMode: timeDelayConfig?.revealMode ?? "up_to_delayed_now",
+      });
+      if (!updatedRow) {
+        throw new Error("Failed to save delay filter.");
+      }
+      screenRuntime.setDynamicLayerFeatureFilter?.(
+        getRowRuntimeTargetId(updatedRow),
+        buildDynamicFilterLayerExpression(layerModel, updatedRow),
+      );
+      const parentRow = updatedRow?.filter?.parentLayerId
+        ? (findRowByRuntimeTargetId(layerModel, updatedRow.filter.parentLayerId) ?? findLayerRowByLayerRef(layerModel, updatedRow.filter.parentLayerId))
+        : null;
+      if (parentRow) {
+        syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow);
+      }
+      screenRuntime.reapplyFullOrder?.();
+      rerenderLayerMenu();
+      return;
     }
 
     if (mode === "variable") {
@@ -705,7 +760,15 @@ async function bootstrapApplication() {
         return;
       }
       const editFilter = row?.kind === "filter"
-        ? {
+        ? isTimeDelayFilter(row.filter)
+          ? {
+            mode: TIME_DELAY_FILTER_MODE,
+            rowId: row.id,
+            delayHours: normalizeDelayHours(row.filter?.delayHours, 24),
+            timestampField: row.filter?.timestampField ?? DEFAULT_TIME_DELAY_FIELD,
+            label: row.label ?? "",
+          }
+          : {
           mode: "fixed",
           rowId: row.id,
           columnName: row.filter?.field ?? "",
@@ -790,6 +853,9 @@ async function bootstrapApplication() {
     screenRuntime,
     viewModel,
   });
+  window.setInterval(() => {
+    reapplyTimeDelayFilters(layerModel, screenRuntime);
+  }, 60 * 1000);
   bindTitleControls({
     viewModel,
     onTitleChange: requestPrintRendererSync,
@@ -1118,6 +1184,9 @@ function combineDefaultExpressions(expressions = [], combinator = "all") {
 
 function buildDefaultFilterConfigExpression(row, variableValues = {}) {
   const filter = row?.filter && typeof row.filter === "object" ? row.filter : {};
+  if (isTimeDelayFilter(filter)) {
+    return buildTimeDelayFilterExpression(filter);
+  }
   const filterConditions = Array.isArray(filter.conditions) && filter.conditions.length
     ? filter.conditions
     : filter.field
@@ -1171,6 +1240,10 @@ function materializeLayerDefaultViewRows(layerModel, parentRow, defaultView = {}
         row = layerModel.addRowToLayer(parentId, "filter", {
           id,
           name: rowConfig.label ?? rowConfig.name ?? "Filter",
+          mode: rowConfig.filter?.mode,
+          delayHours: rowConfig.filter?.delayHours,
+          timestampField: rowConfig.filter?.timestampField,
+          revealMode: rowConfig.filter?.revealMode,
           field: rowConfig.filter?.field ?? "",
           op: rowConfig.filter?.op ?? "==",
           value: rowConfig.filter?.value ?? "",
@@ -1242,6 +1315,15 @@ function stripDefaultRowScope(rootRowId, rowId) {
 
 function serializeFilterConfig(row) {
   const filter = row?.filter ?? {};
+  if (isTimeDelayFilter(filter)) {
+    return {
+      mode: TIME_DELAY_FILTER_MODE,
+      type: TIME_DELAY_FILTER_MODE,
+      delayHours: normalizeDelayHours(filter.delayHours, 24),
+      timestampField: filter.timestampField ?? DEFAULT_TIME_DELAY_FIELD,
+      revealMode: filter.revealMode ?? "up_to_delayed_now",
+    };
+  }
   const conditions = Array.isArray(filter.conditions) && filter.conditions.length
     ? filter.conditions.map((condition) => ({
       field: condition.field,
@@ -1969,6 +2051,10 @@ function buildFilterConditionExpression(layerModel, condition, scopeRow = null) 
 }
 
 function buildRowFilterExpression(layerModel, row, scopeRow = row) {
+  if (isTimeDelayFilter(row?.filter)) {
+    return buildTimeDelayFilterExpression(row.filter);
+  }
+
   const conditions = Array.isArray(row?.filter?.conditions) ? row.filter.conditions : null;
   if (conditions?.length) {
     const expressions = conditions
@@ -2155,6 +2241,32 @@ function syncChildDynamicFilterRows(layerModel, screenRuntime, parentRow) {
         buildDynamicFilterLayerExpression(layerModel, childRow),
       );
       syncChildDynamicFilterRows(layerModel, screenRuntime, childRow);
+    }
+  });
+}
+
+function reapplyTimeDelayFilters(layerModel, screenRuntime) {
+  const parentsToSync = new Set();
+  const visit = (rows = []) => {
+    rows.forEach((row) => {
+      if (row?.type === "layer" && row.kind === "filter" && isTimeDelayFilter(row.filter)) {
+        screenRuntime.setDynamicLayerFeatureFilter?.(
+          getRowRuntimeTargetId(row),
+          buildDynamicFilterLayerExpression(layerModel, row),
+        );
+        const parentRow = getDynamicFilterParentRow(layerModel, row);
+        if (parentRow?.id) {
+          parentsToSync.add(parentRow.id);
+        }
+      }
+      visit(layerModel.getChildRows(row.id));
+    });
+  };
+  visit(layerModel.getRootRows());
+  parentsToSync.forEach((parentRowId) => {
+    const parentRow = layerModel.getRowById(parentRowId);
+    if (parentRow) {
+      syncParentDynamicFilterOwnership(layerModel, screenRuntime, parentRow);
     }
   });
 }

@@ -574,6 +574,37 @@
   - render them like any other layer
 - Prefer one logical runtime artifact per layer, even if preprocessing uses many files.
 
+## GPX Replay / Delayed Public Walks
+- First implementation slice is for a reusable delayed-reveal layer filter, motivated by a Mombasa walk layer but not hardcoded to Mombasa.
+- Architecture intent:
+  - GPX walks are normal uploaded layers/datasets.
+  - Delay is a normal editable filter row (`mode: "time-delay"`), not a route-specific behavior.
+  - Public slugs such as `/mombasa` resolve to saved share/view state, then normal layer/filter runtime applies.
+- Implemented code paths:
+  - `src/upload/parse-file.js` expands timestamped GPX line tracks into replay-friendly segment and point features.
+  - Replay features carry `_valid_from`, `_valid_from_ms`, `_replay_kind`, `_replay_index`, and `_replay_track_id`.
+  - `src/core/filter-expressions.js` owns `TIME_DELAY_FILTER_MODE`, `DEFAULT_TIME_DELAY_FIELD`, delay-hour normalization, delayed cutoff calculation, and MapLibre filter expression generation.
+  - `src/app/filter-panel.js`, `src/core/layer-model.js`, and `src/app/bootstrap.js` support creating/editing/persisting delay filters through the existing filter-row system.
+  - Delay filters refresh approximately once per minute so the cutoff advances without a page reload.
+  - `src/app/share-controls.js` and `src/sources/supabase/map-share-loader.js` can resolve a single path segment slug through `public_view_slugs` to a `map_shares` snapshot.
+- Current behavior:
+  - Non-point replay features reveal when their timestamp is at or before `now - delayHours`.
+  - GPX `_replay_kind: "track-point"` features show only near the delayed cutoff, giving an approximate moving marker instead of leaving every historical point visible.
+  - Default timestamp field is `_valid_from_ms`; owners/admins can edit the delay hours and timestamp field in the filter panel.
+- Backend requirement:
+  - Apply `supabase/migrations/012_map_shares_and_public_slugs.sql` before public slug loading works.
+  - The migration adds reproducible `map_shares` and `public_view_slugs` tables/RLS because the client already depended on `map_shares` but the repo previously lacked schema coverage.
+  - Hosting must rewrite `/mombasa` and other slug paths to the app entry point for the client resolver to run.
+- Not implemented yet:
+  - Browser UI for creating/editing custom slugs from the share popup.
+  - Admin/service-role helper for reserving/transferring slugs.
+  - Paid entitlement checks for custom slug creation.
+  - A precise interpolated marker between GPX points; current marker is nearest recent timestamped point within the filter window.
+  - Full saved-project/view model beyond mapping a slug to a current `map_shares` snapshot.
+- Validation done when this slice was added:
+  - `node --check` on changed JS files.
+  - `npm run build`.
+
 ## Olympics
 - First generic temporal-layer proof is Olympic medals by athlete birthplace.
 - Source family:

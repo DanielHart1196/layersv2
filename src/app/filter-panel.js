@@ -1,5 +1,11 @@
 import { closeOpenSelect, createCustomSelect } from "./shared/custom-select.js";
-import { DATASET_FILTER_FIELD, DATASET_FILTER_LABEL } from "../core/filter-expressions.js";
+import {
+  DATASET_FILTER_FIELD,
+  DATASET_FILTER_LABEL,
+  DEFAULT_TIME_DELAY_FIELD,
+  TIME_DELAY_FILTER_MODE,
+  normalizeDelayHours,
+} from "../core/filter-expressions.js";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -166,6 +172,8 @@ function createDefaultState(overrides = {}) {
     variableMax: "",
     variableStep: "1",
     variableDefault: "",
+    timeDelayHours: "24",
+    timeDelayTimestampField: DEFAULT_TIME_DELAY_FIELD,
     loading: false,
     saving: false,
     error: "",
@@ -201,7 +209,8 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
       return;
     }
 
-    const controlsDisabled = state.loading || state.saving || !state.fields.length;
+    const isTimeDelayMode = state.filterMode === TIME_DELAY_FILTER_MODE;
+    const controlsDisabled = state.loading || state.saving || (!state.fields.length && !isTimeDelayMode);
     const modeLocked = state.panelMode === "edit";
     const isVariableMode = state.filterMode === "variable";
     const operatorParts = getOperatorParts(state.filterOperator);
@@ -234,7 +243,20 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         <div class="clp-mode-selector" role="radiogroup" aria-label="Filter type">
           <button class="clp-mode-option filter-panel-mode-option ${state.filterMode === "fixed" ? "is-selected" : ""}" type="button" data-filter-mode="fixed" aria-pressed="${state.filterMode === "fixed"}" ${modeLocked ? "disabled" : ""}>Fixed</button>
           <button class="clp-mode-option filter-panel-mode-option ${state.filterMode === "variable" ? "is-selected" : ""}" type="button" data-filter-mode="variable" aria-pressed="${state.filterMode === "variable"}" ${modeLocked ? "disabled" : ""}>Variable</button>
+          <button class="clp-mode-option filter-panel-mode-option ${isTimeDelayMode ? "is-selected" : ""}" type="button" data-filter-mode="${TIME_DELAY_FILTER_MODE}" aria-pressed="${isTimeDelayMode}" ${modeLocked ? "disabled" : ""}>Delay</button>
         </div>
+        ${isTimeDelayMode ? `
+          <div class="arp-field-row">
+            <label class="clp-field">
+              <span class="clp-field-label">Hours</span>
+              <input class="clp-field-input filter-panel-time-delay-hours" type="number" min="0" max="8760" step="1" value="${escapeHtml(state.timeDelayHours)}" ${state.saving ? "disabled" : ""} />
+            </label>
+            <label class="clp-field">
+              <span class="clp-field-label">Timestamp</span>
+              <input class="clp-field-input filter-panel-time-delay-field" type="text" value="${escapeHtml(state.timeDelayTimestampField)}" ${state.saving ? "disabled" : ""} />
+            </label>
+          </div>
+        ` : ""}
         ${isVariableMode ? `
           <label class="clp-field">
             <span class="clp-field-label">Control</span>
@@ -244,7 +266,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
             </select>
           </label>
         ` : ""}
-        <div class="filter-panel-condition" data-condition-index="0">
+        ${!isTimeDelayMode ? `<div class="filter-panel-condition" data-condition-index="0">
         <div class="clp-field">
           <span class="clp-field-label">Column</span>
           <div class="filter-panel-select-combo" data-condition-index="0">
@@ -277,8 +299,8 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
             </button>
           </div>
         </div>` : ""}
-        </div>
-        ${state.secondConditionEnabled ? `
+        </div>` : ""}
+        ${state.secondConditionEnabled && !isTimeDelayMode ? `
           <div class="filter-panel-condition-join" role="radiogroup" aria-label="Condition join">
             <button class="clp-mode-option filter-panel-combinator-option ${state.conditionCombinator === "all" ? "is-selected" : ""}" type="button" data-filter-combinator="all" aria-pressed="${state.conditionCombinator === "all"}" ${controlsDisabled ? "disabled" : ""}>And</button>
             <button class="clp-mode-option filter-panel-combinator-option ${state.conditionCombinator === "any" ? "is-selected" : ""}" type="button" data-filter-combinator="any" aria-pressed="${state.conditionCombinator === "any"}" ${controlsDisabled ? "disabled" : ""}>Or</button>
@@ -355,7 +377,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         ` : ""}
         ${state.error ? `<p class="upload-error">${escapeHtml(state.error)}</p>` : ""}
         <div class="upload-actions">
-          <button class="upload-btn upload-btn-secondary filter-panel-add-condition" type="button" ${controlsDisabled ? "disabled" : ""}>${state.secondConditionEnabled ? "Remove condition" : "Add condition"}</button>
+          ${!isTimeDelayMode ? `<button class="upload-btn upload-btn-secondary filter-panel-add-condition" type="button" ${controlsDisabled ? "disabled" : ""}>${state.secondConditionEnabled ? "Remove condition" : "Add condition"}</button>` : ""}
           <button class="upload-btn upload-btn-secondary filter-panel-cancel" type="button">Cancel</button>
           <button class="upload-btn upload-btn-primary" type="submit" ${controlsDisabled ? "disabled" : ""}>${submitLabel}</button>
         </div>
@@ -534,14 +556,20 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         if (modeLocked) {
           return;
         }
-        state.filterMode = button.dataset.filterMode === "variable" ? "variable" : "fixed";
+        state.filterMode = button.dataset.filterMode === TIME_DELAY_FILTER_MODE
+          ? TIME_DELAY_FILTER_MODE
+          : button.dataset.filterMode === "variable" ? "variable" : "fixed";
         if (state.filterMode === "variable") {
           state.variableLabel = state.variableLabel || "Year";
           state.variableId = state.variableId || "year";
+        } else if (state.filterMode === TIME_DELAY_FILTER_MODE) {
+          state.filterLabel = state.filterLabel || "Delayed reveal";
+          state.timeDelayHours = state.timeDelayHours || "24";
+          state.timeDelayTimestampField = state.timeDelayTimestampField || DEFAULT_TIME_DELAY_FIELD;
         }
         state.error = "";
         render();
-        if (state.columnName) {
+        if (state.columnName && state.filterMode !== TIME_DELAY_FILTER_MODE) {
           void loadValues();
         }
       });
@@ -579,6 +607,8 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
       state.variableMax = content.querySelector(".filter-panel-variable-max")?.value ?? state.variableMax;
       state.variableStep = content.querySelector(".filter-panel-variable-step")?.value ?? state.variableStep;
       state.variableDefault = content.querySelector(".filter-panel-variable-default")?.value ?? state.variableDefault;
+      state.timeDelayHours = content.querySelector(".filter-panel-time-delay-hours")?.value ?? state.timeDelayHours;
+      state.timeDelayTimestampField = content.querySelector(".filter-panel-time-delay-field")?.value ?? state.timeDelayTimestampField;
       const columnName = String(state.columnName ?? "").trim();
       const secondColumnName = state.secondConditionEnabled ? String(state.secondColumnName ?? "").trim() : "";
       const filterLabel = String(state.filterLabel ?? "").trim();
@@ -586,6 +616,41 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
       const valueLabel = formatValueLabel(state.value, state.values);
       const secondColumnLabel = formatColumnLabel(secondColumnName, state.fields);
       const secondValueLabel = formatValueLabel(state.secondValue, state.secondValues);
+      if (state.filterMode === TIME_DELAY_FILTER_MODE) {
+        const delayHours = normalizeDelayHours(state.timeDelayHours, 24);
+        state.saving = true;
+        state.error = "";
+        render();
+        try {
+          const payload = {
+            layerId: state.layerId,
+            parentRowId: state.parentRowId,
+            label: filterLabel || `${delayHours}h delay`,
+            mode: TIME_DELAY_FILTER_MODE,
+            timeDelayConfig: {
+              delayHours,
+              timestampField: String(state.timeDelayTimestampField || DEFAULT_TIME_DELAY_FIELD).trim() || DEFAULT_TIME_DELAY_FIELD,
+              revealMode: "up_to_delayed_now",
+            },
+          };
+          if (state.panelMode === "edit") {
+            await onUpdateFilter?.({
+              ...payload,
+              editFilter: state.editFilter,
+            });
+          } else {
+            await onCreateFilter?.(payload);
+          }
+          close();
+        } catch (error) {
+          state.error = error?.message ?? (state.panelMode === "edit" ? "Failed to save filter." : "Failed to add filter.");
+        } finally {
+          state.saving = false;
+          render();
+        }
+        return;
+      }
+
       if (!columnName) {
         state.error = "Choose a column.";
         render();
@@ -694,13 +759,13 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
           ? state.secondColumnName
           : state.fields.find((field) => field.value !== state.columnName)?.value ?? state.columnName;
       }
-      if (!state.fields.length) {
+      if (!state.fields.length && state.filterMode !== TIME_DELAY_FILTER_MODE) {
         state.error = "No filterable columns found.";
       }
-      if (state.columnName) {
+      if (state.columnName && state.filterMode !== TIME_DELAY_FILTER_MODE) {
         void loadValues();
       }
-      if (state.secondConditionEnabled && state.secondColumnName) {
+      if (state.secondConditionEnabled && state.secondColumnName && state.filterMode !== TIME_DELAY_FILTER_MODE) {
         void loadSecondValues();
       }
     } catch (error) {
@@ -793,7 +858,7 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
       void loadFields();
     },
     edit({ layerId = "", layerName = "", parentRowId = "", filter = null, valueFilterExpression = null } = {}) {
-      const mode = filter?.mode === "variable" ? "variable" : "fixed";
+      const mode = filter?.mode === TIME_DELAY_FILTER_MODE ? TIME_DELAY_FILTER_MODE : filter?.mode === "variable" ? "variable" : "fixed";
       const conditions = normalizeEditConditions(filter);
       const firstCondition = conditions[0] ?? {};
       const secondCondition = conditions[1] ?? {};
@@ -821,6 +886,8 @@ function mountFilterPanel({ getLayerFields, getLayerFieldValues, onCreateFilter,
         variableMax: filter?.variableMax ?? "",
         variableStep: filter?.variableStep ?? "1",
         variableDefault: filter?.variableDefault ?? "",
+        timeDelayHours: String(filter?.delayHours ?? "24"),
+        timeDelayTimestampField: filter?.timestampField ?? DEFAULT_TIME_DELAY_FIELD,
       });
       panel.classList.add("is-open");
       render();

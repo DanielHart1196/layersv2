@@ -232,7 +232,11 @@ function buildFeatureCollection(features) {
     features: features.map((feature) => ({
       type: "Feature",
       geometry: feature.geometry,
-      properties: feature.properties ?? {},
+      properties: {
+        ...(feature.properties ?? {}),
+        ...(feature.valid_from ? { _valid_from: feature.valid_from } : {}),
+        ...(feature.valid_to ? { _valid_to: feature.valid_to } : {}),
+      },
     })),
   };
 }

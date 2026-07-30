@@ -4,7 +4,9 @@ import {
   DATASET_FILTER_FIELD,
   DATASET_FILTER_LABEL,
   DATASET_FILTER_PROPERTY,
+  buildTimeDelayFilterExpression,
   evaluatePropertyExpression,
+  isTimeDelayFilter,
 } from "../../core/filter-expressions.js";
 
 const LOCAL_BORDERS_PMTILES_URL = "/data/world-atlas/ne_10m_admin_0_boundary_lines_land.pmtiles";
@@ -956,6 +958,7 @@ async function loadGeojsonArtifact(url) {
 
 function featureFromRow(row, datasetById) {
   const dataset = datasetById.get(row?.dataset_id) ?? null;
+  const validFromMs = Date.parse(row?.valid_from);
   return {
     type: "Feature",
     id: row?.id,
@@ -964,11 +967,18 @@ function featureFromRow(row, datasetById) {
       ...(row?.properties && typeof row.properties === "object" ? row.properties : {}),
       _dataset_id: row?.dataset_id ?? "",
       _dataset_name: dataset?.name ?? "",
+      ...(row?.valid_from ? { _valid_from: row.valid_from } : {}),
+      ...(row?.valid_to ? { _valid_to: row.valid_to } : {}),
+      ...(Number.isFinite(validFromMs) ? { _valid_from_ms: validFromMs } : {}),
     },
   };
 }
 
 function buildPropertyFilterExpression(filter) {
+  if (isTimeDelayFilter(filter)) {
+    return buildTimeDelayFilterExpression(filter);
+  }
+
   if (Array.isArray(filter?.expression)) {
     return filter.expression;
   }
@@ -1072,6 +1082,9 @@ function getServerFilterConfig(expression) {
     return null;
   }
   const operator = expression[0];
+  if (["==", "!=", ">", ">=", "<", "<="].includes(operator) && getExpressionField(expression[1]).startsWith("_")) {
+    return null;
+  }
   if (operator === "all") {
     const conditions = expression.slice(1).map(getServerFilterCondition);
     return conditions.length && conditions.every(Boolean)
@@ -1129,7 +1142,7 @@ async function loadFilteredLayerGeojson(supabase, layerId, datasets, filter, { o
   while (features.length <= FILTERED_GEOJSON_FEATURES_MAX) {
     let query = supabase
       .from("features")
-      .select("id, dataset_id, geometry, properties")
+      .select("id, dataset_id, geometry, properties, valid_from, valid_to")
       .in("dataset_id", datasetIds)
       .order("dataset_id", { ascending: true })
       .order("created_at", { ascending: true })

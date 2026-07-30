@@ -1,6 +1,8 @@
 const DATASET_FILTER_FIELD = "__dataset";
 const DATASET_FILTER_PROPERTY = "_dataset_id";
 const DATASET_FILTER_LABEL = "Dataset";
+const DEFAULT_TIME_DELAY_FIELD = "_valid_from_ms";
+const TIME_DELAY_FILTER_MODE = "time-delay";
 
 function resolveFilterExpressionField(field) {
   return field === DATASET_FILTER_FIELD ? DATASET_FILTER_PROPERTY : field;
@@ -115,12 +117,60 @@ function evaluatePropertyExpression(expression, properties = {}) {
   return Boolean(evaluateExpressionValue(expression, properties));
 }
 
+function normalizeDelayHours(value, fallback = 24) {
+  const hours = Number(value);
+  if (!Number.isFinite(hours) || hours < 0) {
+    return fallback;
+  }
+  return Math.min(8760, hours);
+}
+
+function getDelayedCutoffMs(delayHours, nowMs = Date.now()) {
+  return nowMs - (normalizeDelayHours(delayHours) * 60 * 60 * 1000);
+}
+
+function isTimeDelayFilter(filter) {
+  return filter?.mode === TIME_DELAY_FILTER_MODE || filter?.type === TIME_DELAY_FILTER_MODE;
+}
+
+function buildTimeDelayFilterExpression(filter, nowMs = Date.now()) {
+  if (!isTimeDelayFilter(filter)) {
+    return null;
+  }
+  const field = String(filter.timestampField ?? DEFAULT_TIME_DELAY_FIELD).trim() || DEFAULT_TIME_DELAY_FIELD;
+  const cutoffMs = getDelayedCutoffMs(filter.delayHours, nowMs);
+  const markerWindowMinutes = Number(filter.markerWindowMinutes ?? 5);
+  const markerWindowMs = (Number.isFinite(markerWindowMinutes) && markerWindowMinutes > 0 ? markerWindowMinutes : 5) * 60 * 1000;
+  const timestampValue = ["to-number", ["coalesce", ["get", field], Number.MAX_SAFE_INTEGER]];
+  const visibleUpToCutoff = ["<=", timestampValue, cutoffMs];
+  return [
+    "any",
+    [
+      "all",
+      ["!=", ["to-string", ["coalesce", ["get", "_replay_kind"], ""]], "track-point"],
+      visibleUpToCutoff,
+    ],
+    [
+      "all",
+      ["==", ["to-string", ["coalesce", ["get", "_replay_kind"], ""]], "track-point"],
+      visibleUpToCutoff,
+      [">", timestampValue, cutoffMs - markerWindowMs],
+    ],
+  ];
+}
+
 export {
   DATASET_FILTER_FIELD,
   DATASET_FILTER_LABEL,
   DATASET_FILTER_PROPERTY,
+  DEFAULT_TIME_DELAY_FIELD,
+  TIME_DELAY_FILTER_MODE,
   buildExactMatchFilterExpression,
   buildStringComparisonFilterExpression,
+  buildTimeDelayFilterExpression,
   evaluateExpressionValue,
   evaluatePropertyExpression,
+  getDelayedCutoffMs,
+  isTimeDelayFilter,
+  normalizeDelayHours,
 };
